@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "sourceMap": true,
+    "outDir": "../public",
+    "module": "esnext",
+    "target": "es5",
+    "jsx": "react",
+    "lib":["es2017","dom"],
+    "rootDirs": ["ui"],
+    "moduleResolution": "node",
+    "baseUrl": "./",
+    "paths": {
+      "components" : ["./components"]
+    }
+  }
+}

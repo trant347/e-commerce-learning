@@ -1,0 +1,22 @@
+.login {
+    font-family: "Times New Roman";
+    margin: auto;
+    width: 400px;
+    background-color: white;
+    padding: 20px;
+}
+
+
+.login h1 {
+    text-align: center;
+}
+
+.login hr {
+    display: block;
+    width: 80%;
+}
+
+.login .navigate-to-signup {
+    width: 40%;
+    margin: auto;
+}

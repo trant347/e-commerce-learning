@@ -1,0 +1,34 @@
+.App-header{
+    background-color: azure;
+    height: 4vh;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-content: center;
+    margin-bottom: 10px;
+    position: sticky;
+
+    .company-name {
+        flex: 1;
+        text-align: left;
+    }
+
+    .page-section {
+        flex: 1;
+        text-align: right;
+
+    }
+}
+
+.App-content {
+    justify-content: center;
+    justify-items: center;
+    display: grid;
+    grid-template-columns: repeat(3, 20%);
+    padding: 10px;
+
+    .ui.card:first-child {
+        margin-top: 1em;
+    }
+}
+
