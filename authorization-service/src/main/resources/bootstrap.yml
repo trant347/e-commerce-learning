@@ -1,0 +1,11 @@
+spring:
+  cloud:
+    consul:
+      host: ${CONSUL_SERVER:consul}
+      port: ${CONSUL_PORT:8500}
+      discovery:
+        service-name: ${spring.application.name}
+      config:
+        enabled: ${spring.cloud.consul.enabled}
+    bus:
+      enabled: ${spring.cloud.consul.enabled}
