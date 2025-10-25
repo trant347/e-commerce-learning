@@ -1,0 +1,14 @@
+.error-message {
+    color: red;
+}
+
+.form-signup {
+    margin: auto;
+    width: 40%;
+    padding: 4em;
+    
+    .field-section {
+        padding-bottom: 2em;      
+    }
+    
+}

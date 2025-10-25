@@ -1,0 +1,35 @@
+{
+  "name": "frontend-nodejs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "set NODE_ENV=production &&  node ./bin/www",
+    "storybook": "cd ./ui && npm run storybook",
+    "webpack": "cd ./ui && webpack --watch",
+    "build": "cd ./ui && webpack",
+    "dev-start": "set NODE_ENV=development && nodemon --inspect-brk=0.0.0.0:9229 ./bin/www",
+    "debug-production": "NODE_ENV=production nodemon --inspect-brk=0.0.0.0:9229 ./bin/www"
+  },
+  "dependencies": {
+    "axios": "0.19.2",
+    "consul": "0.34.1",
+    "cookie-parser": "1.4.4",
+    "date-fns": "^4.1.0",
+    "debug": "~2.6.9",
+    "ejs": "~2.5.7",
+    "express": "~4.16.0",
+    "express-http-proxy": "1.5.1",
+    "morgan": "~1.9.0"
+  },
+  "devDependencies": {
+    "nodemon": "1.18.10"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "public/*",
+      "ui/*",
+      "node_modules/*"
+    ],
+    "delay": "2500"
+  }
+}
