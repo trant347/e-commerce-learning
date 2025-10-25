@@ -1,0 +1,25 @@
+version: "3"
+services:
+  product-service:
+    image: product-service
+    ports:
+      - "8080:8080"
+    environment:
+      - spring.cloud.consul.enabled=true
+    depends_on:
+      - mongodb
+  mongodb:
+    image: mongo
+    ports:
+      - "27017:27017"
+  consul:
+    image: consul:1.4.3
+    hostname: consul
+    environment:
+      SERVICE_TAGS: dev,consul,consul_tag
+    ports:
+    - "8400:8400"             # CLI PRC
+    - "8500:8500"             # HTTP API & Web UI
+    - "8600:53"               # DNS interface
+    command: "agent -dev -bootstrap=true -client 0.0.0.0 -ui"
+    restart: always
