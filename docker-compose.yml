@@ -1,0 +1,99 @@
+version: "3"
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  frontend:
+    image: frontend
+    ports:
+    - "3000:3000"
+    environment:
+    - NODE_ENV=production
+    depends_on:
+      - product-service
+  product-service:
+    image: product-service
+    environment:
+    - spring.cloud.consul.enabled=true
+    ports:
+    - "8080:8080" #need to remove exposed port in production
+    - "8000:8000" #debug port
+    depends_on:
+    - mongodb
+    - consul
+    - authentication-service
+
+
+  calendar-service:
+    image: booking-service
+    environment:
+    - ConnectionsString=${ConnectionsString}
+    - ConsulConfig__ConsulAddress=http://consul:8500
+    - ConsulConfig__ServiceAddress=calendar-service # IMPORTANT: This is the service name *within* the Docker network
+    - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
+    - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
+    - KafkaProducerConfig__BootstrapServers=kafka:29092
+    - KafkaProducerConfig__Topic=calendar-events
+    ports:
+    - "8082:8080" #need to remove exposed port in production
+    depends_on:
+    - mongodb
+    - consul
+    - kafka
+
+
+  authentication-service:
+    image: auth-service
+    environment:
+    - spring.cloud.consul.enabled=true
+    ports:
+    - "8081:8081" #need to remove exposed port in production
+    - "8001:8000" #debug
+    depends_on:
+    - mongodb
+    - consul
+
+  mongodb:
+    image: mongodb/mongodb-community-server:5.0-ubi8  
+    ports:
+    - "27017:27017"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Explicitly disable KRaft mode
+      KAFKA_PROCESS_ROLES: ""
+      KAFKA_CONTROLLER_QUORUM_VOTERS: ""
+      KAFKA_CONTROLLER_LISTENER_NAMES: ""
+
+  redis:
+    image: redis:6.0.9
+    ports:
+    - "6379:6379"
+
+  consul:
+    image: consul:1.4.3
+    hostname: consul
+    environment:
+      SERVICE_TAGS: dev,consul,consul_tag
+    ports:
+    - "8400:8400"             # CLI PRC
+    - "8500:8500"             # HTTP API & Web UI
+    - "8600:53"               # DNS interface
+    command: "agent -dev -bootstrap=true -client 0.0.0.0 -ui"
+    restart: always
