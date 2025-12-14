@@ -9,11 +9,11 @@ RUN mvn package -DskipTests
 
 
 
-FROM openjdk:8-jre-alpine
+FROM eclipse-temurin:8-jre-alpine
 
 ARG version
 WORKDIR /app
-COPY --from=builder /app/target/authorization-service-${version}.jar ./auth-service.jar
+COPY --from=builder /app/target/*.jar ./auth-service.jar
 
 ENV JAVA_TOOL_OPTIONS -agentlib:jdwp=transport=dt_socket,address=8000,server=y,suspend=n
 
