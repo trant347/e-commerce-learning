@@ -6,6 +6,10 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/logs
+
   frontend:
     image: frontend
     ports:
@@ -36,7 +40,7 @@ services:
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
     - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
     - KafkaProducerConfig__BootstrapServers=kafka:29092
-    - KafkaProducerConfig__Topic=calendar-events
+    - KafkaProducerConfig__Topic=bookings
     ports:
     - "8082:8080" #need to remove exposed port in production
     depends_on:
@@ -80,6 +84,22 @@ services:
       KAFKA_PROCESS_ROLES: ""
       KAFKA_CONTROLLER_QUORUM_VOTERS: ""
       KAFKA_CONTROLLER_LISTENER_NAMES: ""
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    
+  kafka-init:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Wait for Kafka to be ready
+        cub kafka-ready -b kafka:9092 1 20
+        # Create the 'bookings' topic
+        kafka-topics --create --if-not-exists --topic bookings --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
+        kafka-topics --create --if-not-exists --topic notification-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
+        echo "Topic created successfully."
 
   redis:
     image: redis:6.0.9
@@ -97,3 +117,49 @@ services:
     - "8600:53"               # DNS interface
     command: "agent -dev -bootstrap=true -client 0.0.0.0 -ui"
     restart: always
+  
+  notification-service:
+    image: notification-service:latest
+    environment:
+    - ConnectionsString=${ConnectionsString}
+    - MongoBookingDatabaseName=${MongoBookingDatabaseName}
+    - ConsulConfig__ConsulAddress=http://consul:8500
+    - ConsulConfig__ServiceAddress=notification-service
+    - ConsulConfig__ServicePort=8080
+    - ConsulConfig__HealthCheckUrl=http://notification-service:8080/health
+    - KafkaConsumerConfig__BootstrapServers=kafka:29092
+    - KafkaConsumerConfig__GroupId=notification-service-group
+    - KafkaConsumerConfig__Topics_0=notification-events
+    ports:
+    - "8084:8080"
+    depends_on:
+    - mongodb
+    - kafka-init
+    - kafka
+    restart: unless-stopped
+
+  worker-service:
+    image: worker-service:latest
+    environment:
+    - ConnectionsString=${ConnectionsString}
+    - MongoBookingDatabaseName=${MongoBookingDatabaseName}
+    - ConsulConfig__ConsulAddress=http://consul:8500
+    - ConsulConfig__ServiceAddress=worker-service
+    - ConsulConfig__ServicePort=8080
+    - ConsulConfig__HealthCheckUrl=http://worker-service:8080/health
+    - Kafka__BootstrapServers=kafka:29092
+    - Kafka__GroupId=worker-service-group
+    - Kafka__Topics_0=bookings
+    - Kafka__OutputTopics_0=notification-events
+    ports:
+    - "8085:8080"
+    depends_on:
+    - calendar-service
+    - kafka
+    - kafka-init
+    restart: unless-stopped
+
+volumes:
+  zookeeper-data:
+  kafka-data:
+  zookeeper-logs:

@@ -14,13 +14,16 @@ namespace calendar_service.Model
         public string? Id { get; set; }
 
         [DataMember(IsRequired = true, Name = "description")]
-        public string Description { get; set; }
+        public string Description { get; set; } = string.Empty;
 
         [DataMember(IsRequired = true, Name = "startTime")]
         public DateTime StartTime { get; set; }
 
         [DataMember(IsRequired = true, Name = "endTime")]
         public DateTime EndTime { get; set; }
+
+        [DataMember(IsRequired = false, Name = "status")]
+        public string Status { get; set; } = "Pending"; // e.g., Pending, Confirmed, Cancelled
 
     }
 }

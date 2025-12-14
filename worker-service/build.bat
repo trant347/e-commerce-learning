@@ -1,0 +1,1 @@
+docker build --build-arg version=latest . -t worker-service
