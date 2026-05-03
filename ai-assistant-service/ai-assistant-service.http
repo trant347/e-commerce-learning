@@ -1,0 +1,14 @@
+@ai_assistant_service_HostAddress = http://localhost:5180
+
+POST {{ai_assistant_service_HostAddress}}/api/ai-assistant/chat
+Content-Type: application/json
+
+{
+  "message": "What products do you have for office chairs under 200 dollars?",
+  "userId": "demo-user"
+}
+
+###
+
+GET {{ai_assistant_service_HostAddress}}/health
+Accept: application/json

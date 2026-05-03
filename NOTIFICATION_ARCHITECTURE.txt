@@ -1,0 +1,76 @@
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    REAL-TIME NOTIFICATION SYSTEM                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────┐     Kafka Topic          ┌─────────────────────┐
+│    Worker    │    "notification-        │   Notification      │
+│   Service    │───────events"──────────▶ │     Service         │
+│              │                           │  (Kafka Consumer)   │
+└──────────────┘                           └──────────┬──────────┘
+      ▲                                              │
+      │                                              ▼
+      │ Processes                           ┌────────────────┐
+      │ Bookings                            │    MongoDB     │
+      │                                     │ (Notifications)│
+┌─────┴──────┐                             └────────────────┘
+│  Calendar  │
+│  Service   │                             ┌────────────────────┐
+│(Kafka Prod)│                             │ NotificationStreamer│
+└────────────┘                             │   (SSE Manager)    │
+                                           └─────────┬──────────┘
+                                                     │
+                                              SSE Connection
+                                                     │
+                                           ┌─────────▼──────────┐
+┌─────────────┐    Consul Service         │   Notification     │
+│  Frontend   │◀────Discovery────────────▶│   Service API      │
+│   (React)   │                            │                    │
+└──────┬──────┘                            └────────────────────┘
+       │                                    • GET /{email}
+       │                                    • GET /{email}/stream
+       │                                    • Health Check
+       │
+┌──────▼────────────────────────────────────────────────────────┐
+│  USER INTERFACE                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Header: [Bell Icon 🔔 3]                           │   │
+│  │          Click to see:                                │   │
+│  │          • Booking Confirmed (2m ago)                 │   │
+│  │          • Status Updated (5m ago)                    │   │
+│  │          • Reminder (1h ago)                          │   │
+│  └──────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────────┘
+
+DATA FLOW:
+==========
+1. User books appointment → Calendar Service
+2. Calendar Service → Publishes to Kafka (bookings topic)
+3. Worker Service → Processes → Publishes to Kafka (notification-events)
+4. Notification Service:
+   a. Consumes from Kafka
+   b. Saves to MongoDB
+   c. Pushes to connected SSE clients
+5. Frontend (React):
+   a. Fetches initial notifications (REST)
+   b. Opens SSE connection for real-time updates
+   c. Updates UI automatically
+
+REAL-TIME CONNECTION:
+====================
+Frontend ←──SSE──→ Notification Service
+   │                      │
+   │ 1. Connect with      │
+   │    user email        │
+   ├─────────────────────▶│
+   │                      │
+   │ 2. Stream opened     │
+   │◀─────────────────────┤
+   │                      │
+   │ 3. New notification  │
+   │    (from Kafka)      │
+   │◀─────────────────────┤
+   │                      │
+   │ 4. UI auto-updates   │
+   │    (bell count++)    │
+```

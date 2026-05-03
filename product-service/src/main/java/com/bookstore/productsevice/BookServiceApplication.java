@@ -3,8 +3,8 @@ package com.bookstore.productsevice;
 import com.bookstore.productsevice.model.Book;
 import com.bookstore.productsevice.repository.BookRepository;
 import com.bookstore.productsevice.security.Secret;
-import com.thedeanda.lorem.Lorem;
-import com.thedeanda.lorem.LoremIpsum;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +17,7 @@ import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
@@ -29,6 +30,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.ConnectException;
 import java.net.URI;
+import java.io.InputStream;
 import java.util.List;
 
 
@@ -97,30 +99,31 @@ public class BookServiceApplication {
         return new CommandLineRunner() {
             @Override
             public void run(String... args) throws Exception {
-
-                Lorem lorem = LoremIpsum.getInstance();
-
-                String[] categories = new String[] { "fiction", "non-fiction", "autobiography", "detective", "science"};
-
                 repository.deleteAll();
 
-                for(int i = 1; i <= 18; i++) {
+                ObjectMapper objectMapper = new ObjectMapper();
+                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
-                    Book book = new Book.Builder()
-                                    .setName( lorem.getWords(4,6))
-                                    .setAuthors(new String[] { lorem.getName(), lorem.getName()})
-                                    .setDescription(lorem.getWords(10,20))
-                                    .setCategories(new String[] { categories[(int)Math.random()*5]})
-                                    .setRating(Math.random()*10)
-                                    .setPriceUsd((double)Math.round(100*Math.random())/100)
-                                    .setPicture("https://picsum.photos/200/300?id="+(int)(100*Math.random()))
-                                    .build();
-                    repository.save(book);
+                ClassPathResource seedResource = new ClassPathResource("seed/books.json");
+                try (InputStream inputStream = seedResource.getInputStream()) {
+                    SeedBooksPayload payload = objectMapper.readValue(inputStream, SeedBooksPayload.class);
+
+                    if (payload == null || payload.books == null || payload.books.isEmpty()) {
+                        logger.warn("No books found in seed/books.json; product catalog remains empty.");
+                        return;
+                    }
+
+                    repository.saveAll(payload.books);
+                    logger.info("Seeded {} books from seed/books.json", payload.books.size());
                 }
             }
         };
 
     };
+
+    private static class SeedBooksPayload {
+        public List<Book> books;
+    }
 
 }
 

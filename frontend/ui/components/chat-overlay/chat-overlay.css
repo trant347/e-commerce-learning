@@ -1,0 +1,132 @@
+.chat-overlay-container {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    width: 320px;
+    background: #ffffff;
+    border: 1px solid #dce3ea;
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+    z-index: 1200;
+    overflow: hidden;
+}
+
+.chat-overlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #0f766e;
+    color: #ffffff;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.chat-overlay-minimize-btn {
+    border: none;
+    background: transparent;
+    color: #ffffff;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.chat-overlay-minimize-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.chat-overlay-body {
+    padding: 12px;
+    color: #1f2937;
+}
+
+.chat-overlay-messages {
+    height: 220px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    padding-right: 2px;
+}
+
+.chat-message-row {
+    display: flex;
+    margin-bottom: 8px;
+}
+
+.chat-message-row.from-user {
+    justify-content: flex-end;
+}
+
+.chat-message-row.from-assistant {
+    justify-content: flex-start;
+}
+
+.chat-message-bubble {
+    max-width: 85%;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.chat-message-row.from-user .chat-message-bubble {
+    background: #0f766e;
+    color: #ffffff;
+}
+
+.chat-message-row.from-assistant .chat-message-bubble {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.chat-overlay-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.chat-overlay-input {
+    flex: 1;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 13px;
+}
+
+.chat-overlay-send-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: #14b8a6;
+    color: #ffffff;
+    font-size: 12px;
+}
+
+.chat-overlay-toggle {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 14px;
+    background: #0f766e;
+    color: #ffffff;
+    cursor: pointer;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.24);
+    z-index: 1200;
+}
+
+@media (max-width: 600px) {
+    .chat-overlay-container {
+        right: 12px;
+        left: 12px;
+        width: auto;
+        bottom: 12px;
+    }
+
+    .chat-overlay-toggle {
+        right: 12px;
+        bottom: 12px;
+    }
+}

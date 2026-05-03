@@ -5,6 +5,7 @@ import {Route, Switch, BrowserRouter} from 'react-router-dom';
 import * as loadable from 'react-loadable';
 
 import PageHeader from '../components/page-header';
+import ChatOverlay from '../components/chat-overlay/chat-overlay';
 
 // import Home from './Home';
 // import Product from './Product';
@@ -81,7 +82,16 @@ export default class App extends React.Component<{},IAppContext>{
                         <PageHeader/>
 
                         <Switch>
-                            <Route exact path="/" component={AsyncHome}></Route>
+                            <Route
+                                exact
+                                path="/"
+                                render={(props) => (
+                                    <>
+                                        <AsyncHome {...props}></AsyncHome>
+                                        <ChatOverlay></ChatOverlay>
+                                    </>
+                                )}
+                            ></Route>
                             <Route path="/product/:id" component={AsyncProduct}></Route>
                             <Route path="/register" component={AsyncRegistration}></Route>
                             <Route path="/signin" component={AsyncSignin}></Route>

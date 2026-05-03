@@ -17,6 +17,9 @@ import { Popup, Menu, Label, Button } from 'semantic-ui-react';
 
 import styled from 'styled-components';
 
+import { NotificationBell } from '../notifications/NotificationBell';
+import { useNotifications } from '../../hooks/useNotifications';
+
 const StyledNav = styled.nav`
     padding-left: 10%;
     padding-right: 10%;
@@ -50,6 +53,9 @@ export default function(props) {
 
         let { username, setUsername } = React.useContext(UserContext);
 
+        // Use the notifications hook
+        const { notifications, unreadCount, markAsRead } = useNotifications(username);
+
         const showLoginPopup = function():void {
             setLoginPopupVisibility(true);
         }
@@ -71,6 +77,18 @@ export default function(props) {
                         <ul className="right-nav">                           
                             <li> <a className="order_status"> <i className="compass icon"/>Order Status </a></li>
                             <li> <a> <i className="heart outline icon"/> Wishlist </a></li>
+                            
+                            {/* Notification Bell - always visible */}
+                            {username && (
+                                <li>
+                                    <NotificationBell 
+                                        notifications={notifications}
+                                        unreadCount={unreadCount}
+                                        onMarkAsRead={markAsRead}
+                                    />
+                                </li>
+                            )}
+                            
                             <li>
 
                                 {

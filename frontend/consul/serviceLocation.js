@@ -11,6 +11,14 @@ var endpoints = {
     "calendar-service": {
         address: "127.0.0.1",
         port: 8080
+    },
+    "notification-service": {
+        address: "127.0.0.1",
+        port: 8084
+    },
+    "ai-assistant-service": {
+        address: "ai-assistant-service",
+        port: 8080
     }
 };
 

@@ -22,6 +22,9 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 builder.Services.AddScoped<IMongoDbService, MongoDbService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
+// Register NotificationStreamer as singleton (maintains user connections)
+builder.Services.AddSingleton<INotificationStreamer, NotificationStreamer>();
+
 // Register Kafka consumer configuration as singleton
 builder.Services.AddSingleton(sp =>
 {
@@ -51,8 +54,20 @@ builder.Services.AddHostedService<NotificationConsumerWorker>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
+// Add CORS
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(builder =>
+    {
+        builder.AllowAnyOrigin()
+               .AllowAnyMethod()
+               .AllowAnyHeader();
+    });
+});
+
 
 var app = builder.Build();
+app.UseCors();
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();

@@ -51,5 +51,14 @@ namespace notification_service.Services
             var filter = Builders<NotificationEventModel>.Filter.Eq(n => n.Status, "Pending");
             return await collection.Find(filter).ToListAsync();
         }
+
+        public async Task<List<NotificationEventModel>> GetNotificationsByUserEmailAsync(string email, int limit = 50)
+        {
+            var database = _mongoClient.GetDatabase("NotificationDB");
+            var collection = database.GetCollection<NotificationEventModel>("Notifications");
+            var filter = Builders<NotificationEventModel>.Filter.Eq(n => n.RecipientEmail, email);
+            var sort = Builders<NotificationEventModel>.Sort.Descending(n => n.Timestamp);
+            return await collection.Find(filter).Sort(sort).Limit(limit).ToListAsync();
+        }
     }
 }

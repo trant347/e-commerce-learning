@@ -8,5 +8,6 @@ namespace notification_service.DAO
         Task <NotificationEventModel?> GetNotificationByIdAsync(string id);
         Task UpdateNotificationStatusAsync(string id, string status, string? errorMessage);
         Task<List<NotificationEventModel>> GetPendingNotificationsAsync();
+        Task<List<NotificationEventModel>> GetNotificationsByUserEmailAsync(string email, int limit = 50);
     }
 }

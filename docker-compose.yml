@@ -1,14 +1,14 @@
-version: "3"
 services:
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.4.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data
       - zookeeper-logs:/var/lib/zookeeper/logs
+    restart: unless-stopped
 
   frontend:
     image: frontend
@@ -86,6 +86,7 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: ""
     volumes:
       - kafka-data:/var/lib/kafka/data
+    restart: unless-stopped
     
   kafka-init:
     image: confluentinc/cp-kafka:7.4.0
@@ -157,6 +158,24 @@ services:
     - calendar-service
     - kafka
     - kafka-init
+    restart: unless-stopped
+
+  ai-assistant-service:
+    build:
+      context: ./ai-assistant-service
+      dockerfile: Dockerfile
+    image: ai-assistant-service:latest
+    environment:
+    - Ollama__BaseUrl=http://host.docker.internal:11434
+    - Ollama__Model=llama3.1:8b
+    - Ollama__TimeoutSeconds=60
+    - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
+    - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
+    ports:
+    - "8086:8080"
+    depends_on:
+    - product-service
+    - calendar-service
     restart: unless-stopped
 
 volumes:
