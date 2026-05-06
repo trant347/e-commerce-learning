@@ -160,15 +160,50 @@ services:
     - kafka-init
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+    - "11434:11434"
+    volumes:
+    - ollama-data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment below for GPU support (requires nvidia-docker):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Init container to pull the model on first startup
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+    - ollama
+    volumes:
+    - ollama-data:/root/.ollama
+    environment:
+    - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+    - |
+      echo "Waiting for Ollama server to be ready..."
+      sleep 10
+      echo "Pulling llama3.2:3b model (this may take a few minutes)..."
+      ollama pull llama3.2:3b
+      echo "Model pull complete!"
+    restart: "no"
+
   ai-assistant-service:
     build:
       context: ./ai-assistant-service
       dockerfile: Dockerfile
     image: ai-assistant-service:latest
     environment:
-    - Ollama__BaseUrl=http://host.docker.internal:11434
-    - Ollama__Model=llama3.1:8b
-    - Ollama__TimeoutSeconds=60
+    - Ollama__BaseUrl=http://ollama:11434
+    - Ollama__Model=llama3.2:3b
+    - Ollama__TimeoutSeconds=120
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
     ports:
@@ -176,9 +211,11 @@ services:
     depends_on:
     - product-service
     - calendar-service
+    - ollama
     restart: unless-stopped
 
 volumes:
   zookeeper-data:
   kafka-data:
   zookeeper-logs:
+  ollama-data:

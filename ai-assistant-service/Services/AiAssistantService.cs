@@ -29,8 +29,8 @@ public sealed class AiAssistantService : IAiAssistantService
         var systemPrompt = _configuration["PromptOptions:SystemPrompt"]
             ?? "You are an e-commerce assistant. Use factual data from tools.";
 
-        var productContext = await _productApiClient.FetchProductContextAsync(request.Message, cancellationToken);
-        var bookingContext = await _bookingApiClient.FetchBookingContextAsync(request.UserId, cancellationToken);
+        var productContext = ""; // await _productApiClient.FetchProductContextAsync(request.Message, cancellationToken);
+        var bookingContext = ""; //await _bookingApiClient.FetchBookingContextAsync(request.UserId, cancellationToken);
 
         var userPrompt = BuildUserPrompt(request, productContext, bookingContext);
         var answer = await _ollamaClient.GenerateAsync(model, systemPrompt, userPrompt, cancellationToken);
