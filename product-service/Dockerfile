@@ -1,4 +1,4 @@
-FROM maven:3.5-jdk-8-alpine as builder
+FROM maven:3.8-eclipse-temurin-11-alpine as builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY ./static ./static/
 
 RUN mvn package -DskipTests
 
-FROM  eclipse-temurin:8-jre-alpine
+FROM eclipse-temurin:11-jre-alpine
 
 ARG version
 WORKDIR /app

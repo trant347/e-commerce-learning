@@ -37,6 +37,10 @@ namespace notification_service
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            // Yield immediately so the host can finish startup (web server, etc.)
+            // before this background worker blocks the thread with consumer.Consume()
+            await Task.Yield();
+
             using var consumer = new ConsumerBuilder<string, string>(_consumerConfig).Build();
             consumer.Subscribe(_topics);
 

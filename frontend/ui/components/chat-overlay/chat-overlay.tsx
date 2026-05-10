@@ -26,7 +26,7 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
             messages: [
                 {
                     role: 'assistant',
-                    content: 'Hi, I can help you find books and check booking information.'
+                    content: 'Hi! I can help you find task masters for various services like plumbing, cleaning, tutoring, and more. I can also check your booking status.'
                 }
             ]
         };

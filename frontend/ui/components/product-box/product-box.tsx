@@ -2,23 +2,26 @@ import * as React from 'react';
 
 import './product-box.css';
 
-import {Card, Image, Button} from 'semantic-ui-react';
+import {Card, Image, Button, Label, Icon} from 'semantic-ui-react';
 
 type Props = {
     quantity: number,
     name: string,
-    priceUsd: number,
-    picture?:string,
-    description ?:string,
-    openProduct ?: Function,
-    authors?: string[]
+    hourlyRateUsd: number,
+    photo?: string,
+    description?: string,
+    openProduct?: Function,
+    jobCategories?: string[],
+    location?: string,
+    rating?: number,
+    age?: number
 }
 
 type State = {
     quantity: number
 }
 
-export default class ProductBox extends React.Component<Props,  Readonly<State>> {
+export default class ProductBox extends React.Component<Props, Readonly<State>> {
 
     constructor(props) {
         super(props);
@@ -35,15 +38,18 @@ export default class ProductBox extends React.Component<Props,  Readonly<State>>
         })
     }
 
-    getPictureSrc(imageName:string) {
-        if(imageName.indexOf("http") == 0) {
+    getPictureSrc(imageName: string) {
+        if (!imageName) {
+            return 'https://via.placeholder.com/200x300?text=No+Photo';
+        }
+        if (imageName.indexOf("http") == 0) {
             return imageName;
         }
         return `products/image/${imageName}`;
     }
 
     openProduct() {
-        this.props.openProduct ? this.props.openProduct(this.props.name) :null ;
+        this.props.openProduct ? this.props.openProduct(this.props.name) : null;
     }
 
 
@@ -51,17 +57,27 @@ export default class ProductBox extends React.Component<Props,  Readonly<State>>
         return (
 
             <Card className="product-box">
-                <Image onClick={this.openProduct.bind(this)} className="item-image" src={ this.getPictureSrc(this.props.picture) }/>
+                <Image onClick={this.openProduct.bind(this)} className="item-image" src={this.getPictureSrc(this.props.photo)} />
                 <Card.Content>
                     <Card.Header>{this.props.name}</Card.Header>
+                    <Card.Meta>
+                        <Icon name="map marker alternate" /> {this.props.location}
+                    </Card.Meta>
                     <Card.Description>
-                        <div className="content-section"> {this.props.authors.join(" and ")} </div>                     
-                        <div className="content-section"> C$ {this.props.priceUsd} </div>
-                    </Card.Description>                  
+                        <div className="content-section">
+                            {this.props.jobCategories?.map((cat, idx) => (
+                                <Label key={idx} size="tiny" color="blue">{cat}</Label>
+                            ))}
+                        </div>
+                        <div className="content-section">
+                            <Icon name="star" color="yellow" /> {this.props.rating?.toFixed(1)}
+                        </div>
+                        <div className="content-section"> ${this.props.hourlyRateUsd}/hr </div>
+                    </Card.Description>
                 </Card.Content>
-                <Card.Content extra>                   
-                    <Button>
-                        <Button.Content>Add to Cart</Button.Content>                        
+                <Card.Content extra>
+                    <Button primary>
+                        <Button.Content>View Profile</Button.Content>
                     </Button>
                 </Card.Content>
             </Card>

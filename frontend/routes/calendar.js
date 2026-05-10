@@ -10,14 +10,18 @@ function getHost() {
 
 module.exports = proxy(getHost,{
     memoizeHost: false,
-    proxyReqPathResolver: function (req) {        
-       console.log(`${endpoints.getServiceLocationPath("calendar-service")}`);
-       let updatedPath = req.originalUrl.replace('/calendar-service/','/');
-       console.log(updatedPath);
-       return updatedPath;
+    proxyReqPathResolver: function (req) {
+        const host = endpoints.getServiceLocationPath('calendar-service');
+        const updatedPath = req.originalUrl.replace('/calendar-service/', '/');
+        console.log(`[BFF][calendar] → ${req.method} ${host}${updatedPath}`);
+        return updatedPath;
+    },
+    userResDecorator: function (proxyRes, proxyResData, userReq) {
+        console.log(`[BFF][calendar] ← ${proxyRes.statusCode} ${userReq.method} ${userReq.originalUrl}`);
+        return proxyResData;
     },
     proxyErrorHandler: function (err, res, next) {
-        console.log(err);
+        console.error(`[BFF][calendar] ✗ proxy error | upstream: ${endpoints.getServiceLocationPath('calendar-service')} | ${err.message}`);
         next(err);
     }
 });

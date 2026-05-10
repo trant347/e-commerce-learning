@@ -96,7 +96,7 @@ export default class App extends React.Component<{},IAppContext>{
                             <Route path="/register" component={AsyncRegistration}></Route>
                             <Route path="/signin" component={AsyncSignin}></Route>
                             <Route path="/profile" render={ (props) => <AsyncProfile {...props} username={ Auth.getUser() }></AsyncProfile>}></Route>
-                            <Route path="/booking" render={(props) => <AsyncCalendar {...props} events={[]}/> }></Route>
+                            <Route path="/booking/:id?" render={(props) => <AsyncCalendar {...props} events={[]}/> }></Route>
                         </Switch>
 
 

@@ -49,12 +49,14 @@ app.use(function(req, res, next) {
 
 // error handler
 app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
+  const status = err.status || err.response?.status || 500;
+  const upstream = err.config?.url || err.address || 'unknown';
+  console.error(`[BFF][error] ${req.method} ${req.originalUrl} → ${status} | upstream: ${upstream} | ${err.message}`);
+  if (err.stack) console.error(err.stack);
+
   res.locals.message = err.message;
   res.locals.error = req.app.get('env') === 'development' ? err : {};
-
-  // render the error page
-  res.status(err.status || 500);
+  res.status(status);
   res.send(err.message);
 });
 

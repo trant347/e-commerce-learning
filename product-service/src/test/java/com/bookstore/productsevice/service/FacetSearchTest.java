@@ -1,9 +1,8 @@
 package com.bookstore.productsevice.service;
 
 import com.bookstore.productsevice.MockConfiguration;
-import com.bookstore.productsevice.repository.BookRepository;
-import com.bookstore.productsevice.repository.FacetRepository;
-import com.bookstore.productsevice.services.queries.FacetSearchService;
+import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.services.queries.TaskMasterSearchService;
 import org.bson.Document;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -29,15 +28,15 @@ import static org.junit.Assert.assertEquals;
 public class FacetSearchTest {
 
     @Autowired
-    BookRepository facetRepository;
+    TaskMasterRepository taskMasterRepository;
 
     @Test
     public void testNameFacetSearch() {
-        FacetSearchService facetSearchService = new FacetSearchService(facetRepository);
-        Map<String,?> map = facetSearchService.getBooksByNameFacetSearch("test", 0, 10, new String[] { "priceUsd" });
+        TaskMasterSearchService searchService = new TaskMasterSearchService(taskMasterRepository);
+        Map<String,?> map = searchService.getTaskMastersByNameFacetSearch("test", 0, 10, new String[] { "hourlyRateUsd" });
 
-        assertEquals(((ArrayList<Document>)map.get("books")).size(),1);
-        assertNotNull(map.get("priceUsd"));
+        assertEquals(((ArrayList<Document>)map.get("taskMasters")).size(), 1);
+        assertNotNull(map.get("hourlyRateUsd"));
         assertNotNull(map.get("rating"));
     }
 }

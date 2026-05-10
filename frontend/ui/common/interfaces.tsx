@@ -1,8 +1,11 @@
-export interface Book {
-    id: number,
+export interface TaskMaster {
+    id: string,
     name: string,
-    priceUsd: number,
-    authors: string[],
+    age: number,
+    photo?: string,
+    location: string,
+    rating: number,
+    jobCategories: string[],
     description?: string,
-    picture?: string
+    hourlyRateUsd: number
 }

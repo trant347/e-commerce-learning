@@ -1,20 +1,20 @@
 var endpoints = {
 
     "product-service": {
-        address: "127.0.0.1",
+        address: "product-service",
         port: 8080
     },
     "authentication-service": {
-        address: "127.0.0.1",
+        address: "authentication-service",
         port: 8081
     },
     "calendar-service": {
-        address: "127.0.0.1",
+        address: "calendar-service",
         port: 8080
     },
     "notification-service": {
-        address: "127.0.0.1",
-        port: 8084
+        address: "notification-service",
+        port: 8080
     },
     "ai-assistant-service": {
         address: "ai-assistant-service",

@@ -130,7 +130,7 @@ services:
     - ConsulConfig__HealthCheckUrl=http://notification-service:8080/health
     - KafkaConsumerConfig__BootstrapServers=kafka:29092
     - KafkaConsumerConfig__GroupId=notification-service-group
-    - KafkaConsumerConfig__Topics_0=notification-events
+    - KafkaConsumerConfig__Topic__0=notification-events
     ports:
     - "8084:8080"
     depends_on:

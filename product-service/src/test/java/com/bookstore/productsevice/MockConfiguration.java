@@ -1,12 +1,11 @@
 package com.bookstore.productsevice;
 
-import com.bookstore.productsevice.model.Book;
-import com.bookstore.productsevice.repository.BookRepository;
+import com.bookstore.productsevice.model.TaskMaster;
+import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.bookstore.productsevice.repository.FacetRepository;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -26,105 +25,120 @@ public class MockConfiguration {
     Logger logger = LoggerFactory.getLogger(MockConfiguration.class);
 
     @Bean
-    public BookRepository getFacetRepository() {
+    public TaskMasterRepository getFacetRepository() {
 
-        logger.info(" Creating mock BookRepository ");
+        logger.info(" Creating mock TaskMasterRepository ");
 
-        return new BookRepository() {
+        return new TaskMasterRepository() {
             @Override
-            public List<Book> findAllByName(String name) {
+            public List<TaskMaster> findAllByName(String name) {
                 return null;
             }
 
             @Override
-            public List<Book> findAllByAuthors(String[] authors) {
+            public List<TaskMaster> findAllByLocation(String location) {
                 return null;
             }
 
             @Override
-            public List<Book> findBookByPriceUsdBetween(double low, double high) {
+            public List<TaskMaster> findAllByJobCategoriesContaining(String category) {
+                return null;
+            }
+
+            @Override
+            public List<TaskMaster> findTaskMasterByHourlyRateUsdBetween(double low, double high) {
+                return null;
+            }
+
+            @Override
+            public List<TaskMaster> findTaskMasterByRatingGreaterThanEqual(double rating) {
                 return null;
             }
 
             @Override
             public Optional<Document> getBooksUsingNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<Document> getTaskMastersUsingNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
                 Document document = new Document();
 
-                ArrayList<Document> bookList = new ArrayList<>();
-                Document book = new Document();
-                book.put("name","test");
-                book.put("priceUsd", 29.4);
-                book.put("rating",2.0);
-                bookList.add(book);
-                document.put("books", bookList);
-
+                ArrayList<Document> taskMasterList = new ArrayList<>();
+                Document tm = new Document();
+                tm.put("name", "test");
+                tm.put("hourlyRateUsd", 50.0);
+                tm.put("rating", 4.5);
+                tm.put("location", "New York, NY");
+                taskMasterList.add(tm);
+                document.put("taskMasters", taskMasterList);
 
                 ArrayList<Document> ratingList = new ArrayList<>();
                 Document rating = new Document();
-                rating.put("_id",0);
-                rating.put("name", new String[] { "test" });
-                rating.put("count",1);
+                rating.put("_id", 0);
+                rating.put("name", new String[]{"test"});
+                rating.put("count", 1);
                 ratingList.add(rating);
-                document.put("rating",ratingList);
+                document.put("ratingBuckets", ratingList);
 
-                ArrayList<Document> priceList = new ArrayList<>();
-                Document price = new Document();
-                price.put("_id",25);
-                price.put("name", new String[] { "test" });
-                price.put("count",1);
-                priceList.add(rating);
-                document.put("rating",priceList);
+                ArrayList<Document> rateList = new ArrayList<>();
+                Document rate = new Document();
+                rate.put("_id", 25);
+                rate.put("name", new String[]{"test"});
+                rate.put("count", 1);
+                rateList.add(rate);
+                document.put("hourlyRateBuckets", rateList);
 
                 return Optional.of(document);
             }
 
             @Override
-            public <S extends Book> List<S> saveAll(Iterable<S> iterable) {
+            public <S extends TaskMaster> List<S> saveAll(Iterable<S> iterable) {
                 return null;
             }
 
             @Override
-            public List<Book> findAll() {
+            public List<TaskMaster> findAll() {
                 return null;
             }
 
             @Override
-            public List<Book> findAll(Sort sort) {
+            public List<TaskMaster> findAll(Sort sort) {
                 return null;
             }
 
             @Override
-            public <S extends Book> S insert(S s) {
+            public <S extends TaskMaster> S insert(S s) {
                 return null;
             }
 
             @Override
-            public <S extends Book> List<S> insert(Iterable<S> iterable) {
+            public <S extends TaskMaster> List<S> insert(Iterable<S> iterable) {
                 return null;
             }
 
             @Override
-            public <S extends Book> List<S> findAll(Example<S> example) {
+            public <S extends TaskMaster> List<S> findAll(Example<S> example) {
                 return null;
             }
 
             @Override
-            public <S extends Book> List<S> findAll(Example<S> example, Sort sort) {
+            public <S extends TaskMaster> List<S> findAll(Example<S> example, Sort sort) {
                 return null;
             }
 
             @Override
-            public Page<Book> findAll(Pageable pageable) {
+            public Page<TaskMaster> findAll(Pageable pageable) {
                 return null;
             }
 
             @Override
-            public <S extends Book> S save(S s) {
+            public <S extends TaskMaster> S save(S s) {
                 return null;
             }
 
             @Override
-            public Optional<Book> findById(String s) {
+            public Optional<TaskMaster> findById(String s) {
                 return Optional.empty();
             }
 
@@ -134,7 +148,7 @@ public class MockConfiguration {
             }
 
             @Override
-            public Iterable<Book> findAllById(Iterable<String> iterable) {
+            public Iterable<TaskMaster> findAllById(Iterable<String> iterable) {
                 return null;
             }
 
@@ -149,12 +163,12 @@ public class MockConfiguration {
             }
 
             @Override
-            public void delete(Book book) {
+            public void delete(TaskMaster taskMaster) {
 
             }
 
             @Override
-            public void deleteAll(Iterable<? extends Book> iterable) {
+            public void deleteAll(Iterable<? extends TaskMaster> iterable) {
 
             }
 
@@ -164,22 +178,22 @@ public class MockConfiguration {
             }
 
             @Override
-            public <S extends Book> Optional<S> findOne(Example<S> example) {
+            public <S extends TaskMaster> Optional<S> findOne(Example<S> example) {
                 return Optional.empty();
             }
 
             @Override
-            public <S extends Book> Page<S> findAll(Example<S> example, Pageable pageable) {
+            public <S extends TaskMaster> Page<S> findAll(Example<S> example, Pageable pageable) {
                 return null;
             }
 
             @Override
-            public <S extends Book> long count(Example<S> example) {
+            public <S extends TaskMaster> long count(Example<S> example) {
                 return 0;
             }
 
             @Override
-            public <S extends Book> boolean exists(Example<S> example) {
+            public <S extends TaskMaster> boolean exists(Example<S> example) {
                 return false;
             }
         };

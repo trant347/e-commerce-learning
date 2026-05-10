@@ -40,11 +40,11 @@ const StyledLinkHovered = styled.a`
 
 export default function(props) {
 
-        let tabs = ["Book for you", "Bestsellers", "New Release"];
+        let tabs = ["For You", "Top Rated", "New TaskMasters"];
 
         let history = useHistory();
 
-        let topCategories = ["Art & Photography","Children Books","Craft and Hobbies" ]
+        let topCategories = ["Plumbing","Cleaning","Electrical", "Tutoring", "Pet Care", "Moving"]
 
         let [arrowDirection,setArrowDirection] = useState<string>("down");
 
@@ -127,36 +127,36 @@ export default function(props) {
                                 }
                             </li>
                             <li>
-                                <Link to="/booking" className="logo"> <i className="book icon"></i> Book Now </Link>
+                                <Link to="/booking" className="logo"> <i className="calendar icon"></i> Book a TaskMaster </Link>
                             </li>
 
                         </ul>
                     </StyledNav>
                     <div className="search-area">
                         <StyledCenteredDiv>
-                            <Link to="/" className="logo"> <i className="book icon"></i> Geeks' Bookstore </Link>
+                            <Link to="/" className="logo"> <i className="users icon"></i> TaskMaster Hub </Link>
                         </StyledCenteredDiv>
                         <div className="search-form">
                             <span className="search-dropdown">
                             <select>
-                                <option>All</option>
-                                <option>Fiction</option>
-                                <option>Non-fiction</option>
+                                <option>All Services</option>
+                                <option>Home Repair</option>
+                                <option>Personal Services</option>
                             </select>
                             </span>
 
 
-                            <input className="search-input" type="text" name="search_input"/>
+                            <input className="search-input" type="text" name="search_input" placeholder="Search for services..."/>
                             <button>Search</button>
                         </div>                        
                     </div>
                     <StyledNav className="cart-bar">
                         <ul style={{paddingLeft:"0px"}}>
                             <li className="categories-dropdown"  onMouseLeave={() => setArrowDirection("down")}>
-                                <div onMouseEnter={() => setArrowDirection("up")}>Shop by category <i className={`angle ${arrowDirection} icon`}/></div>
+                                <div onMouseEnter={() => setArrowDirection("up")}>Browse by service <i className={`angle ${arrowDirection} icon`}/></div>
 
                                         <ul>
-                                            <li><a>Top Categories</a></li>
+                                            <li><a>Popular Services</a></li>
                                             {
                                                 topCategories.map((item,index) => {
                                                    return <li key={index}><a> {item}</a></li>
@@ -164,14 +164,14 @@ export default function(props) {
                                             }
                                         </ul>
                             </li>
-                            <li> Bestsellers </li>
-                            <li> Coming soon </li>
-                            <li> New Releases </li>
-                            <li> Bargain shop </li>
+                            <li> Top Rated </li>
+                            <li> Near Me </li>
+                            <li> New TaskMasters </li>
+                            <li> Best Value </li>
                         </ul>
                         <ul>
-                            <li> $CAD </li>
-                            <li> C$0.00 </li>
+                            <li> $USD </li>
+                            <li> $0.00 </li>
                             <li> 0 </li>
                         </ul>
                     </StyledNav>

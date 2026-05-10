@@ -87,5 +87,42 @@ public class FacetRepositoryImpl implements FacetRepository {
 
     }
 
+    @Override
+    public Optional<Document> getTaskMastersUsingNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
+        long skip = page * itemsPerPage;
+
+        Aggregation aggregation = newAggregation(
+                match(where("name").regex(".*" + name + ".*", "i")),
+                sort(Sort.Direction.ASC, sortFields),
+                skip(skip),
+                facet(
+                        bucket("hourlyRateUsd")
+                                .withBoundaries(HOURLY_RATE_USD_RANGES)
+                                .withDefaultBucket("Other")
+                                .andOutput("name").push().as("name")
+                                .andOutputCount().as("count")
+                ).as(HOURLY_RATE_BUCKETS_NAME)
+                .and(
+                        bucket("rating")
+                                .withBoundaries(RATING_RANGES)
+                                .withDefaultBucket("Other")
+                                .andOutput("name").push().as("name")
+                                .andOutputCount().as("count")
+                ).as(RATING_BUCKETS_NAME)
+                .and(
+                        project("name", "hourlyRateUsd", "location", "rating", "jobCategories", "description", "photo", "age")
+                ).as("taskMasters")
+        );
+
+        AggregationResults<Document> results = mongoOperations.aggregate(aggregation, "taskmaster", Document.class);
+
+        List<Document> facets = results.getMappedResults();
+
+        if (facets.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(facets.get(0));
+    }
 
 }

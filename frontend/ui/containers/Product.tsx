@@ -1,6 +1,6 @@
 import * as React from 'react';
 import ProductPage from "../components/product-page";
-import {BookServices} from "../api/bookServices";
+import {TaskMasterServices} from "../api/taskMasterServices";
 
 const errorMessageStyle = {
     display: "flex",
@@ -14,22 +14,21 @@ export default class Product extends React.Component<any,any> {
         super(props);
 
         this.state = {
-            quantity: 0,
-            book: {}
+            taskMaster: {}
         }
 
     }
 
     async componentDidMount() {
         try{
-            let bookData = await BookServices.getBookById(this.props.match.params.id);
+            let taskMaster = await TaskMasterServices.getTaskMasterById(this.props.match.params.id);
             this.setState({
-                book: bookData.data
+                taskMaster
             });
         } catch(e) {
             
             this.setState({
-                book : {},
+                taskMaster : {},
                 error: {
                     message: "You need to log in to view the content"
                 }
@@ -41,7 +40,7 @@ export default class Product extends React.Component<any,any> {
         return (
             !this.state.error 
                 ?
-                    <ProductPage {...this.state.book}/>
+                    <ProductPage {...this.state.taskMaster}/>
                 :
                     <div style={errorMessageStyle}>{this.state.error.message}</div>
 

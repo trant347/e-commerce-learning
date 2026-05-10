@@ -1,6 +1,6 @@
 package com.bookstore.productsevice;
 
-import com.bookstore.productsevice.model.Book;
+import com.bookstore.productsevice.model.TaskMaster;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,25 +48,25 @@ public class BookServiceApplicationTests {
 
 
     @Test
-    public void shouldReturnListOfBooks() throws Exception {
+    public void shouldReturnListOfTaskMasters() throws Exception {
         MvcResult mockMvcResult = this.mockMvc.perform(get("/products")).andExpect(status().isOk())
                                     .andReturn();
-        List<Book> list = objectMapper.readValue(mockMvcResult.getResponse().getContentAsString(), new TypeReference<List<Book>>(){});
-        Assert.assertTrue(list.stream().anyMatch(book -> book.getName().length() > 0));
+        List<TaskMaster> list = objectMapper.readValue(mockMvcResult.getResponse().getContentAsString(), new TypeReference<List<TaskMaster>>(){});
+        Assert.assertTrue(list.stream().anyMatch(tm -> tm.getName().length() > 0));
     }
 
 
     @Test
-    public void shouldReturnCorrectBook() throws Exception {
+    public void shouldReturnCorrectTaskMaster() throws Exception {
         MvcResult mockMvcResult = this.mockMvc.perform(get("/products")).andExpect(status().isOk())
                 .andReturn();
-        List<Book> list = objectMapper.readValue(mockMvcResult.getResponse().getContentAsString(), new TypeReference<List<Book>>(){});
+        List<TaskMaster> list = objectMapper.readValue(mockMvcResult.getResponse().getContentAsString(), new TypeReference<List<TaskMaster>>(){});
         String id = list.get(0).getId();
 
         mockMvcResult = this.mockMvc.perform(get("/products/"+id)).andExpect(status().isOk()).andReturn();
-        Book book = objectMapper.readValue(mockMvcResult.getResponse().getContentAsString(), new TypeReference<Book>(){});
+        TaskMaster taskMaster = objectMapper.readValue(mockMvcResult.getResponse().getContentAsString(), new TypeReference<TaskMaster>(){});
 
-        Assert.assertTrue(book.getName().equals(list.get(0).getName()));
+        Assert.assertTrue(taskMaster.getName().equals(list.get(0).getName()));
     }
 
     @Test

@@ -1,14 +1,14 @@
 import * as React from 'react';
 import ProductBox from "../components/product-box/product-box";
 
-import {Book} from "../common/interfaces";
-import {BookServices} from "../api/bookServices";
+import {TaskMaster} from "../common/interfaces";
+import {TaskMasterServices} from "../api/taskMasterServices";
 
-export const BOOK_PER_PAGE = 6;
+export const ITEMS_PER_PAGE = 6;
 
-export interface BookState {
-    books: Book[], 
-    fetchingBooks: boolean, 
+export interface TaskMasterState {
+    taskMasters: TaskMaster[], 
+    fetchingData: boolean, 
     pageNumber: number
 }
 
@@ -21,27 +21,27 @@ export default function Home({ history }) {
 
 
     const initialStates = {
-        books: [],
-        fetchingBooks: false,
+        taskMasters: [],
+        fetchingData: false,
         pageNumber: 0
     };
 
-    const [booksState, dispatchBooksAction] = React.useReducer<BookState, Action>(booksReducer, initialStates);  
+    const [state, dispatch] = React.useReducer<TaskMasterState, Action>(taskMasterReducer, initialStates);  
 
     React.useEffect(() => {
         try {
-            const fetchBooks = async () => {
-                let { data } = await BookServices.getBooksAtPage(booksState.pageNumber - 1, BOOK_PER_PAGE);
-                dispatchBooksAction({ type: UPDATE_FETCHING_STATUS, payload: false});
-                dispatchBooksAction({ type: UPDATE_BOOKS, payload: data });              
+            const fetchTaskMasters = async () => {
+                let taskMasters = await TaskMasterServices.getTaskMastersAtPage(state.pageNumber - 1, ITEMS_PER_PAGE);
+                dispatch({ type: UPDATE_FETCHING_STATUS, payload: false});
+                dispatch({ type: UPDATE_TASK_MASTERS, payload: taskMasters });              
             }            
-            if(booksState.fetchingBooks) {
-                fetchBooks();      
+            if(state.fetchingData) {
+                fetchTaskMasters();      
             }   
         }catch (e) {
-            throw Error("Failed to retrieve all books");
+            throw Error("Failed to retrieve task masters");
         }
-    }, [booksState]);
+    }, [state]);
 
     const bottomBoundaryRef = React.useRef(null);
 
@@ -49,13 +49,13 @@ export default function Home({ history }) {
             new IntersectionObserver(entries => {
                 entries.forEach(en => {
                     if(en.isIntersecting) {
-                        dispatchBooksAction({ type: INCREASE_PAGE_INDEX, payload: 1 });
-                        dispatchBooksAction({ type: UPDATE_FETCHING_STATUS, payload: true});
+                        dispatch({ type: INCREASE_PAGE_INDEX, payload: 1 });
+                        dispatch({ type: UPDATE_FETCHING_STATUS, payload: true});
                     }
                 })
             }).observe(node);
         },
-        [dispatchBooksAction],
+        [dispatch],
     );
 
     React.useEffect(() => {
@@ -64,8 +64,8 @@ export default function Home({ history }) {
         }
     }, [bottomBoundaryRef, scrollObserver]);
 
-    const openProduct = (book: Book) => {
-        history.push(`/product/${book.id}`);
+    const openTaskMaster = (taskMaster: TaskMaster) => {
+        history.push(`/product/${taskMaster.id}`);
     }  
 
     
@@ -74,8 +74,8 @@ export default function Home({ history }) {
         <>
             <div className="App-content ui">
             {
-                booksState.books.map(
-                    (book,index) => <ProductBox key={index} {...book} quantity={1} openProduct={() => openProduct(book)}/>
+                state.taskMasters.map(
+                    (taskMaster, index) => <ProductBox key={index} {...taskMaster} quantity={1} openProduct={() => openTaskMaster(taskMaster)}/>
                 )
             }
             </div>
@@ -85,17 +85,17 @@ export default function Home({ history }) {
     
 }
 
-export const UPDATE_BOOKS = "UPDATE_BOOKS";
+export const UPDATE_TASK_MASTERS = "UPDATE_TASK_MASTERS";
 export const UPDATE_FETCHING_STATUS = "UPDATE_FETCHING_STATUS";
 export const INCREASE_PAGE_INDEX = "INCREASE_PAGE_INDEX";
 
-export const booksReducer = ( state : BookState, action: Action ) => {
+export const taskMasterReducer = ( state : TaskMasterState, action: Action ) => {
     switch (action.type) {
-        case "UPDATE_BOOKS": {
+        case "UPDATE_TASK_MASTERS": {
             return {
                 ...state,
-                books: [
-                    ...state.books,
+                taskMasters: [
+                    ...state.taskMasters,
                     ...action.payload
                 ]
             }
@@ -103,7 +103,7 @@ export const booksReducer = ( state : BookState, action: Action ) => {
         case "UPDATE_FETCHING_STATUS": {
             return {
                 ...state,
-                fetchingBooks: action.payload
+                fetchingData: action.payload
             }
         }
         case INCREASE_PAGE_INDEX: {

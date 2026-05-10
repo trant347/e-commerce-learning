@@ -17,15 +17,16 @@ public sealed class ProductApiClient : IProductApiClient
     {
         try
         {
-            var encodedQuery = Uri.EscapeDataString(query);
-            var response = await _httpClient.GetAsync($"/api/products/search?query={encodedQuery}", cancellationToken);
+            // Fetch all task masters and return as context
+            // The AI will filter based on the user's query
+            var response = await _httpClient.GetAsync("/products", cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Unable to fetch product context from product-service");
-            return "Product tool unavailable.";
+            _logger.LogWarning(ex, "Unable to fetch task master context from product-service");
+            return "Task master data unavailable.";
         }
     }
 }

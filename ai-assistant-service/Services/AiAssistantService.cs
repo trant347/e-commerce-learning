@@ -27,10 +27,10 @@ public sealed class AiAssistantService : IAiAssistantService
     {
         var model = _configuration["Ollama:Model"] ?? "llama3.1:8b";
         var systemPrompt = _configuration["PromptOptions:SystemPrompt"]
-            ?? "You are an e-commerce assistant. Use factual data from tools.";
+            ?? "You are a TaskMaster marketplace assistant.";
 
-        var productContext = ""; // await _productApiClient.FetchProductContextAsync(request.Message, cancellationToken);
-        var bookingContext = ""; //await _bookingApiClient.FetchBookingContextAsync(request.UserId, cancellationToken);
+        var productContext = await _productApiClient.FetchProductContextAsync(request.Message, cancellationToken);
+        var bookingContext = await _bookingApiClient.FetchBookingContextAsync(request.UserId, cancellationToken);
 
         var userPrompt = BuildUserPrompt(request, productContext, bookingContext);
         var answer = await _ollamaClient.GenerateAsync(model, systemPrompt, userPrompt, cancellationToken);
@@ -53,13 +53,13 @@ public sealed class AiAssistantService : IAiAssistantService
         sb.AppendLine("User question:");
         sb.AppendLine(request.Message);
         sb.AppendLine();
-        sb.AppendLine("Tool output from product-service:");
+        sb.AppendLine("Available Task Masters from product-service:");
         sb.AppendLine(productContext);
         sb.AppendLine();
-        sb.AppendLine("Tool output from booking-service:");
+        sb.AppendLine("User's booking history from booking-service:");
         sb.AppendLine(bookingContext);
         sb.AppendLine();
-        sb.AppendLine("Answer with concise, factual details. If tool output is unavailable, state that clearly.");
+        sb.AppendLine("Answer with concise, factual details about task masters. Include their name, skills, location, rating, and hourly rate when relevant. If tool output is unavailable, state that clearly.");
 
         return sb.ToString();
     }
