@@ -4,10 +4,13 @@ import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterMapper;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import org.bson.Document;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,6 +22,8 @@ import static com.bookstore.productsevice.repository.FacetRepository.RATING_RANG
 @Service
 public class TaskMasterSearchService implements SearchService {
 
+    private static final Logger log = LoggerFactory.getLogger(TaskMasterSearchService.class);
+
     private TaskMasterRepository taskMasterRepository;
 
     @Autowired
@@ -27,10 +32,14 @@ public class TaskMasterSearchService implements SearchService {
     }
 
     public Map<String, ?> getTaskMastersByNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
+        log.debug("[TaskMasterSearch] name='{}' page={} itemsPerPage={} sortFields={}",
+                name, page, itemsPerPage, Arrays.toString(sortFields));
+
         Map<String, Object> results = new HashMap<>();
         Document document = taskMasterRepository.getTaskMastersUsingNameFacetSearch(name, page, itemsPerPage, sortFields).orElse(null);
 
         if (document == null) {
+            log.warn("[TaskMasterSearch] Repository returned empty result for name='{}'", name);
             return results;
         }
 
@@ -40,6 +49,8 @@ public class TaskMasterSearchService implements SearchService {
         if (taskMasterList != null) {
             taskMasterList.forEach(tm -> taskMasters.add(TaskMasterMapper.mapBsonToTaskMaster(tm)));
         }
+
+        log.debug("[TaskMasterSearch] Mapped {} task masters from repository result", taskMasters.size());
 
         results.put("taskMasters", taskMasters);
 
@@ -52,6 +63,9 @@ public class TaskMasterSearchService implements SearchService {
         hourlyRateUsd.put("items", document.get(HOURLY_RATE_BUCKETS_NAME));
         hourlyRateUsd.put("ranges", HOURLY_RATE_USD_RANGES);
         results.put("hourlyRateUsd", hourlyRateUsd);
+
+        log.info("[TaskMasterSearch] Returning {} task masters for name='{}' page={}",
+                taskMasters.size(), name, page);
 
         return results;
     }

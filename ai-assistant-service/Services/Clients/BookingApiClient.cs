@@ -13,24 +13,25 @@ public sealed class BookingApiClient : IBookingApiClient
         _logger = logger;
     }
 
-    public async Task<string> FetchBookingContextAsync(string? userId, CancellationToken cancellationToken)
+    public async Task<string> FetchBookingContextAsync(string? bookingId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            return "No user id provided, booking lookup skipped.";
-        }
-
         try
         {
-            var encodedUserId = Uri.EscapeDataString(userId);
-            var response = await _httpClient.GetAsync($"/api/bookings/status?userId={encodedUserId}", cancellationToken);
+            // Fetch a specific booking by ID, or all bookings when no ID is given
+            string path = string.IsNullOrWhiteSpace(bookingId)
+                ? "/api/booking"
+                : $"/api/booking/{Uri.EscapeDataString(bookingId)}";
+
+            _logger.LogInformation("Fetching bookings: {Path}", path);
+
+            var response = await _httpClient.GetAsync(path, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Unable to fetch booking context from booking-service");
-            return "Booking tool unavailable.";
+            _logger.LogWarning(ex, "Unable to fetch booking context from calendar-service");
+            return "Booking data unavailable.";
         }
     }
 }

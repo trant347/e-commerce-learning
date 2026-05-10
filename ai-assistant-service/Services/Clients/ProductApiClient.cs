@@ -13,13 +13,22 @@ public sealed class ProductApiClient : IProductApiClient
         _logger = logger;
     }
 
-    public async Task<string> FetchProductContextAsync(string query, CancellationToken cancellationToken)
+    public async Task<string> FetchProductContextAsync(string? category, string? location, CancellationToken cancellationToken)
     {
         try
         {
-            // Fetch all task masters and return as context
-            // The AI will filter based on the user's query
-            var response = await _httpClient.GetAsync("/products", cancellationToken);
+            // Use specific filter endpoints when arguments are provided
+            string path;
+            if (!string.IsNullOrWhiteSpace(category))
+                path = $"/products?category={Uri.EscapeDataString(category)}";
+            else if (!string.IsNullOrWhiteSpace(location))
+                path = $"/products?location={Uri.EscapeDataString(location)}";
+            else
+                path = "/products";
+
+            _logger.LogInformation("Fetching task masters: {Path}", path);
+
+            var response = await _httpClient.GetAsync(path, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }

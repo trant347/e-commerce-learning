@@ -1,6 +1,7 @@
 using ai_assistant_service.Services;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Tools;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +42,11 @@ builder.Services.AddHttpClient<IBookingApiClient, BookingApiClient>((sp, client)
     var baseUrl = config["ExternalServices:BookingServiceBaseUrl"] ?? "http://calendar-service:8080";
     client.BaseAddress = new Uri(baseUrl);
 });
+
+// Register MCP-style tools — each IToolDefinition implementation is discovered by ToolRegistry
+builder.Services.AddSingleton<IToolDefinition, SearchTaskMastersTool>();
+builder.Services.AddSingleton<IToolDefinition, GetBookingsTool>();
+builder.Services.AddSingleton<ToolRegistry>();
 
 builder.Services.AddScoped<IAiAssistantService, AiAssistantService>();
 

@@ -22,6 +22,7 @@ services:
     image: product-service
     environment:
     - spring.cloud.consul.enabled=true
+    - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
     ports:
     - "8080:8080" #need to remove exposed port in production
     - "8000:8000" #debug port
