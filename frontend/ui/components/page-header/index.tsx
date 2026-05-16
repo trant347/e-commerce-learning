@@ -109,6 +109,14 @@ export default function(props) {
                                                  <StyledLinkHovered onClick={() => history.push('/profile')}> My Profile </StyledLinkHovered>                                       
                                             </Menu.Item>
 
+                                            {username === 'admin' && (
+                                                <Menu.Item name='new-taskmaster'>
+                                                    <StyledLinkHovered onClick={() => history.push('/admin/new-taskmaster')}>
+                                                        <i className="user plus icon" /> Add TaskMaster
+                                                    </StyledLinkHovered>
+                                                </Menu.Item>
+                                            )}
+
                                             <Menu.Item
                                                 name='logout'                                                                                              
                                                 >                                               
@@ -126,10 +134,6 @@ export default function(props) {
                                     </Popup>                               
                                 }
                             </li>
-                            <li>
-                                <Link to="/booking" className="logo"> <i className="calendar icon"></i> Book a TaskMaster </Link>
-                            </li>
-
                         </ul>
                     </StyledNav>
                     <div className="search-area">

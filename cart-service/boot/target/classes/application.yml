@@ -1,0 +1,14 @@
+spring:
+  data:
+    mongodb:
+      port: ${mongo_port:27017}
+      host: mongodb
+  application:
+    name: cart-service
+
+
+logging:
+  level:
+    org.springframework.cloud.consul: INFO
+server:
+  port: 8085

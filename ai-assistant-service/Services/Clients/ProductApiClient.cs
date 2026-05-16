@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ai_assistant_service.Services.Contracts;
 
 namespace ai_assistant_service.Services.Clients;
@@ -36,6 +37,23 @@ public sealed class ProductApiClient : IProductApiClient
         {
             _logger.LogWarning(ex, "Unable to fetch task master context from product-service");
             return "Task master data unavailable.";
+        }
+    }
+
+    public async Task<string[]> FetchCategoriesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Fetching categories from product-service");
+            var response = await _httpClient.GetAsync("/products/categories", cancellationToken);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            return JsonSerializer.Deserialize<string[]>(json) ?? [];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to fetch categories from product-service");
+            return [];
         }
     }
 }

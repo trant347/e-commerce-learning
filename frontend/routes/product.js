@@ -45,6 +45,21 @@ router.get('/:id', async (req, res, next) => {
 
 
 
+router.post('/', async (req, res, next) => {
+    const upstream = `${endpoints.getServiceLocationPath('product-service')}/products`;
+    try {
+        console.log(`[BFF][products] → POST ${upstream}`);
+        const response = await axios.post(upstream, req.body, {
+            headers: { 'Authorization': req.get('Authorization'), 'Content-Type': 'application/json' }
+        });
+        console.log(`[BFF][products] ← ${response.status} created id=${response.data.id}`);
+        res.status(201).send(response.data);
+    } catch (e) {
+        console.error(`[BFF][products] ✗ ${e.response?.status || e.code} | upstream: ${upstream} | ${e.message}`);
+        next(e);
+    }
+});
+
 router.get('/image/:name', async (req, res, next) => {
     const upstream = `${endpoints.getServiceLocationPath('product-service')}/products/image/${req.params.name}`;
     try {

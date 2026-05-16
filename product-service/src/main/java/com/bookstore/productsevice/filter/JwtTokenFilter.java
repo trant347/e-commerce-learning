@@ -38,6 +38,9 @@ public class JwtTokenFilter implements Filter {
         if(url.matches(".*\\.(png|jpg|svg)$")){
             return false;
         }
+        if(url.endsWith("/products/categories")) {
+            return false;
+        }
         return true;
     }
 

@@ -9,6 +9,14 @@ public sealed class SearchTaskMastersTool : IToolDefinition
     private readonly IProductApiClient _client;
     private readonly ILogger<SearchTaskMastersTool> _logger;
 
+    private string[] _categories = [];
+
+    /// <summary>
+    /// Called once at startup (from Program.cs) to seed the enum of valid categories
+    /// so the LLM normalises user input (e.g. "tutor" → "tutoring").
+    /// </summary>
+    public void SetCategories(string[] categories) => _categories = categories;
+
     public string Name => "search_task_masters";
 
     public string Description =>
@@ -16,24 +24,39 @@ public sealed class SearchTaskMastersTool : IToolDefinition
         "Use this when the user asks about available professionals, skills, pricing, location, or ratings. " +
         "Optionally filter by category (e.g. plumbing, cleaning, tutoring) or location.";
 
-    public object ParametersSchema => new
+    public object ParametersSchema
     {
-        type = "object",
-        properties = new
+        get
         {
-            category = new
+            object categorySchema = _categories.Length > 0
+                ? (object)new
+                {
+                    type = "string",
+                    description = "Job category to filter by. You MUST use one of the listed enum values — pick the closest match to what the user asked for.",
+                    @enum = _categories
+                }
+                : new
+                {
+                    type = "string",
+                    description = "Job category to filter by, e.g. 'plumbing', 'cleaning', 'tutoring'. Leave empty to return all."
+                };
+
+            return new
             {
-                type = "string",
-                description = "Job category to filter by, e.g. 'plumbing', 'cleaning', 'tutoring'. Leave empty to return all."
-            },
-            location = new
-            {
-                type = "string",
-                description = "City or region to filter by, e.g. 'New York, NY'. Leave empty to search all locations."
-            }
-        },
-        required = Array.Empty<string>()
-    };
+                type = "object",
+                properties = new
+                {
+                    category = categorySchema,
+                    location = new
+                    {
+                        type = "string",
+                        description = "City or region to filter by, e.g. 'New York, NY'. Leave empty to search all locations."
+                    }
+                },
+                required = Array.Empty<string>()
+            };
+        }
+    }
 
     public SearchTaskMastersTool(IProductApiClient client, ILogger<SearchTaskMastersTool> logger)
     {

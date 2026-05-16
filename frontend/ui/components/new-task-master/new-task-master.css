@@ -1,0 +1,146 @@
+.new-taskmaster-page {
+    max-width: 680px;
+    margin: 40px auto;
+    padding: 0 20px 60px;
+}
+
+.new-taskmaster-page h1 {
+    font-size: 1.8rem;
+    margin-bottom: 28px;
+    color: #222;
+}
+
+.new-taskmaster-page .user-input-row {
+    margin-bottom: 18px;
+}
+
+.new-taskmaster-page .user-input-row label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: #333;
+}
+
+.new-taskmaster-page input[type="text"],
+.new-taskmaster-page input[type="number"],
+.new-taskmaster-page textarea {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    box-sizing: border-box;
+}
+
+.new-taskmaster-page input[type="text"]:focus,
+.new-taskmaster-page input[type="number"]:focus,
+.new-taskmaster-page textarea:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(81, 203, 238, 0.7);
+    border-color: #51cbee;
+}
+
+.new-taskmaster-page textarea {
+    resize: vertical;
+    min-height: 100px;
+}
+
+/* Category tag input */
+.category-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.category-input-row input {
+    flex: 1;
+}
+
+.category-input-row button {
+    padding: 8px 16px;
+    background: #51cbee;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.category-input-row button:hover {
+    background: #2bb5e0;
+}
+
+.category-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.category-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #e0f7fa;
+    border: 1px solid #51cbee;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    color: #006064;
+}
+
+.category-tag button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #006064;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0;
+}
+
+.category-tag button:hover {
+    color: #c00;
+}
+
+/* Submit button */
+.new-taskmaster-page .submit-btn {
+    margin-top: 28px;
+    padding: 12px 32px;
+    background: aquamarine;
+    color: #222;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+}
+
+.new-taskmaster-page .submit-btn:hover {
+    background: #5fd4b0;
+}
+
+.new-taskmaster-page .submit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.form-feedback {
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: 4px;
+    font-size: 0.95rem;
+}
+
+.form-feedback.success {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
+}
+
+.form-feedback.error {
+    background: #ffebee;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
+}

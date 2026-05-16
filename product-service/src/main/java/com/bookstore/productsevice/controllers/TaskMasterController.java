@@ -1,6 +1,7 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.exception.ItemNotFoundException;
+import com.bookstore.productsevice.messaging.CategoryEventPublisher;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.bookstore.productsevice.services.queries.TaskMasterSearchService;
@@ -13,9 +14,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.data.domain.PageRequest;
 
 @RestController
 @RequestMapping("/products")
@@ -33,6 +38,9 @@ public class TaskMasterController {
 
     @Autowired
     private TaskMasterSearchService taskMasterSearchService;
+
+    @Autowired
+    private CategoryEventPublisher categoryEventPublisher;
 
     @GetMapping(params = "name")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByName(@RequestParam String name) {
@@ -63,7 +71,12 @@ public class TaskMasterController {
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer limit) {
         log.debug("[TaskMasterController] GET /products page={} limit={}", page, limit);
-        List<TaskMaster> taskMasters = taskMasterRepository.findAll();
+        List<TaskMaster> taskMasters;
+        if (page != null && limit != null) {
+            taskMasters = taskMasterRepository.findAll(PageRequest.of(page, limit)).getContent();
+        } else {
+            taskMasters = taskMasterRepository.findAll();
+        }
         log.debug("[TaskMasterController] getAll → {} results", taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -76,10 +89,36 @@ public class TaskMasterController {
 
     @PostMapping
     public ResponseEntity<TaskMaster> createTaskMaster(@RequestBody TaskMaster taskMaster) throws Exception {
-        log.debug("[TaskMasterController] POST /products name='{}'", taskMaster.getName());
-        TaskMasterValidator.validate(taskMaster);
-        TaskMaster response = taskMasterRepository.save(taskMaster);
-        log.debug("[TaskMasterController] Created task master id='{}'", response.getId());
+        log.info("[TaskMasterController] POST /products — received: name='{}', location='{}', categories={}, hourlyRate={}, description='{}'",
+                taskMaster.getName(),
+                taskMaster.getLocation(),
+                java.util.Arrays.toString(taskMaster.getJobCategories()),
+                taskMaster.getHourlyRateUsd(),
+                taskMaster.getDescription());
+
+        try {
+            TaskMasterValidator.validate(taskMaster);
+        } catch (Exception e) {
+            log.warn("[TaskMasterController] Validation failed: {}", e.getMessage());
+            throw e;
+        }
+        log.info("[TaskMasterController] Validation passed, saving to DB...");
+
+        TaskMaster response;
+        try {
+            response = taskMasterRepository.save(taskMaster);
+        } catch (Exception e) {
+            log.error("[TaskMasterController] DB save failed", e);
+            throw e;
+        }
+        log.info("[TaskMasterController] Saved successfully, id='{}'", response.getId());
+
+        try {
+            categoryEventPublisher.publishCategoriesUpdated();
+        } catch (Exception e) {
+            log.warn("[TaskMasterController] Kafka publish failed (non-fatal): {}", e.getMessage());
+        }
+
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
@@ -139,5 +178,19 @@ public class TaskMasterController {
         List<TaskMaster> taskMasters = taskMasterRepository.findTaskMasterByHourlyRateUsdBetween(minRate, maxRate);
         log.debug("[TaskMasterController] by-rate-range [{}, {}] → {} results", minRate, maxRate, taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
+    }
+
+    @GetMapping("/categories")
+    public ResponseEntity<List<String>> getCategories() {
+        log.debug("[TaskMasterController] GET /products/categories");
+        List<String> categories = taskMasterRepository.findAll().stream()
+                .filter(tm -> tm.getJobCategories() != null)
+                .flatMap(tm -> Arrays.stream(tm.getJobCategories()))
+                .filter(c -> c != null && !c.isBlank())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+        log.debug("[TaskMasterController] categories → {} distinct values", categories.size());
+        return ResponseEntity.ok(categories);
     }
 }

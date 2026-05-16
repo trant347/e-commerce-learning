@@ -49,6 +49,11 @@ const AsyncCalendar = loadable({
     loading: LoadingComponent
 });
 
+const AsyncNewTaskMaster = loadable({
+    loader: () => import('../components/new-task-master/NewTaskMaster'),
+    loading: LoadingComponent
+});
+
 export interface IAppContext {
     username: string
 }
@@ -97,6 +102,7 @@ export default class App extends React.Component<{},IAppContext>{
                             <Route path="/signin" component={AsyncSignin}></Route>
                             <Route path="/profile" render={ (props) => <AsyncProfile {...props} username={ Auth.getUser() }></AsyncProfile>}></Route>
                             <Route path="/booking/:id?" render={(props) => <AsyncCalendar {...props} events={[]}/> }></Route>
+                            <Route path="/admin/new-taskmaster" component={AsyncNewTaskMaster}></Route>
                         </Switch>
 
 

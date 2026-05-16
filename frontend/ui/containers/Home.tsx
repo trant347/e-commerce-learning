@@ -9,7 +9,8 @@ export const ITEMS_PER_PAGE = 6;
 export interface TaskMasterState {
     taskMasters: TaskMaster[], 
     fetchingData: boolean, 
-    pageNumber: number
+    pageNumber: number,
+    hasMore: boolean
 }
 
 export interface Action {
@@ -23,34 +24,42 @@ export default function Home({ history }) {
     const initialStates = {
         taskMasters: [],
         fetchingData: false,
-        pageNumber: 0
+        pageNumber: 0,
+        hasMore: true
     };
 
-    const [state, dispatch] = React.useReducer<TaskMasterState, Action>(taskMasterReducer, initialStates);  
+    const [state, dispatch] = React.useReducer<TaskMasterState, Action>(taskMasterReducer, initialStates);
+
+    // Always-current ref so the IntersectionObserver (created once) can read latest hasMore.
+    const hasMoreRef = React.useRef(state.hasMore);
+    React.useEffect(() => { hasMoreRef.current = state.hasMore; }, [state.hasMore]);
 
     React.useEffect(() => {
         try {
             const fetchTaskMasters = async () => {
                 let taskMasters = await TaskMasterServices.getTaskMastersAtPage(state.pageNumber - 1, ITEMS_PER_PAGE);
-                dispatch({ type: UPDATE_FETCHING_STATUS, payload: false});
-                dispatch({ type: UPDATE_TASK_MASTERS, payload: taskMasters });              
+                dispatch({ type: UPDATE_FETCHING_STATUS, payload: false });
+                dispatch({ type: UPDATE_TASK_MASTERS, payload: taskMasters });
+                if (taskMasters.length < ITEMS_PER_PAGE) {
+                    dispatch({ type: SET_HAS_MORE, payload: false });
+                }
             }            
-            if(state.fetchingData) {
+            if (state.fetchingData) {
                 fetchTaskMasters();      
             }   
-        }catch (e) {
+        } catch (e) {
             throw Error("Failed to retrieve task masters");
         }
-    }, [state]);
+    }, [state.fetchingData, state.pageNumber]);
 
     const bottomBoundaryRef = React.useRef(null);
 
     const scrollObserver = React.useCallback(node => {
             new IntersectionObserver(entries => {
                 entries.forEach(en => {
-                    if(en.isIntersecting) {
+                    if (en.isIntersecting && hasMoreRef.current) {
                         dispatch({ type: INCREASE_PAGE_INDEX, payload: 1 });
-                        dispatch({ type: UPDATE_FETCHING_STATUS, payload: true});
+                        dispatch({ type: UPDATE_FETCHING_STATUS, payload: true });
                     }
                 })
             }).observe(node);
@@ -88,6 +97,7 @@ export default function Home({ history }) {
 export const UPDATE_TASK_MASTERS = "UPDATE_TASK_MASTERS";
 export const UPDATE_FETCHING_STATUS = "UPDATE_FETCHING_STATUS";
 export const INCREASE_PAGE_INDEX = "INCREASE_PAGE_INDEX";
+export const SET_HAS_MORE = "SET_HAS_MORE";
 
 export const taskMasterReducer = ( state : TaskMasterState, action: Action ) => {
     switch (action.type) {
@@ -110,6 +120,12 @@ export const taskMasterReducer = ( state : TaskMasterState, action: Action ) => 
             return {
                 ...state,
                 pageNumber: state.pageNumber + action.payload
+            }
+        }
+        case SET_HAS_MORE: {
+            return {
+                ...state,
+                hasMore: action.payload
             }
         }
         default:

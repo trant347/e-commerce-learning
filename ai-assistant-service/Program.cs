@@ -43,14 +43,22 @@ builder.Services.AddHttpClient<IBookingApiClient, BookingApiClient>((sp, client)
     client.BaseAddress = new Uri(baseUrl);
 });
 
-// Register MCP-style tools — each IToolDefinition implementation is discovered by ToolRegistry
-builder.Services.AddSingleton<IToolDefinition, SearchTaskMastersTool>();
+// Register MCP-style tools — each IToolDefinition implementation is discovered by ToolRegistry.
+// SearchTaskMastersTool is also registered as its concrete type so CategoryRefreshConsumerWorker
+// can inject it directly to call SetCategories().
+builder.Services.AddSingleton<SearchTaskMastersTool>();
+builder.Services.AddSingleton<IToolDefinition>(sp => sp.GetRequiredService<SearchTaskMastersTool>());
 builder.Services.AddSingleton<IToolDefinition, GetBookingsTool>();
 builder.Services.AddSingleton<ToolRegistry>();
+
+builder.Services.AddHostedService<ai_assistant_service.MessageQueue.CategoryRefreshConsumerWorker>();
 
 builder.Services.AddScoped<IAiAssistantService, AiAssistantService>();
 
 var app = builder.Build();
+
+// Categories are seeded in the background by CategoryRefreshConsumerWorker
+// so the HTTP server starts immediately without blocking on product-service.
 
 app.UseCors();
 app.UseHttpsRedirection();

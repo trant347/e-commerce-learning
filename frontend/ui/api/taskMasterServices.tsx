@@ -20,5 +20,14 @@ export const TaskMasterServices : ITaskMasterServices  = {
 
     getTaskMastersAtPage(pageIndex: number, limit: number): Promise<TaskMaster[]> {
         return axios.get(`/products?page=${pageIndex}&limit=${limit}`).then(res => res.data);
+    },
+
+    createTaskMaster(taskMaster: Omit<TaskMaster, 'id'>): Promise<TaskMaster> {
+        const token = localStorage.getItem('token');
+        return axios.post(
+            '/products',
+            taskMaster,
+            { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
     }
 };

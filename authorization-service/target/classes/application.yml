@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: "authentication-service"
+  data:
+    mongodb:
+      port: ${mongo_port:27017}
+      database: user
+      host: mongodb
+  consul:
+    discovery:
+      serviceName: ${spring.application.name}
+      instanceId:  ${spring.application.name}
+  mvc:
+    view:
+      suffix: .html
+server:
+  port: 8081
+  servlet:
+    context-path: /
+jwt:
+  get.token.uri: /authenticate
+  http.request.header: Authorization
