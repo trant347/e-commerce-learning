@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
@@ -116,11 +117,61 @@ public sealed class AiAssistantService : IAiAssistantService
         _logger.LogInformation("Chat request completed with final answer length={AnswerLength}, total messages={MessageCount}", 
             finalContent.Length, messages.Count);
 
+        var mentions = ExtractMentions(messages);
+        _logger.LogInformation("Extracted {MentionCount} task master mentions from tool results", mentions.Count);
+
         return new ChatResponse
         {
-            Answer  = finalContent,
-            Model   = model,
-            Sources = _toolRegistry.All.Select(t => t.Name).ToList()
+            Answer   = finalContent,
+            Model    = model,
+            Sources  = _toolRegistry.All.Select(t => t.Name).ToList(),
+            Mentions = mentions
         };
+    }
+
+    /// <summary>
+    /// Scans tool-role messages for JSON arrays of task masters and extracts id+name pairs.
+    /// The product-service returns a JSON array of TaskMaster objects, each with "id" and "name".
+    /// </summary>
+    private static List<TaskMasterMention> ExtractMentions(IEnumerable<OllamaChatMessage> messages)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var mentions = new List<TaskMasterMention>();
+
+        foreach (var msg in messages.Where(m => m.Role == "tool" && !string.IsNullOrWhiteSpace(m.Content)))
+        {
+            try
+            {
+                var trimmed = msg.Content!.Trim();
+                // Tool content may be a JSON array directly or wrapped in an object with a "taskMasters" key
+                var root = JsonDocument.Parse(trimmed).RootElement;
+
+                IEnumerable<JsonElement> items = root.ValueKind switch
+                {
+                    JsonValueKind.Array => root.EnumerateArray().Select(e => e),
+                    JsonValueKind.Object when root.TryGetProperty("taskMasters", out var arr)
+                        => arr.EnumerateArray().Select(e => e),
+                    _ => Enumerable.Empty<JsonElement>()
+                };
+
+                foreach (var item in items)
+                {
+                    if (item.TryGetProperty("id", out var idEl) &&
+                        item.TryGetProperty("name", out var nameEl))
+                    {
+                        var id   = idEl.GetString()   ?? string.Empty;
+                        var name = nameEl.GetString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name) && seen.Add(id))
+                            mentions.Add(new TaskMasterMention { Id = id, Name = name });
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Tool content was not valid JSON — skip
+            }
+        }
+
+        return mentions;
     }
 }

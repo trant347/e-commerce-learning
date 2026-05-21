@@ -76,7 +76,7 @@ export default function NewTaskMaster() {
 
         setSubmitting(true);
         try {
-            await TaskMasterServices.createTaskMaster({
+            const created = await TaskMasterServices.createTaskMaster({
                 name: form.name,
                 age: parseInt(form.age, 10),
                 location: form.location,
@@ -87,9 +87,7 @@ export default function NewTaskMaster() {
                 jobCategories: categories,
             });
 
-            setFeedback({ type: 'success', message: 'TaskMaster created successfully!' });
-            setForm({ name: '', age: '', location: '', description: '', hourlyRateUsd: '', photo: '' });
-            setCategories([]);
+            history.push(`/product/${created.id}`);
         } catch (err) {
             setFeedback({ type: 'error', message: 'Failed to create TaskMaster. Please try again.' });
         } finally {

@@ -1,12 +1,59 @@
 import * as React from 'react';
+import { Link } from 'react-router-dom';
 import Auth from '../../api/authenticationStorage';
-import AiAssistantServices from '../../api/aiAssistantServices';
+import AiAssistantServices, { TaskMasterMention } from '../../api/aiAssistantServices';
 
 import './chat-overlay.css';
+
+/**
+ * Splits `text` on task master names and replaces each occurrence with a
+ * React <Link> pointing to /product/:id.
+ */
+function renderWithLinks(text: string, mentions: TaskMasterMention[]): React.ReactNode {
+    if (!mentions.length) return text;
+
+    // Sort longest name first to avoid partial matches on shorter names
+    const sorted = [...mentions].sort((a, b) => b.name.length - a.name.length);
+
+    // Split text into alternating plain/matched segments
+    const parts: React.ReactNode[] = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+        let earliest: { index: number; mention: TaskMasterMention } | null = null;
+
+        for (const mention of sorted) {
+            const idx = remaining.indexOf(mention.name);
+            if (idx !== -1 && (earliest === null || idx < earliest.index)) {
+                earliest = { index: idx, mention };
+            }
+        }
+
+        // if no matching mention found, push the rest of the text and break
+        if (!earliest) {
+            parts.push(remaining);
+            break;
+        }
+
+        // push the part before the mention (if any), then the mention as a Link, and continue
+        if (earliest.index > 0) {
+            parts.push(remaining.slice(0, earliest.index));
+        }
+        parts.push(
+            <Link key={earliest.mention.id} to={`/product/${earliest.mention.id}`}>
+                {earliest.mention.name}
+            </Link>
+        );
+        remaining = remaining.slice(earliest.index + earliest.mention.name.length);
+    }
+
+    return <>{parts}</>;
+}
 
 interface IChatMessage {
     role: 'user' | 'assistant';
     content: string;
+    mentions?: TaskMasterMention[];
 }
 
 interface IChatOverlayState {
@@ -66,9 +113,9 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
             const response = await AiAssistantServices.chat(text, userId);
             const assistantMessage: IChatMessage = {
                 role: 'assistant',
-                content: response.answer || 'No answer returned from assistant.'
+                content: response.answer || 'No answer returned from assistant.',
+                mentions: response.mentions || []
             };
-
             this.setState({
                 messages: nextMessages.concat(assistantMessage),
                 loading: false
@@ -112,7 +159,12 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
                                 key={index}
                                 className={`chat-message-row ${message.role === 'user' ? 'from-user' : 'from-assistant'}`}
                             >
-                                <div className="chat-message-bubble">{message.content}</div>
+                                <div className="chat-message-bubble">
+                                    {message.role === 'assistant' && message.mentions && message.mentions.length > 0
+                                        ? renderWithLinks(message.content, message.mentions)
+                                        : message.content
+                                    }
+                                </div>
                             </div>
                         ))}
                         {this.state.loading && (
