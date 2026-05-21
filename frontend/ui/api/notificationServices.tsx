@@ -7,6 +7,7 @@ export interface Notification {
     message: string;
     timestamp: string;
     status: string;
+    actionUrl?: string;
 }
 
 const NOTIFICATION_SERVICE_URL = '/api/notification';

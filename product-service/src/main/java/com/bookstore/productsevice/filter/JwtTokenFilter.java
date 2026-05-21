@@ -77,8 +77,11 @@ public class JwtTokenFilter implements Filter {
 
             String username = claims.getSubject();
 
-            if(username != null) {
-                List<String> authorities = (List<String>)claims.get("authorities");
+            if (username != null) {
+                List<String> authorities = (List<String>) claims.get("authorities");
+                // Expose parsed identity to downstream controllers via request attributes
+                servletRequest.setAttribute("authenticatedUsername", username);
+                servletRequest.setAttribute("authenticatedAuthorities", authorities);
             }
         }catch (Exception ex){
             ((HttpServletResponse)servletResponse).sendError(HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED ACCESS");

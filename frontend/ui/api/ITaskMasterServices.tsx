@@ -1,4 +1,4 @@
-import { TaskMaster } from '../common/interfaces';
+import { TaskMaster, TaskMasterApplication, SubmitApplicationRequest } from '../common/interfaces';
 
 
 export default interface ITaskMasterServices {
@@ -10,4 +10,14 @@ export default interface ITaskMasterServices {
     getTaskMastersAtPage(pageIndex: number, limit: number): Promise<TaskMaster[]>;
 
     createTaskMaster(taskMaster: Omit<TaskMaster, 'id'>): Promise<TaskMaster>;
+
+    submitApplication(application: SubmitApplicationRequest): Promise<TaskMasterApplication>;
+
+    listApplications(status?: string): Promise<TaskMasterApplication[]>;
+
+    getApplication(id: string): Promise<TaskMasterApplication>;
+
+    acceptApplication(id: string): Promise<TaskMasterApplication>;
+
+    declineApplication(id: string, reason?: string): Promise<TaskMasterApplication>;
 }

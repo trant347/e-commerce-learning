@@ -1,0 +1,98 @@
+.filter-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.filter-tab {
+    padding: 0.4rem 1rem;
+    border: 1px solid #ccc;
+    border-radius: 20px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: #555;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.filter-tab:hover {
+    border-color: #888;
+    color: #222;
+}
+
+.filter-tab.active {
+    background: #2185d0;
+    color: #fff;
+    border-color: #2185d0;
+    font-weight: 600;
+}
+
+.applications-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.applications-table th {
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 2px solid #ddd;
+    color: #444;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.applications-table td {
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid #eee;
+    vertical-align: middle;
+}
+
+.applications-table tr:hover td {
+    background: #f9f9f9;
+}
+
+.row-pending td {
+    font-weight: 500;
+}
+
+.status-badge-sm {
+    color: #fff;
+    font-weight: 700;
+    padding: 0.2rem 0.6rem;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.review-btn {
+    padding: 0.3rem 0.75rem;
+    background: #2185d0;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.review-btn:hover {
+    background: #1678c2;
+}
+
+.loading-text {
+    color: #888;
+    padding: 1rem 0;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #999;
+}
+
+.empty-state p {
+    margin-top: 0.5rem;
+    font-size: 1rem;
+}

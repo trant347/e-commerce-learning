@@ -16,7 +16,7 @@ WORKDIR /app
 COPY --from=builder /app/target/product-service-${version}.jar ./product-service.jar
 COPY --from=builder /app/static ./static
 
-ENV JAVA_TOOL_OPTIONS -agentlib:jdwp=transport=dt_socket,address=8000,server=y,suspend=n
+ENV JAVA_TOOL_OPTIONS -agentlib:jdwp=transport=dt_socket,address=*:8000,server=y,suspend=n
 
 EXPOSE 8080 8000
 

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-import { TaskMaster } from '../common/interfaces';
+import { TaskMaster, TaskMasterApplication, SubmitApplicationRequest } from '../common/interfaces';
 import ITaskMasterServices from './ITaskMasterServices';
 
 
@@ -29,5 +29,46 @@ export const TaskMasterServices : ITaskMasterServices  = {
             taskMaster,
             { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
         ).then(res => res.data);
-    }
+    },
+
+    submitApplication(application: SubmitApplicationRequest): Promise<TaskMasterApplication> {
+        const token = localStorage.getItem('token');
+        return axios.post(
+            '/products/applications',
+            application,
+            { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
+    },
+
+    listApplications(status?: string): Promise<TaskMasterApplication[]> {
+        const token = localStorage.getItem('token');
+        const url = status ? `/products/applications?status=${status}` : '/products/applications';
+        return axios.get(url, { headers: { 'Authorization': `Bearer ${token}` } }).then(res => res.data);
+    },
+
+    getApplication(id: string): Promise<TaskMasterApplication> {
+        const token = localStorage.getItem('token');
+        return axios.get(
+            `/products/applications/${id}`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(res => res.data);
+    },
+
+    acceptApplication(id: string): Promise<TaskMasterApplication> {
+        const token = localStorage.getItem('token');
+        return axios.put(
+            `/products/applications/${id}/accept`,
+            {},
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(res => res.data);
+    },
+
+    declineApplication(id: string, reason?: string): Promise<TaskMasterApplication> {
+        const token = localStorage.getItem('token');
+        return axios.put(
+            `/products/applications/${id}/decline`,
+            reason ? { reason } : {},
+            { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
+    },
 };

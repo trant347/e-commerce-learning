@@ -23,5 +23,8 @@ namespace notification_service.Model
         public DateTime? SentAt { get; set; }
 
         public string? ErrorMessage { get; set; }
+
+        /// <summary>Frontend route to navigate to when the notification is clicked.</summary>
+        public string? ActionUrl { get; set; }
     }
 }

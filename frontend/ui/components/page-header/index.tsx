@@ -117,6 +117,14 @@ export default function(props) {
                                                 </Menu.Item>
                                             )}
 
+                                            {username === 'admin' && (
+                                                <Menu.Item name='applications'>
+                                                    <StyledLinkHovered onClick={() => history.push('/admin/applications')}>
+                                                        <i className="tasks icon" /> Applications
+                                                    </StyledLinkHovered>
+                                                </Menu.Item>
+                                            )}
+
                                             <Menu.Item
                                                 name='logout'                                                                                              
                                                 >                                               
@@ -170,7 +178,12 @@ export default function(props) {
                             </li>
                             <li> Top Rated </li>
                             <li> Near Me </li>
-                            <li> New TaskMasters </li>
+                            <li>
+                                {username && username !== 'admin'
+                                    ? <Link to="/apply">New TaskMasters</Link>
+                                    : <span>New TaskMasters</span>
+                                }
+                            </li>
                             <li> Best Value </li>
                         </ul>
                         <ul>

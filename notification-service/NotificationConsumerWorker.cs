@@ -75,10 +75,16 @@ namespace notification_service
                             var notification = new Model.NotificationEventModel
                             {
                                 Id = Guid.NewGuid().ToString(),
-                                RecipientEmail = notificationMessage.RecipientEmail,
+                                // RecipientUsername takes precedence — the notification system uses
+                                // username as the lookup key (stored in RecipientEmail for backward compat)
+                                RecipientEmail = !string.IsNullOrEmpty(notificationMessage.RecipientUsername)
+                                    ? notificationMessage.RecipientUsername
+                                    : notificationMessage.RecipientEmail,
                                 Status = "Pending",
                                 Timestamp = notificationMessage.Timestamp,
                                 Message = notificationMessage.Message,
+                                Type = notificationMessage.Type,
+                                ActionUrl = notificationMessage.ActionUrl,
                             };
 
                             await mongoDbService.CreateNotificationAsync(notification);

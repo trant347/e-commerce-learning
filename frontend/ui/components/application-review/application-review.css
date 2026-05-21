@@ -1,0 +1,72 @@
+.review-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.review-header h1 {
+    margin: 0;
+    flex: 1;
+}
+
+.back-btn {
+    background: none;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.back-btn:hover {
+    background: #f0f0f0;
+}
+
+.status-badge {
+    color: #fff;
+    font-weight: 700;
+    padding: 0.3rem 0.8rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.review-meta {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.review-actions {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e0e0e0;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.75rem;
+}
+
+.accept-btn {
+    background: #21ba45 !important;
+}
+
+.accept-btn:hover:not(:disabled) {
+    background: #16a938 !important;
+}
+
+.decline-btn {
+    background: #db2828 !important;
+}
+
+.decline-btn:hover:not(:disabled) {
+    background: #c82020 !important;
+}

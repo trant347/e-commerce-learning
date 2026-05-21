@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useHistory } from 'react-router-dom';
 import { Popup, Label, List, Icon } from 'semantic-ui-react';
 import { formatDistance } from 'date-fns';
 import { Notification } from '../../api/notificationServices';
@@ -15,6 +16,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
     unreadCount,
     onMarkAsRead
 }) => {
+    const history = useHistory();
     const getNotificationIcon = (type: string) => {
         switch (type.toLowerCase()) {
             case 'booking_confirmed':
@@ -85,7 +87,11 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                         <List.Item 
                             key={notification.id}
                             className={notification.status === 'Pending' ? 'unread' : 'read'}
-                            onClick={() => onMarkAsRead && onMarkAsRead(notification.id)}
+                            style={notification.actionUrl ? { cursor: 'pointer' } : undefined}
+                            onClick={() => {
+                                if (onMarkAsRead) onMarkAsRead(notification.id);
+                                if (notification.actionUrl) history.push(notification.actionUrl);
+                            }}
                         >
                             <List.Icon 
                                 name={getNotificationIcon(notification.type)} 

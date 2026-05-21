@@ -54,6 +54,21 @@ const AsyncNewTaskMaster = loadable({
     loading: LoadingComponent
 });
 
+const AsyncApplyForTaskMaster = loadable({
+    loader: () => import('../components/apply-for-task-master/ApplyForTaskMaster'),
+    loading: LoadingComponent
+});
+
+const AsyncApplicationReview = loadable({
+    loader: () => import('../components/application-review/ApplicationReview'),
+    loading: LoadingComponent
+});
+
+const AsyncAdminApplicationsList = loadable({
+    loader: () => import('../components/admin-applications/AdminApplicationsList'),
+    loading: LoadingComponent
+});
+
 export interface IAppContext {
     username: string
 }
@@ -103,6 +118,9 @@ export default class App extends React.Component<{},IAppContext>{
                             <Route path="/profile" render={ (props) => <AsyncProfile {...props} username={ Auth.getUser() }></AsyncProfile>}></Route>
                             <Route path="/booking/:id?" render={(props) => <AsyncCalendar {...props} events={[]}/> }></Route>
                             <Route path="/admin/new-taskmaster" component={AsyncNewTaskMaster}></Route>
+                            <Route path="/apply" component={AsyncApplyForTaskMaster}></Route>
+                            <Route path="/admin/applications/:id" component={AsyncApplicationReview}></Route>
+                            <Route path="/admin/applications" component={AsyncAdminApplicationsList}></Route>
                         </Switch>
 
 

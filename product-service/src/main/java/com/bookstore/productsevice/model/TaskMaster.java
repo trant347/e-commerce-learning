@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @Document(collection = "taskmaster")
@@ -25,6 +26,16 @@ public class TaskMaster {
     private String[] jobCategories;
     private String description;
     private double hourlyRateUsd;
+
+    /**
+     * The username of the registered user who owns this task master profile.
+     * Set when an application is accepted. Indexed for efficient lookup during
+     * profile queries and cascading cleanup on account deletion (via USER_DELETED Kafka event).
+     * Unique + sparse: one user can own at most one profile; null values are excluded
+     * from the index so legacy task masters without an owner do not conflict.
+     */
+    @Indexed(unique = true, sparse = true)
+    private String ownerUsername;
 
     public TaskMaster() {}
 
