@@ -18,4 +18,7 @@ public interface ApplicationRepository extends MongoRepository<TaskMasterApplica
 
     /** Fetch all applications in a given status (for admin listing). */
     List<TaskMasterApplication> findAllByStatus(TaskMasterApplication.ApplicationStatus status);
+
+    /** Count PENDING applications the admin has not yet opened. */
+    long countByStatusAndIsViewedByAdmin(TaskMasterApplication.ApplicationStatus status, boolean isViewedByAdmin);
 }

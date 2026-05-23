@@ -24,6 +24,7 @@ export interface TaskMasterApplication {
     submittedAt: string;
     declineReason?: string;
     createdTaskMasterId?: string;
+    isViewedByAdmin: boolean;
 }
 
 export interface SubmitApplicationRequest {

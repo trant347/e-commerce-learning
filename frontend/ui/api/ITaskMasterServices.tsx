@@ -20,4 +20,8 @@ export default interface ITaskMasterServices {
     acceptApplication(id: string): Promise<TaskMasterApplication>;
 
     declineApplication(id: string, reason?: string): Promise<TaskMasterApplication>;
+
+    getUnviewedCount(): Promise<number>;
+
+    markApplicationViewed(id: string): Promise<void>;
 }

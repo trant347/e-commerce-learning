@@ -97,6 +97,23 @@ router.get('/applications', async (req, res, next) => {
     }
 });
 
+// GET /products/applications/unviewed-count  — count unviewed PENDING applications (admin)
+router.get('/applications/unviewed-count', async (req, res, next) => {
+    const upstream = `${endpoints.getServiceLocationPath('product-service')}/products/applications/unviewed-count`;
+    try {
+        console.log(`[BFF][applications] → GET ${upstream}`);
+        const response = await axios.get(upstream, {
+            headers: { 'Authorization': req.get('Authorization') }
+        });
+        console.log(`[BFF][applications] ← ${response.status} count=${response.data.count}`);
+        res.send(response.data);
+    } catch (e) {
+        console.error(`[BFF][applications] ✗ ${e.response?.status || e.code} | ${e.message}`);
+        if (e.response) return res.status(e.response.status).send(e.response.data);
+        next(e);
+    }
+});
+
 // GET /products/applications/:id  — get single application (admin)
 router.get('/applications/:id', async (req, res, next) => {
     const upstream = `${endpoints.getServiceLocationPath('product-service')}/products/applications/${req.params.id}`;
@@ -140,6 +157,23 @@ router.put('/applications/:id/decline', async (req, res, next) => {
             headers: { 'Authorization': req.get('Authorization'), 'Content-Type': 'application/json' }
         });
         console.log(`[BFF][applications] ← ${response.status} declined`);
+        res.send(response.data);
+    } catch (e) {
+        console.error(`[BFF][applications] ✗ ${e.response?.status || e.code} | ${e.message}`);
+        if (e.response) return res.status(e.response.status).send(e.response.data);
+        next(e);
+    }
+});
+
+// PUT /products/applications/:id/view  — mark application as viewed (admin)
+router.put('/applications/:id/view', async (req, res, next) => {
+    const upstream = `${endpoints.getServiceLocationPath('product-service')}/products/applications/${req.params.id}/view`;
+    try {
+        console.log(`[BFF][applications] → PUT ${upstream}`);
+        const response = await axios.put(upstream, {}, {
+            headers: { 'Authorization': req.get('Authorization') }
+        });
+        console.log(`[BFF][applications] ← ${response.status} viewed`);
         res.send(response.data);
     } catch (e) {
         console.error(`[BFF][applications] ✗ ${e.response?.status || e.code} | ${e.message}`);

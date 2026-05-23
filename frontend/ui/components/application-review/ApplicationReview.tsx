@@ -36,6 +36,9 @@ export default function ApplicationReview() {
             .then(data => {
                 setApplication(data);
                 setLoading(false);
+                if (!data.isViewedByAdmin) {
+                    TaskMasterServices.markApplicationViewed(id).catch(() => {/* silently ignore */});
+                }
             })
             .catch(() => {
                 setError('Failed to load application.');

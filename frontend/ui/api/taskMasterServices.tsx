@@ -71,4 +71,21 @@ export const TaskMasterServices : ITaskMasterServices  = {
             { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },
+
+    getUnviewedCount(): Promise<number> {
+        const token = localStorage.getItem('token');
+        return axios.get(
+            '/products/applications/unviewed-count',
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(res => res.data.count);
+    },
+
+    markApplicationViewed(id: string): Promise<void> {
+        const token = localStorage.getItem('token');
+        return axios.put(
+            `/products/applications/${id}/view`,
+            {},
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(() => undefined);
+    },
 };

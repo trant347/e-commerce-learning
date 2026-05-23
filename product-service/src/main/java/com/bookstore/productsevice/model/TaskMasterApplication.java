@@ -50,6 +50,12 @@ public class TaskMasterApplication {
      */
     private String createdTaskMasterId;
 
+    /**
+     * Whether the admin has opened and viewed this application's detail page.
+     * Used to drive the unread badge in the admin nav.
+     */
+    private boolean isViewedByAdmin = false;
+
     public enum ApplicationStatus {
         PENDING,
         ACCEPTED,

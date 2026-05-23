@@ -6,7 +6,7 @@ import './cart-bar.css';
 import Login from '../login/login';
 import Modal from '../modal/modal';
 
-import { useState, Fragment } from "react";
+import { useState, Fragment, useEffect } from "react";
 
 
 import { Link, useHistory } from 'react-router-dom';
@@ -19,6 +19,8 @@ import styled from 'styled-components';
 
 import { NotificationBell } from '../notifications/NotificationBell';
 import { useNotifications } from '../../hooks/useNotifications';
+
+import { TaskMasterServices } from '../../api/taskMasterServices';
 
 const StyledNav = styled.nav`
     padding-left: 10%;
@@ -55,6 +57,15 @@ export default function(props) {
 
         // Use the notifications hook
         const { notifications, unreadCount, markAsRead } = useNotifications(username);
+
+        const [unviewedApplicationCount, setUnviewedApplicationCount] = React.useState<number>(0);
+
+        useEffect(() => {
+            if (username !== 'admin') return;
+            TaskMasterServices.getUnviewedCount()
+                .then(count => setUnviewedApplicationCount(count))
+                .catch(() => {/* silently ignore */});
+        }, [username]);
 
         const showLoginPopup = function():void {
             setLoginPopupVisibility(true);
@@ -121,6 +132,11 @@ export default function(props) {
                                                 <Menu.Item name='applications'>
                                                     <StyledLinkHovered onClick={() => history.push('/admin/applications')}>
                                                         <i className="tasks icon" /> Applications
+                                                        {unviewedApplicationCount > 0 && (
+                                                            <Label circular color='red' size='mini' style={{ marginLeft: '6px' }}>
+                                                                {unviewedApplicationCount}
+                                                            </Label>
+                                                        )}
                                                     </StyledLinkHovered>
                                                 </Menu.Item>
                                             )}

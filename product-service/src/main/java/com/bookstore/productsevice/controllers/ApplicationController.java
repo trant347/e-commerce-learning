@@ -202,6 +202,39 @@ public class ApplicationController {
     }
 
     // -------------------------------------------------------------------------
+    // Unviewed count (admin only)
+    // -------------------------------------------------------------------------
+
+    @GetMapping("/unviewed-count")
+    public ResponseEntity<?> getUnviewedCount(HttpServletRequest request) {
+        if (!isAdmin(request)) return forbidden();
+
+        long count = applicationRepository.countByStatusAndIsViewedByAdmin(
+                ApplicationStatus.PENDING, false);
+        return ResponseEntity.ok(Map.of("count", count));
+    }
+
+    // -------------------------------------------------------------------------
+    // Mark application as viewed (admin only)
+    // -------------------------------------------------------------------------
+
+    @PutMapping("/{id}/view")
+    public ResponseEntity<?> markViewed(@PathVariable String id, HttpServletRequest request) {
+        if (!isAdmin(request)) return forbidden();
+
+        TaskMasterApplication application = applicationRepository.findById(id).orElse(null);
+        if (application == null) return ResponseEntity.notFound().build();
+
+        if (!application.isViewedByAdmin()) {
+            application.setViewedByAdmin(true);
+            applicationRepository.save(application);
+            log.info("[ApplicationController] Marked application id='{}' as viewed", id);
+        }
+
+        return ResponseEntity.ok(Map.of("viewed", true));
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
