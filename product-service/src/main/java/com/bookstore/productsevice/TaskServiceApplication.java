@@ -99,7 +99,10 @@ public class TaskServiceApplication {
         return new CommandLineRunner() {
             @Override
             public void run(String... args) throws Exception {
-                repository.deleteAll();
+                if (repository.count() > 0) {
+                    logger.info("Task masters collection already has data; skipping seed.");
+                    return;
+                }
 
                 ObjectMapper objectMapper = new ObjectMapper();
                 objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);

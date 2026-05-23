@@ -65,6 +65,8 @@ services:
     image: mongodb/mongodb-community-server:5.0-ubi8  
     ports:
     - "27017:27017"
+    volumes:
+    - mongodb-data:/data/db
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -220,3 +222,4 @@ volumes:
   kafka-data:
   zookeeper-logs:
   ollama-data:
+  mongodb-data:
