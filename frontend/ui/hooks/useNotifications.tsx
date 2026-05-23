@@ -5,6 +5,7 @@ export const useNotifications = (userEmail: string | null) => {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState<number>(0);
     const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [lastNotification, setLastNotification] = useState<Notification | null>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
 
     // Fetch initial notifications
@@ -43,6 +44,7 @@ export const useNotifications = (userEmail: string | null) => {
             userEmail,
             (newNotification: Notification) => {
                 setNotifications(prev => [newNotification, ...prev]);
+                setLastNotification(newNotification);
                 // Increment unread count for new notifications
                 if (newNotification.status === 'Pending') {
                     setUnreadCount(prev => prev + 1);
@@ -78,6 +80,7 @@ export const useNotifications = (userEmail: string | null) => {
         notifications,
         unreadCount,
         isLoading,
+        lastNotification,
         markAsRead,
         clearAll
     };

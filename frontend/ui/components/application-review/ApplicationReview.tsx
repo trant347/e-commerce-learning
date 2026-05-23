@@ -3,6 +3,7 @@ import { useState, useEffect, useContext } from 'react';
 import { useHistory, useParams } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
+import ApplicationBadgeContext from '../../context/applicationBadgeContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
 import { TaskMasterApplication } from '../../common/interfaces';
 
@@ -15,6 +16,7 @@ interface RouteParams {
 
 export default function ApplicationReview() {
     const { username } = useContext(UserContext);
+    const { decrementUnviewedCount } = useContext(ApplicationBadgeContext);
     const history = useHistory();
     const { id } = useParams<RouteParams>();
 
@@ -37,7 +39,9 @@ export default function ApplicationReview() {
                 setApplication(data);
                 setLoading(false);
                 if (!data.isViewedByAdmin) {
-                    TaskMasterServices.markApplicationViewed(id).catch(() => {/* silently ignore */});
+                    TaskMasterServices.markApplicationViewed(id)
+                        .then(() => decrementUnviewedCount())
+                        .catch(() => {/* silently ignore */});
                 }
             })
             .catch(() => {

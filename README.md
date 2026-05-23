@@ -14,7 +14,83 @@ A TaskMaster marketplace that uses micro-services architecture. Users can browse
 - **calendar-service**: Booking management
 - **authentication-service**: User authentication
 - **notification-service**: Real-time notifications
+- **worker-service**: Async booking job processor
 - **ai-assistant-service**: AI-powered chat assistant (Ollama)
+
+---
+
+## How it works
+
+### product-service (Java 11 / Spring Boot)
+The core catalog service. Stores and serves TaskMaster profiles and manages the application-to-TaskMaster lifecycle.
+
+**TaskMaster profiles**
+- Profiles are stored in MongoDB (`task_masters` collection).
+- On first startup, the collection is seeded from `src/main/resources/seed/taskMasters.json` — only when empty, so manually created profiles are never overwritten.
+- `GET /products` — public paginated listing (no auth required).
+- `GET /products?name=` / `?location=` / `?category=` / `?minRate=&maxRate=` / `?minRating=` — filtered queries backed by Spring Data MongoDB derived methods.
+- Faceted search (MongoDB aggregation pipeline) groups results by job category and location.
+- `POST /products` — create a new profile directly (admin).
+- `POST /products/upload` — stores a profile image on disk under `static/images/`; the filename is returned and embedded in the profile.
+
+**TaskMaster application lifecycle**
+
+```
+User submits form → PENDING → Admin accepts → TaskMaster profile created
+                             → Admin declines → DECLINED (with optional reason)
+```
+
+- `POST /products/applications` — any authenticated user submits an application. A second submission while one is `PENDING` returns HTTP 409.
+- `GET /products/applications` — admin lists all applications, filterable by status (`PENDING`, `ACCEPTED`, `DECLINED`).
+- `GET /products/applications/unviewed-count` — returns `{ count: N }` of PENDING applications the admin hasn't opened yet. Powers the badge in the navigation header.
+- `PUT /products/applications/{id}/accept` — creates a TaskMaster profile from the application data, links the application to the new profile, and publishes a `TASKMASTER_APPLICATION_ACCEPTED` event to Kafka.
+- `PUT /products/applications/{id}/decline` — marks the application DECLINED with an optional reason and publishes a `TASKMASTER_APPLICATION_DECLINED` event.
+- `PUT /products/applications/{id}/view` — marks an application as viewed by the admin (clears it from the unviewed count).
+
+**Kafka events published** (topic: `notification-events`)
+| Event type | Trigger | Recipient |
+|---|---|---|
+| `TASKMASTER_APPLICATION_SUBMITTED` | User submits application | `admin` |
+| `TASKMASTER_APPLICATION_ACCEPTED` | Admin accepts | applicant |
+| `TASKMASTER_APPLICATION_DECLINED` | Admin declines | applicant |
+
+---
+
+### notification-service (.NET 8)
+Bridges Kafka events to browser clients using Server-Sent Events (SSE).
+
+**Flow**
+1. `NotificationConsumerWorker` — a background `IHostedService` that subscribes to the `notification-events` Kafka topic.
+2. Each consumed message is deserialised into a `NotificationMessage`, persisted to MongoDB (`notifications` collection), and then pushed to any live browser connection for the target user.
+3. Delivery uses `NotificationStreamer` — an in-memory `ConcurrentDictionary<userId, Channel<T>>`. Each connected browser holds one SSE channel. When a message arrives for a user who isn't connected, it is silently dropped (MongoDB still has it for next load).
+
+**REST endpoints**
+- `GET /api/notification/{userId}` — returns the last 50 notifications for a user (initial page load).
+- `GET /api/notification/{userId}/stream` — opens an SSE stream (`Content-Type: text/event-stream`). The browser holds this connection open and receives new notifications in real-time without polling.
+
+**Frontend integration**
+The `useNotifications` React hook connects to the SSE stream on login and exposes `lastNotification`. Components can watch `lastNotification.type` to react to specific events — for example, the navigation badge increments instantly when a `TASKMASTER_APPLICATION_SUBMITTED` event arrives while the admin is using the app.
+
+---
+
+### worker-service (.NET)
+Processes booking jobs asynchronously, decoupling the calendar-service from long-running completion logic.
+
+**Flow**
+1. When a booking is created, `calendar-service` publishes a `BookingJobMessage` to the `bookings` Kafka topic.
+2. `BookingJobConsumerWorker` (a background `IHostedService`) consumes messages from that topic.
+3. For each message, `ProcessBookingService`:
+   - Fetches the booking from the calendar-service.
+   - Validates it hasn't already been completed and that the start time has passed.
+   - Updates the booking status to `Completed`.
+4. After processing, a `BookingJobStatusMessage` (`Status: "Processed"`) is published to the `notification-events` topic, triggering a notification to the user via the notification-service.
+5. Kafka offsets are committed **manually** after successful processing, giving at-least-once delivery semantics — a crash mid-processing will re-deliver the message rather than silently drop it.
+
+**Kafka topics**
+| Topic | Role |
+|---|---|
+| `bookings` | Input — booking jobs to process |
+| `notification-events` | Output — booking completion notifications |
 
 ## Authentication
 

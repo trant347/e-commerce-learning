@@ -12,6 +12,7 @@ import { useState, Fragment, useEffect } from "react";
 import { Link, useHistory } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
+import ApplicationBadgeContext from '../../context/applicationBadgeContext';
 
 import { Popup, Menu, Label, Button } from 'semantic-ui-react';
 
@@ -19,8 +20,6 @@ import styled from 'styled-components';
 
 import { NotificationBell } from '../notifications/NotificationBell';
 import { useNotifications } from '../../hooks/useNotifications';
-
-import { TaskMasterServices } from '../../api/taskMasterServices';
 
 const StyledNav = styled.nav`
     padding-left: 10%;
@@ -54,18 +53,17 @@ export default function(props) {
         let [isLoginPopupVisible, setLoginPopupVisibility] = useState<boolean>(false);
 
         let { username, setUsername } = React.useContext(UserContext);
+        const { unviewedApplicationCount, setUnviewedApplicationCount } = React.useContext(ApplicationBadgeContext);
 
         // Use the notifications hook
-        const { notifications, unreadCount, markAsRead } = useNotifications(username);
+        const { notifications, unreadCount, markAsRead, lastNotification } = useNotifications(username);
 
-        const [unviewedApplicationCount, setUnviewedApplicationCount] = React.useState<number>(0);
-
+        // Increment badge in real-time when a new application arrives via SSE
         useEffect(() => {
-            if (username !== 'admin') return;
-            TaskMasterServices.getUnviewedCount()
-                .then(count => setUnviewedApplicationCount(count))
-                .catch(() => {/* silently ignore */});
-        }, [username]);
+            if (lastNotification?.type === 'TASKMASTER_APPLICATION_SUBMITTED') {
+                setUnviewedApplicationCount(unviewedApplicationCount + 1);
+            }
+        }, [lastNotification]);
 
         const showLoginPopup = function():void {
             setLoginPopupVisibility(true);

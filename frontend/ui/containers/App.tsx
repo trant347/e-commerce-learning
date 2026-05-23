@@ -13,6 +13,7 @@ import ChatOverlay from '../components/chat-overlay/chat-overlay';
 import './App.css';
 
 import UserContext from '../context/userContext';
+import ApplicationBadgeProvider from '../context/ApplicationBadgeProvider';
 
 import Auth from '../api/authenticationStorage';
 
@@ -97,6 +98,7 @@ export default class App extends React.Component<{},IAppContext>{
 
         return (
             <UserContext.Provider value={{username: this.state.username,setUsername: this.setUsername.bind(this)}}>
+                <ApplicationBadgeProvider>
                 <BrowserRouter>
                     <div className="App">
                         <PageHeader/>
@@ -126,6 +128,7 @@ export default class App extends React.Component<{},IAppContext>{
 
                     </div>
                 </BrowserRouter>
+                </ApplicationBadgeProvider>
             </UserContext.Provider>
         );
     }
