@@ -13,7 +13,7 @@ namespace notification_service.Tests
     ///   1. Output must be framed as "data: {json}\n\n" — raw JSON bytes do not trigger
     ///      EventSource.onmessage in the browser.
     ///   2. JSON property names must be camelCase — the frontend Notification interface
-    ///      reads notification.type / notification.status (camelCase).
+    ///      reads notification.type / notification.notificationStatus (camelCase).
     /// </summary>
     public class NotificationStreamerTests
     {
@@ -34,7 +34,7 @@ namespace notification_service.Tests
                 Type = "TASKMASTER_APPLICATION_ACCEPTED",
                 Message = "Welcome aboard!",
                 Timestamp = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
-                Status = "Pending",
+                NotificationStatus = "Pending",
                 ActionType = "VIEW_MY_APPLICATION",
                 ActionPayload = new Dictionary<string, string> { ["foo"] = "bar" }
             });
@@ -55,13 +55,13 @@ namespace notification_service.Tests
             // camelCase property names (PascalCase would be the bug)
             Assert.Equal("n-1", root.GetProperty("id").GetString());
             Assert.Equal("TASKMASTER_APPLICATION_ACCEPTED", root.GetProperty("type").GetString());
-            Assert.Equal("Pending", root.GetProperty("status").GetString());
+            Assert.Equal("Pending", root.GetProperty("notificationStatus").GetString());
             Assert.Equal("VIEW_MY_APPLICATION", root.GetProperty("actionType").GetString());
             Assert.Equal("bar", root.GetProperty("actionPayload").GetProperty("foo").GetString());
 
             // No PascalCase leakage
             Assert.False(root.TryGetProperty("Type", out _));
-            Assert.False(root.TryGetProperty("Status", out _));
+            Assert.False(root.TryGetProperty("NotificationStatus", out _));
         }
 
         private static async Task<string> ReadAvailableAsync(PipeReader reader)

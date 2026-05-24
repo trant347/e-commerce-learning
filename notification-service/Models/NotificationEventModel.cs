@@ -17,7 +17,8 @@ namespace notification_service.Model
 
         public string Message { get; set; } = string.Empty;
 
-        public string Status { get; set; } = "Pending"; // e.g., Pending, Sent, Failed
+        [BsonElement("Status")] // preserve existing Mongo field name; renamed in code to disambiguate from application status
+        public string NotificationStatus { get; set; } = "Pending"; // e.g., Pending, Sent, Failed
 
         public DateTime? SentAt { get; set; }
 

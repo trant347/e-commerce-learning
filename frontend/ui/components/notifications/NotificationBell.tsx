@@ -95,7 +95,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                     notifications.slice(0, 10).map((notification) => (
                         <List.Item 
                             key={notification.id}
-                            className={notification.status === 'Pending' ? 'unread' : 'read'}
+                            className={notification.notificationStatus === 'Pending' ? 'unread' : 'read'}
                             style={resolveActionUrl(notification.actionType, notification.actionPayload) ? { cursor: 'pointer' } : undefined}
                             onClick={() => {
                                 if (onMarkAsRead) onMarkAsRead(notification.id);

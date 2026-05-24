@@ -21,8 +21,8 @@ export const useNotifications = (userEmail: string | null) => {
             try {
                 const data = await notificationServices.getNotifications(userEmail);
                 setNotifications(data);
-                // Count unread (e.g., where status is "Pending" or any logic you prefer)
-                const unread = data.filter(n => n.status === 'Pending').length;
+                // Count unread (e.g., where notificationStatus is "Pending" or any logic you prefer)
+                const unread = data.filter(n => n.notificationStatus === 'Pending').length;
                 setUnreadCount(unread);
             } catch (error) {
                 console.error('Error loading notifications:', error);
@@ -46,7 +46,7 @@ export const useNotifications = (userEmail: string | null) => {
                 setNotifications(prev => [newNotification, ...prev]);
                 setLastNotification(newNotification);
                 // Increment unread count for new notifications
-                if (newNotification.status === 'Pending') {
+                if (newNotification.notificationStatus === 'Pending') {
                     setUnreadCount(prev => prev + 1);
                 }
             }
@@ -65,7 +65,7 @@ export const useNotifications = (userEmail: string | null) => {
     const markAsRead = (notificationId: string) => {
         setNotifications(prev =>
             prev.map(n =>
-                n.id === notificationId ? { ...n, status: 'Read' } : n
+                n.id === notificationId ? { ...n, notificationStatus: 'Read' } : n
             )
         );
         setUnreadCount(prev => Math.max(0, prev - 1));

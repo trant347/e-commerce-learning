@@ -37,7 +37,7 @@ namespace notification_service.Services
             var collection = database.GetCollection<NotificationEventModel>("Notifications");
             var filter = Builders<NotificationEventModel>.Filter.Eq(n => n.Id, id);
             var update = Builders<NotificationEventModel>.Update
-                .Set(n => n.Status, status)
+                .Set(n => n.NotificationStatus, status)
                 .Set(n => n.ErrorMessage, errorMessage)
                 .Set(n => n.SentAt, DateTime.UtcNow);
             await collection.UpdateOneAsync(filter, update);
@@ -48,7 +48,7 @@ namespace notification_service.Services
         {
             var database = _mongoClient.GetDatabase("NotificationDB");
             var collection = database.GetCollection<NotificationEventModel>("Notifications");
-            var filter = Builders<NotificationEventModel>.Filter.Eq(n => n.Status, "Pending");
+            var filter = Builders<NotificationEventModel>.Filter.Eq(n => n.NotificationStatus, "Pending");
             return await collection.Find(filter).ToListAsync();
         }
 

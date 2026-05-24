@@ -34,6 +34,12 @@ export default function ApplicationReview() {
     }
 
     useEffect(() => {
+        setLoading(true);
+        setError(null);
+        setFeedback(null);
+        setDeclineReason('');
+        setApplication(null);
+
         TaskMasterServices.getApplication(id)
             .then(data => {
                 setApplication(data);
@@ -58,9 +64,6 @@ export default function ApplicationReview() {
             const updated = await TaskMasterServices.acceptApplication(id);
             setApplication(updated);
             setFeedback({ type: 'success', message: 'Application accepted. TaskMaster profile created.' });
-            if (updated.createdTaskMasterId) {
-                setTimeout(() => history.push(`/product/${updated.createdTaskMasterId}`), 1500);
-            }
         } catch (err: any) {
             const msg = err?.response?.data?.error || err?.response?.data?.message || 'Failed to accept application.';
             setFeedback({ type: 'error', message: msg });

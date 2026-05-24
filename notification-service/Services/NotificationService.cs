@@ -34,7 +34,7 @@ namespace notification_service.Services
                     Type = notificationEvent.Type,
                     Message = notificationEvent.Message,
                     Timestamp = notificationEvent.Timestamp,
-                    Status = notificationEvent.Status,
+                    NotificationStatus = notificationEvent.NotificationStatus,
                     ActionType = notificationEvent.ActionType,
                     ActionPayload = notificationEvent.ActionPayload,
                 });

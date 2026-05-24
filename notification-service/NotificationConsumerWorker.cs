@@ -80,7 +80,7 @@ namespace notification_service
                                 RecipientEmail = !string.IsNullOrEmpty(notificationMessage.RecipientUsername)
                                     ? notificationMessage.RecipientUsername
                                     : notificationMessage.RecipientEmail,
-                                Status = "Pending",
+                                NotificationStatus = "Pending",
                                 Timestamp = notificationMessage.Timestamp,
                                 Message = notificationMessage.Message,
                                 Type = notificationMessage.Type,

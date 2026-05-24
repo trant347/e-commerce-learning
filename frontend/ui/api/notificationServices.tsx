@@ -6,7 +6,7 @@ export interface Notification {
     type: string;
     message: string;
     timestamp: string;
-    status: string;
+    notificationStatus: string;
     actionType?: string;
     actionPayload?: Record<string, string>;
 }

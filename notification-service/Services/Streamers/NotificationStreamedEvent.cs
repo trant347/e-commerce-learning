@@ -7,7 +7,7 @@ namespace notification_service.Services
         public string Type { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
-        public string Status { get; set; } = string.Empty;
+        public string NotificationStatus { get; set; } = string.Empty;
         /// <summary>Semantic action identifier — the frontend maps this to a route.</summary>
         public string? ActionType { get; set; }
         /// <summary>Structured data needed by the frontend to build the route.</summary>

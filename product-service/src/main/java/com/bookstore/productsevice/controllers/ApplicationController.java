@@ -157,11 +157,11 @@ public class ApplicationController {
             // Update application status
             application.setStatus(ApplicationStatus.ACCEPTED)
                        .setCreatedTaskMasterId(saved.getId());
-            applicationRepository.save(application);
+            TaskMasterApplication updatedApplication = applicationRepository.save(application);
 
             eventPublisher.publishApplicationAccepted(application.getApplicantUsername(), saved.getId());
 
-            return ResponseEntity.ok(saved);
+            return ResponseEntity.ok(updatedApplication);
 
         } catch (DuplicateKeyException e) {
             log.warn("[ApplicationController] User '{}' already has a TaskMaster profile",
