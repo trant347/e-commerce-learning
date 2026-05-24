@@ -12,7 +12,9 @@ namespace notification_service.Contracts
         /// when present, since the notification system uses username as the lookup key.
         /// </summary>
         public string? RecipientUsername { get; set; }
-        /// <summary>Frontend route to navigate to when the notification is clicked.</summary>
-        public string? ActionUrl { get; set; }
+        /// <summary>Semantic action identifier — the frontend maps this to a route.</summary>
+        public string? ActionType { get; set; }
+        /// <summary>Structured data needed by the frontend to build the route (e.g. applicationId, taskMasterId).</summary>
+        public Dictionary<string, string>? ActionPayload { get; set; }
     }
 }

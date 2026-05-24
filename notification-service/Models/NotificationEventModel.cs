@@ -5,8 +5,7 @@ namespace notification_service.Model
     public class NotificationEventModel
     {
         [BsonId]
-        [BsonRepresentation(MongoDB.Bson.BsonType.ObjectId)]
-        public string? Id { get; set; } = string.Empty;
+        public string? Id { get; set; }
 
         public string BookingId { get; set; } = string.Empty;
 
@@ -24,7 +23,9 @@ namespace notification_service.Model
 
         public string? ErrorMessage { get; set; }
 
-        /// <summary>Frontend route to navigate to when the notification is clicked.</summary>
-        public string? ActionUrl { get; set; }
+        /// <summary>Semantic action identifier — the frontend maps this to a route.</summary>
+        public string? ActionType { get; set; }
+        /// <summary>Structured data needed by the frontend to build the route.</summary>
+        public Dictionary<string, string>? ActionPayload { get; set; }
     }
 }

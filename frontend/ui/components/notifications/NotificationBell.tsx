@@ -17,6 +17,17 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
     onMarkAsRead
 }) => {
     const history = useHistory();
+
+    const resolveActionUrl = (actionType: string | undefined, payload: Record<string, string> | undefined): string | null => {
+        if (!actionType) return null;
+        const p = payload ?? {};
+        switch (actionType) {
+            case 'VIEW_MY_APPLICATION':    return '/my-application';
+            case 'VIEW_ADMIN_APPLICATION': return `/admin/applications/${p.applicationId}`;
+            case 'VIEW_TASKMASTER':        return `/product/${p.taskMasterId}`;
+            default: return null;
+        }
+    };
     const getNotificationIcon = (type: string) => {
         switch (type.toLowerCase()) {
             case 'booking_confirmed':
@@ -48,19 +59,17 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
     };
 
     const trigger = (
-        <div style={{ position: 'relative', cursor: 'pointer' }}>
-            <Icon name="bell" size="large" />
-            {unreadCount > 0 && (
-                <Label 
-                    circular 
-                    color="red" 
-                    floating
-                    size="mini"
-                >
-                   Notifications {unreadCount}
-                </Label>
-            )}
-        </div>
+        <a style={{ cursor: 'pointer' }}>
+            <span style={{ position: 'relative', display: 'inline-block' }}>
+                <Icon name="bell" />
+                {unreadCount > 0 && (
+                    <Label circular color="red" floating size="mini">
+                        {unreadCount}
+                    </Label>
+                )}
+            </span>
+            {' '}Notifications
+        </a>
     );
 
     const content = (
@@ -87,10 +96,11 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                         <List.Item 
                             key={notification.id}
                             className={notification.status === 'Pending' ? 'unread' : 'read'}
-                            style={notification.actionUrl ? { cursor: 'pointer' } : undefined}
+                            style={resolveActionUrl(notification.actionType, notification.actionPayload) ? { cursor: 'pointer' } : undefined}
                             onClick={() => {
                                 if (onMarkAsRead) onMarkAsRead(notification.id);
-                                if (notification.actionUrl) history.push(notification.actionUrl);
+                                const url = resolveActionUrl(notification.actionType, notification.actionPayload);
+                                if (url) history.push(url);
                             }}
                         >
                             <List.Icon 

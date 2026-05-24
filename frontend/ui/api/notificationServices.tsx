@@ -7,7 +7,8 @@ export interface Notification {
     message: string;
     timestamp: string;
     status: string;
-    actionUrl?: string;
+    actionType?: string;
+    actionPayload?: Record<string, string>;
 }
 
 const NOTIFICATION_SERVICE_URL = '/api/notification';
@@ -40,5 +41,13 @@ export const notificationServices = {
         };
 
         return eventSource;
+    },
+
+    markAsRead: async (notificationId: string): Promise<void> => {
+        try {
+            await axios.patch(`${NOTIFICATION_SERVICE_URL}/${notificationId}/read`);
+        } catch (error) {
+            console.error('Error marking notification as read:', error);
+        }
     }
 };

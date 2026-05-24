@@ -51,5 +51,19 @@ namespace notification_service.Services
         {
             return Ok(new { status = "healthy" });
         }
+
+        [HttpPatch("{notificationId}/read")]
+        public async Task<IActionResult> MarkAsRead(string notificationId)
+        {
+            try
+            {
+                await _mongoDbService.UpdateNotificationStatusAsync(notificationId, "Read", null);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
     }
 }

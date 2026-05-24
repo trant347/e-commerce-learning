@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Pipelines;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
@@ -40,8 +41,9 @@ namespace notification_service.Services
                 {
                     while (channel.Reader.TryRead(out var message))
                     {
-                        var messageBytes = JsonSerializer.SerializeToUtf8Bytes(message);
-                        await writer.WriteAsync(messageBytes, cancellationToken);
+                        var json = JsonSerializer.Serialize(message, NotificationJsonOptions.Serialize);
+                        var sseData = Encoding.UTF8.GetBytes($"data: {json}\n\n");
+                        await writer.WriteAsync(sseData, cancellationToken);
                         await writer.FlushAsync(cancellationToken);
                     }
                 }

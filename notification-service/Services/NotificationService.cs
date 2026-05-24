@@ -34,7 +34,9 @@ namespace notification_service.Services
                     Type = notificationEvent.Type,
                     Message = notificationEvent.Message,
                     Timestamp = notificationEvent.Timestamp,
-                    Status = notificationEvent.Status
+                    Status = notificationEvent.Status,
+                    ActionType = notificationEvent.ActionType,
+                    ActionPayload = notificationEvent.ActionPayload,
                 });
 
             _logger.LogInformation("Notification sent to {RecipientEmail}", notificationEvent.RecipientEmail);

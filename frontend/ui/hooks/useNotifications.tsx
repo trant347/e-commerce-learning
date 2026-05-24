@@ -69,6 +69,7 @@ export const useNotifications = (userEmail: string | null) => {
             )
         );
         setUnreadCount(prev => Math.max(0, prev - 1));
+        notificationServices.markAsRead(notificationId);
     };
 
     const clearAll = () => {

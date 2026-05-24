@@ -58,7 +58,7 @@ namespace notification_service
 
                         using (var scope = _serviceProvider.CreateScope())
                         {
-                            var notificationMessage = JsonSerializer.Deserialize<NotificationMessage>(consumeResult.Message.Value);
+                            var notificationMessage = JsonSerializer.Deserialize<NotificationMessage>(consumeResult.Message.Value, NotificationJsonOptions.Deserialize);
                             if (notificationMessage == null)
                             {
                                 _logger.LogWarning("Received null or invalid notification message");
@@ -84,7 +84,8 @@ namespace notification_service
                                 Timestamp = notificationMessage.Timestamp,
                                 Message = notificationMessage.Message,
                                 Type = notificationMessage.Type,
-                                ActionUrl = notificationMessage.ActionUrl,
+                                ActionType = notificationMessage.ActionType,
+                                ActionPayload = notificationMessage.ActionPayload,
                             };
 
                             await mongoDbService.CreateNotificationAsync(notification);

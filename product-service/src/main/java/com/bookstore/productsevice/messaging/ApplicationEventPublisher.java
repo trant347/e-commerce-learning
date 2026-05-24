@@ -36,10 +36,11 @@ public class ApplicationEventPublisher {
      */
     public void publishApplicationSubmitted(String applicationId, String applicantName) {
         publish(Map.of(
-                "type",                "TASKMASTER_APPLICATION_SUBMITTED",
-                "recipientUsername",   "admin",
-                "message",             applicantName + " has applied to become a TaskMaster.",
-                "actionUrl",           "/admin/applications/" + applicationId
+                "type",               "TASKMASTER_APPLICATION_SUBMITTED",
+                "recipientUsername",  "admin",
+                "message",            applicantName + " has applied to become a TaskMaster.",
+                "actionType",         "VIEW_ADMIN_APPLICATION",
+                "actionPayload",      Map.of("applicationId", applicationId)
         ));
     }
 
@@ -51,10 +52,11 @@ public class ApplicationEventPublisher {
      */
     public void publishApplicationAccepted(String applicantUsername, String taskMasterId) {
         publish(Map.of(
-                "type",                "TASKMASTER_APPLICATION_ACCEPTED",
-                "recipientUsername",   applicantUsername,
-                "message",             "Congratulations! Your TaskMaster application has been accepted.",
-                "actionUrl",           "/product/" + taskMasterId
+                "type",               "TASKMASTER_APPLICATION_ACCEPTED",
+                "recipientUsername",  applicantUsername,
+                "message",            "Congratulations! Your TaskMaster application has been accepted.",
+                "actionType",         "VIEW_MY_APPLICATION",
+                "actionPayload",      Map.of()
         ));
     }
 
@@ -69,14 +71,15 @@ public class ApplicationEventPublisher {
                 ? "Your TaskMaster application was declined: " + reason
                 : "Your TaskMaster application was declined.";
         publish(Map.of(
-                "type",              "TASKMASTER_APPLICATION_DECLINED",
-                "recipientUsername", applicantUsername,
-                "message",           message,
-                "actionUrl",         "/"
+                "type",               "TASKMASTER_APPLICATION_DECLINED",
+                "recipientUsername",  applicantUsername,
+                "message",            message,
+                "actionType",         "VIEW_MY_APPLICATION",
+                "actionPayload",      Map.of()
         ));
     }
 
-    private void publish(Map<String, String> payload) {
+    private void publish(Map<String, Object> payload) {
         try {
             String json = objectMapper.writeValueAsString(payload);
             log.info("[ApplicationEventPublisher] Publishing to topic={} payload={}", TOPIC, json);
