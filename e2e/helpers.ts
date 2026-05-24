@@ -71,6 +71,22 @@ export async function loginAndGetToken(username: string, password: string): Prom
   return typeof res.data === 'string' ? res.data : String(res.data);
 }
 
+export async function deleteUserAsAdmin(adminToken: string, username: string): Promise<void> {
+  try {
+    const res = await axios.delete(`${AUTH_SERVICE_URL}/${encodeURIComponent(username)}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      validateStatus: () => true,
+    });
+    if (res.status === 204 || res.status === 404) {
+      console.log(`[teardown] deleted user ${username} (${res.status})`);
+      return;
+    }
+    console.warn(`[teardown] unexpected status deleting ${username}: ${res.status} ${JSON.stringify(res.data)}`);
+  } catch (e) {
+    console.warn(`[teardown] failed to delete user ${username}: ${(e as Error).message}`);
+  }
+}
+
 export function writeStorageState(filePath: string, token: string, username: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

@@ -4,6 +4,7 @@ import com.bookstore.authentication.configs.JwtConfig;
 import com.bookstore.authentication.encoders.PasswordEncoder;
 import com.bookstore.authentication.exceptions.AuthenticationException;
 import com.bookstore.authentication.exceptions.InvalidUserIdException;
+import com.bookstore.authentication.messaging.UserEventPublisher;
 import com.bookstore.authentication.model.User;
 import com.bookstore.authentication.repository.UserRepository;
 import com.bookstore.authentication.utils.JwtTokenUtil;
@@ -23,6 +24,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletResponse;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -63,6 +66,9 @@ public class UserController {
 
     @Autowired
     private JwtConfig jwtConfig;
+
+    @Autowired
+    private UserEventPublisher userEventPublisher;
 
 
     @PostMapping(value="/register")
@@ -132,6 +138,57 @@ public class UserController {
     @GetMapping(value="/users")
     public ResponseEntity<List<User>> getUsers() {
         return new ResponseEntity<>(userRepository.findAll(),HttpStatus.OK);
+    }
+
+    @DeleteMapping(value = "/{username}")
+    public ResponseEntity<?> deleteUser(@PathVariable String username,
+                                       @RequestHeader(value = "Authorization", required = false) String bearer) {
+
+        if (bearer == null || bearer.indexOf("Bearer") == -1) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+
+        Claims claims;
+        try {
+            claims = Jwts.parser()
+                    .setSigningKey(jwtConfig.getSecret().getBytes())
+                    .parseClaimsJws(bearer.replace("Bearer", "").trim())
+                    .getBody();
+        } catch (Exception e) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+
+        String callerUsername = claims.getSubject();
+        Object authoritiesClaim = claims.get("authorities");
+        List<?> authorities = authoritiesClaim instanceof List ? (List<?>) authoritiesClaim : Collections.emptyList();
+        boolean isAdmin = authorities.stream().anyMatch(a -> "ROLE_ADMIN".equals(String.valueOf(a)));
+
+        if (!isAdmin) {
+            return new ResponseEntity<>(Collections.singletonMap("error", "Admin access required."), HttpStatus.FORBIDDEN);
+        }
+        if (Objects.equals(callerUsername, username)) {
+            return new ResponseEntity<>(Collections.singletonMap("error", "Admins cannot delete themselves."), HttpStatus.FORBIDDEN);
+        }
+
+        User target = userRepository.findFirstByUsername(username);
+        if (target == null) {
+            return new ResponseEntity<>(Collections.singletonMap("error", "User not found."), HttpStatus.NOT_FOUND);
+        }
+
+        // Publish-before-delete: if the broker is unreachable we abort so we never
+        // leave a deleted user with no cascade event on the wire.
+        try {
+            userEventPublisher.publishUserDeleted(username, callerUsername);
+        } catch (Exception e) {
+            logger.error("Aborting delete of '{}': failed to publish USER_DELETED event", username, e);
+            return new ResponseEntity<>(
+                    Collections.singletonMap("error", "Event bus unavailable; user was not deleted. Please retry."),
+                    HttpStatus.SERVICE_UNAVAILABLE);
+        }
+
+        userRepository.delete(target);
+        logger.info("User '{}' deleted by '{}'", username, callerUsername);
+        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
     }
 
 

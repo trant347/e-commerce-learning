@@ -12,6 +12,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
 
   globalSetup: require.resolve('./global-setup'),
+  globalTeardown: require.resolve('./global-teardown'),
 
   use: {
     baseURL: FRONTEND_URL,

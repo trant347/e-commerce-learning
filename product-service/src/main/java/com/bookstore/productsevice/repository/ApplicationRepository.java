@@ -21,4 +21,7 @@ public interface ApplicationRepository extends MongoRepository<TaskMasterApplica
 
     /** Count PENDING applications the admin has not yet opened. */
     long countByStatusAndIsViewedByAdmin(TaskMasterApplication.ApplicationStatus status, boolean isViewedByAdmin);
+
+    /** Bulk delete all applications submitted by a given user (cascade on user deletion). */
+    long deleteAllByApplicantUsername(String applicantUsername);
 }

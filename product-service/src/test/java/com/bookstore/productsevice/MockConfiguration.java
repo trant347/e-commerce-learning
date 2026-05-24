@@ -56,6 +56,11 @@ public class MockConfiguration {
             }
 
             @Override
+            public long deleteByOwnerUsername(String ownerUsername) {
+                return 0;
+            }
+
+            @Override
             public Optional<Document> getBooksUsingNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
                 return Optional.empty();
             }

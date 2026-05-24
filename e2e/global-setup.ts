@@ -15,7 +15,7 @@ export default async function globalSetup(): Promise<void> {
   // Unique per-run user so repeated runs don't collide with prior PENDING/ACCEPTED state.
   const suffix = Date.now().toString(36);
   const testUser: TestUser = {
-    username: `e2euser_${suffix}`,
+    username: `e2euser`,
     password: 'Test1234!',
     email: `e2euser_${suffix}@example.com`,
   };

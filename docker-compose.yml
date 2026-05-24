@@ -54,12 +54,14 @@ services:
     image: auth-service
     environment:
     - spring.cloud.consul.enabled=true
+    - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     ports:
     - "8081:8081" #need to remove exposed port in production
     - "8001:8000" #debug
     depends_on:
     - mongodb
     - consul
+    - kafka
 
   mongodb:
     image: mongodb/mongodb-community-server:5.0-ubi8  
@@ -103,6 +105,7 @@ services:
         # Create the 'bookings' topic
         kafka-topics --create --if-not-exists --topic bookings --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
         kafka-topics --create --if-not-exists --topic notification-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
+        kafka-topics --create --if-not-exists --topic user-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
         echo "Topic created successfully."
 
   redis:

@@ -11,4 +11,5 @@ public interface TaskMasterRepository extends MongoRepository<TaskMaster, String
     List<TaskMaster> findAllByJobCategoriesContaining(String category);
     List<TaskMaster> findTaskMasterByHourlyRateUsdBetween(double low, double high);
     List<TaskMaster> findTaskMasterByRatingGreaterThanEqual(double rating);
+    long deleteByOwnerUsername(String ownerUsername);
 }
