@@ -36,6 +36,10 @@ jobs:
     defaults:
       run:
         working-directory: product-service
+    env:
+      # Testcontainers 1.8.0 references quay.io/testcontainers/ryuk:0.2.2 which is no longer
+      # available. Ryuk only matters on long-lived dev machines; CI runners are ephemeral.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
