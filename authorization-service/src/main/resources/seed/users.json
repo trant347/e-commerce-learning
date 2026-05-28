@@ -1,0 +1,24 @@
+{
+  "_comment": "Seed users that own the task masters seeded by product-service. All share the password 'password' for local development. Loaded once on startup; existing usernames are skipped (never overwritten).",
+  "defaultPassword": "password",
+  "users": [
+    { "username": "john.smith",       "firstName": "John",        "lastName": "Smith",    "email": "john.smith@example.com" },
+    { "username": "sarah.johnson",    "firstName": "Sarah",       "lastName": "Johnson",  "email": "sarah.johnson@example.com" },
+    { "username": "michael.chen",     "firstName": "Michael",     "lastName": "Chen",     "email": "michael.chen@example.com" },
+    { "username": "emily.rodriguez",  "firstName": "Emily",       "lastName": "Rodriguez","email": "emily.rodriguez@example.com" },
+    { "username": "david.williams",   "firstName": "David",       "lastName": "Williams", "email": "david.williams@example.com" },
+    { "username": "lisa.thompson",    "firstName": "Lisa",        "lastName": "Thompson", "email": "lisa.thompson@example.com" },
+    { "username": "james.brown",      "firstName": "James",       "lastName": "Brown",    "email": "james.brown@example.com" },
+    { "username": "amanda.davis",     "firstName": "Amanda",      "lastName": "Davis",    "email": "amanda.davis@example.com" },
+    { "username": "robert.martinez",  "firstName": "Robert",      "lastName": "Martinez", "email": "robert.martinez@example.com" },
+    { "username": "jennifer.wilson",  "firstName": "Jennifer",    "lastName": "Wilson",   "email": "jennifer.wilson@example.com" },
+    { "username": "christopher.lee",  "firstName": "Christopher", "lastName": "Lee",      "email": "christopher.lee@example.com" },
+    { "username": "nicole.anderson",  "firstName": "Nicole",      "lastName": "Anderson", "email": "nicole.anderson@example.com" },
+    { "username": "daniel.taylor",    "firstName": "Daniel",      "lastName": "Taylor",   "email": "daniel.taylor@example.com" },
+    { "username": "rachel.green",     "firstName": "Rachel",      "lastName": "Green",    "email": "rachel.green@example.com" },
+    { "username": "kevin.white",      "firstName": "Kevin",       "lastName": "White",    "email": "kevin.white@example.com" },
+    { "username": "michelle.harris",  "firstName": "Michelle",    "lastName": "Harris",   "email": "michelle.harris@example.com" },
+    { "username": "brian.jackson",    "firstName": "Brian",       "lastName": "Jackson",  "email": "brian.jackson@example.com" },
+    { "username": "stephanie.moore",  "firstName": "Stephanie",   "lastName": "Moore",    "email": "stephanie.moore@example.com" }
+  ]
+}

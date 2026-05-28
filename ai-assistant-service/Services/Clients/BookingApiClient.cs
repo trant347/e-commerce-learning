@@ -15,14 +15,17 @@ public sealed class BookingApiClient : IBookingApiClient
 
     public async Task<string> FetchBookingContextAsync(string? bookingId, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(bookingId))
+        {
+            // Bookings are now per-user (PENDING/ACCEPTED requests between a requester and a TaskMaster).
+            // Without a specific id and without authenticated user context, we cannot list anything safely.
+            return "Booking context is per-user. Please provide a specific bookingId.";
+        }
+
         try
         {
-            // Fetch a specific booking by ID, or all bookings when no ID is given
-            string path = string.IsNullOrWhiteSpace(bookingId)
-                ? "/api/booking"
-                : $"/api/booking/{Uri.EscapeDataString(bookingId)}";
-
-            _logger.LogInformation("Fetching bookings: {Path}", path);
+            string path = $"/api/booking/{Uri.EscapeDataString(bookingId)}";
+            _logger.LogInformation("Fetching booking: {Path}", path);
 
             var response = await _httpClient.GetAsync(path, cancellationToken);
             response.EnsureSuccessStatusCode();

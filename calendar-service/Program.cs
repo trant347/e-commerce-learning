@@ -1,5 +1,7 @@
+using calendar_service.Auth;
 using calendar_service.MessageQueue;
 using calendar_service.Models.ConsulConfig;
+using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
 using calendar_service.Services.DAO;
 using calendar_service.Services.Implementation;
@@ -9,20 +11,20 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Remove this line to fix ASP0000 diagnostic:
-// var serviceProvider = builder.Services.BuildServiceProvider();
 builder.Services.AddOptions<KafkaProducerConfig>().Bind(builder.Configuration.GetSection("KafkaProducerConfig"));
-// Instead, inject IOptions<KafkaProducerConfig> using the service provider in the AddSingleton registration:
-builder.Services.AddSingleton(provider =>
-{
-    var kafkaConfig = provider.GetRequiredService<IOptions<KafkaProducerConfig>>().Value;
-    Console.WriteLine($"Kafka config: {kafkaConfig.BootstrapServers}");
-    return CreateKafkaProducer.CreateProducer(kafkaConfig);
-});
 
 builder.Services.AddSingleton<IMongoDBService, MongoDBService>();
 builder.Services.AddSingleton<IBookingService, BookingService>();
+builder.Services.AddSingleton<INotificationProducer, NotificationProducer>();
+
+builder.Services.AddOptions<JwtSettings>().Bind(builder.Configuration.GetSection("JwtSettings"));
+
+builder.Services.AddHttpClient<ITaskMasterApiClient, TaskMasterApiClient>((sp, client) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = cfg["ExternalServices:ProductServiceBaseUrl"] ?? "http://product-service:8080";
+    client.BaseAddress = new Uri(baseUrl);
+});
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -62,6 +64,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseMiddleware<JwtAuthMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

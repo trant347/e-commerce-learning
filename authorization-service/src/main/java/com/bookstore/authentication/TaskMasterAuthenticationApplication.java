@@ -7,6 +7,8 @@ import com.bookstore.authentication.model.Gender;
 import com.bookstore.authentication.model.User;
 import com.bookstore.authentication.repository.LookupRepository;
 import com.bookstore.authentication.repository.UserRepository;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +17,9 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.ClassPathResource;
 
+import java.io.InputStream;
 import java.util.List;
 
 @SpringBootApplication
@@ -76,5 +80,63 @@ public class TaskMasterAuthenticationApplication {
 
             }
         };
+    }
+
+    @Bean
+    public CommandLineRunner seedTaskMasterOwners() {
+        return args -> {
+            ObjectMapper objectMapper = new ObjectMapper();
+            objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+            ClassPathResource seedResource = new ClassPathResource("seed/users.json");
+            if (!seedResource.exists()) {
+                logger.info("seed/users.json not found; skipping task master owner seed.");
+                return;
+            }
+
+            SeedUsersPayload payload;
+            try (InputStream in = seedResource.getInputStream()) {
+                payload = objectMapper.readValue(in, SeedUsersPayload.class);
+            }
+            if (payload == null || payload.users == null || payload.users.isEmpty()) {
+                logger.warn("seed/users.json contained no users.");
+                return;
+            }
+
+            String rawPassword = payload.defaultPassword == null || payload.defaultPassword.isBlank()
+                    ? "password" : payload.defaultPassword;
+            String encoded = passwordEncoder.encode(rawPassword);
+
+            int created = 0, skipped = 0;
+            for (SeedUserEntry entry : payload.users) {
+                if (entry == null || entry.username == null || entry.username.isBlank()) continue;
+                List<User> existing = userRepository.findAllByUsername(entry.username);
+                if (!existing.isEmpty()) { skipped++; continue; }
+
+                User u = new User()
+                        .setUsername(entry.username)
+                        .setFirstName(entry.firstName)
+                        .setLastName(entry.lastName)
+                        .setEmail(entry.email)
+                        .setRole("USER")
+                        .setEncrytedPassword(encoded);
+                userRepository.save(u);
+                created++;
+            }
+            logger.info("Seeded task master owners: {} created, {} already existed (password='{}').",
+                    created, skipped, rawPassword);
+        };
+    }
+
+    private static class SeedUsersPayload {
+        public String defaultPassword;
+        public List<SeedUserEntry> users;
+    }
+
+    private static class SeedUserEntry {
+        public String username;
+        public String firstName;
+        public String lastName;
+        public String email;
     }
 }

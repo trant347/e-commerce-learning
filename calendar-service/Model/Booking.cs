@@ -1,29 +1,46 @@
-﻿using MongoDB.Bson.Serialization.Attributes;
-using MongoDB.Bson;
-using MongoDB.Driver;
-using System.Runtime.Serialization;
+﻿using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
 
 namespace calendar_service.Model
 {
-    [DataContract]
+    /// <summary>
+    /// A booking raised by a user against a TaskMaster for one or more consecutive
+    /// hour-aligned slots starting at SlotStart and lasting DurationHours hours.
+    /// Multiple PENDING bookings may overlap; when the TaskMaster accepts one, all
+    /// other PENDING bookings whose range overlaps are auto-declined.
+    /// </summary>
     public class Booking
     {
+        public const string StatusPending = "PENDING";
+        public const string StatusAccepted = "ACCEPTED";
+        public const string StatusDeclined = "DECLINED";
+        public const string StatusCancelled = "CANCELLED";
+
+        public const int MaxDurationHours = 24;
+
         [BsonId]
         [BsonRepresentation(BsonType.ObjectId)]
-        [DataMember]
         public string? Id { get; set; }
 
-        [DataMember(IsRequired = true, Name = "description")]
-        public string Description { get; set; } = string.Empty;
+        public string TaskMasterId { get; set; } = string.Empty;
+        public string TaskMasterUsername { get; set; } = string.Empty;
+        public string RequesterUsername { get; set; } = string.Empty;
 
-        [DataMember(IsRequired = true, Name = "startTime")]
-        public DateTime StartTime { get; set; }
+        /// <summary>UTC start of the first hour-aligned slot.</summary>
+        public DateTime SlotStart { get; set; }
 
-        [DataMember(IsRequired = true, Name = "endTime")]
-        public DateTime EndTime { get; set; }
+        /// <summary>Number of consecutive 1-hour slots. >= 1.</summary>
+        public int DurationHours { get; set; } = 1;
 
-        [DataMember(IsRequired = false, Name = "status")]
-        public string Status { get; set; } = "Pending"; // e.g., Pending, Confirmed, Cancelled
+        [BsonIgnore]
+        public DateTime SlotEnd => SlotStart.AddHours(DurationHours);
 
+        public string Status { get; set; } = StatusPending;
+
+        public string? RequestMessage { get; set; }
+        public string? ResponseMessage { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? RespondedAt { get; set; }
     }
 }

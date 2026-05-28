@@ -5,15 +5,17 @@ WORKDIR /App
 COPY . ./
 # Restore as distinct layers
 RUN dotnet restore
-# Build and publish a release
-RUN dotnet publish -c Release -o out
+# Build and publish a Debug build (so PDBs are emitted unoptimized for VS attach-to-process debugging)
+RUN dotnet publish -c Debug -o out
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /App
+ENV DOTNET_ENVIRONMENT=Development
+ENV ASPNETCORE_ENVIRONMENT=Development
 COPY --from=build ./App/out .
 
-# Expose the port your application listens on (e.g., 80 or 5000).
-EXPOSE 80
+# ASP.NET Core 8 listens on 8080 by default in the aspnet:8.0 image.
+EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "calendar-service.dll"]

@@ -8,7 +8,8 @@
       "rating": 4.9,
       "jobCategories": ["plumbing", "home-repair"],
       "description": "Licensed plumber with 10+ years of experience. Specializing in residential repairs, pipe installation, and water heater services. Quick response time and fair pricing.",
-      "hourlyRateUsd": 75.00
+      "hourlyRateUsd": 75.00,
+      "ownerUsername": "john.smith"
     },
     {
       "name": "Sarah Johnson",
@@ -18,7 +19,8 @@
       "rating": 4.8,
       "jobCategories": ["cleaning", "organizing"],
       "description": "Professional house cleaner and home organizer. I transform cluttered spaces into clean, organized environments. Eco-friendly products available upon request.",
-      "hourlyRateUsd": 45.00
+      "hourlyRateUsd": 45.00,
+      "ownerUsername": "sarah.johnson"
     },
     {
       "name": "Michael Chen",
@@ -28,7 +30,8 @@
       "rating": 4.7,
       "jobCategories": ["electrical", "smart-home"],
       "description": "Certified electrician specializing in smart home installations. From basic wiring to complete home automation systems. Safety is my top priority.",
-      "hourlyRateUsd": 85.00
+      "hourlyRateUsd": 85.00,
+      "ownerUsername": "michael.chen"
     },
     {
       "name": "Emily Rodriguez",
@@ -38,7 +41,8 @@
       "rating": 4.9,
       "jobCategories": ["pet-care", "dog-walking"],
       "description": "Passionate animal lover offering pet sitting, dog walking, and basic grooming services. Certified in pet first aid. Your fur babies are in good hands!",
-      "hourlyRateUsd": 30.00
+      "hourlyRateUsd": 30.00,
+      "ownerUsername": "emily.rodriguez"
     },
     {
       "name": "David Williams",
@@ -48,7 +52,8 @@
       "rating": 4.6,
       "jobCategories": ["carpentry", "furniture-assembly"],
       "description": "Master carpenter with 20 years of experience. Custom furniture building, repairs, and IKEA assembly. I bring my own tools and always clean up after.",
-      "hourlyRateUsd": 65.00
+      "hourlyRateUsd": 65.00,
+      "ownerUsername": "david.williams"
     },
     {
       "name": "Lisa Thompson",
@@ -58,7 +63,8 @@
       "rating": 4.8,
       "jobCategories": ["tutoring", "education"],
       "description": "Former high school teacher offering tutoring in math, science, and test prep (SAT/ACT). Patient approach tailored to each student's learning style.",
-      "hourlyRateUsd": 55.00
+      "hourlyRateUsd": 55.00,
+      "ownerUsername": "lisa.thompson"
     },
     {
       "name": "James Brown",
@@ -68,7 +74,8 @@
       "rating": 4.7,
       "jobCategories": ["landscaping", "gardening"],
       "description": "Professional landscaper and garden designer. Lawn maintenance, tree trimming, and complete yard makeovers. Let me help you create your outdoor oasis.",
-      "hourlyRateUsd": 50.00
+      "hourlyRateUsd": 50.00,
+      "ownerUsername": "james.brown"
     },
     {
       "name": "Amanda Davis",
@@ -78,7 +85,8 @@
       "rating": 4.9,
       "jobCategories": ["photography", "videography"],
       "description": "Professional photographer specializing in events, portraits, and real estate. High-quality editing included. Same-day delivery available for urgent needs.",
-      "hourlyRateUsd": 95.00
+      "hourlyRateUsd": 95.00,
+      "ownerUsername": "amanda.davis"
     },
     {
       "name": "Robert Martinez",
@@ -88,7 +96,8 @@
       "rating": 4.5,
       "jobCategories": ["moving", "delivery"],
       "description": "Strong and reliable mover with a large truck. Local and long-distance moves, furniture delivery, and junk removal. Careful handling of your belongings.",
-      "hourlyRateUsd": 40.00
+      "hourlyRateUsd": 40.00,
+      "ownerUsername": "robert.martinez"
     },
     {
       "name": "Jennifer Wilson",
@@ -98,7 +107,8 @@
       "rating": 4.8,
       "jobCategories": ["personal-assistant", "errand-running"],
       "description": "Efficient personal assistant for busy professionals. Grocery shopping, appointment scheduling, mail handling, and general errands. Reliable and discreet.",
-      "hourlyRateUsd": 35.00
+      "hourlyRateUsd": 35.00,
+      "ownerUsername": "jennifer.wilson"
     },
     {
       "name": "Christopher Lee",
@@ -108,7 +118,8 @@
       "rating": 4.6,
       "jobCategories": ["tech-support", "computer-repair"],
       "description": "IT professional offering computer repair, virus removal, and tech setup. I can help with anything from printer issues to network configuration.",
-      "hourlyRateUsd": 60.00
+      "hourlyRateUsd": 60.00,
+      "ownerUsername": "christopher.lee"
     },
     {
       "name": "Nicole Anderson",
@@ -118,7 +129,8 @@
       "rating": 4.7,
       "jobCategories": ["catering", "cooking"],
       "description": "Personal chef and caterer for intimate gatherings. Specializing in Southern cuisine and healthy meal prep. I handle shopping, cooking, and cleanup.",
-      "hourlyRateUsd": 70.00
+      "hourlyRateUsd": 70.00,
+      "ownerUsername": "nicole.anderson"
     },
     {
       "name": "Daniel Taylor",
@@ -128,7 +140,8 @@
       "rating": 4.9,
       "jobCategories": ["music-lessons", "entertainment"],
       "description": "Professional musician offering guitar, piano, and music theory lessons. All ages and skill levels welcome. Also available for live performances at events.",
-      "hourlyRateUsd": 50.00
+      "hourlyRateUsd": 50.00,
+      "ownerUsername": "daniel.taylor"
     },
     {
       "name": "Rachel Green",
@@ -138,7 +151,8 @@
       "rating": 4.8,
       "jobCategories": ["fitness", "personal-training"],
       "description": "Certified personal trainer specializing in weight loss and strength training. I come to your home gym or local park. Let's crush your fitness goals together!",
-      "hourlyRateUsd": 65.00
+      "hourlyRateUsd": 65.00,
+      "ownerUsername": "rachel.green"
     },
     {
       "name": "Kevin White",
@@ -148,7 +162,8 @@
       "rating": 4.6,
       "jobCategories": ["painting", "home-improvement"],
       "description": "Professional painter with an eye for detail. Interior and exterior painting, wallpaper installation, and minor drywall repairs. Free color consultation included.",
-      "hourlyRateUsd": 55.00
+      "hourlyRateUsd": 55.00,
+      "ownerUsername": "kevin.white"
     },
     {
       "name": "Michelle Harris",
@@ -158,7 +173,8 @@
       "rating": 4.7,
       "jobCategories": ["childcare", "babysitting"],
       "description": "Experienced nanny and childcare provider. CPR certified with background check available. Homework help, meal prep, and engaging activities for all ages.",
-      "hourlyRateUsd": 25.00
+      "hourlyRateUsd": 25.00,
+      "ownerUsername": "michelle.harris"
     },
     {
       "name": "Brian Jackson",
@@ -168,7 +184,8 @@
       "rating": 4.8,
       "jobCategories": ["automotive", "car-detailing"],
       "description": "Mobile auto detailing specialist. Interior deep cleaning, exterior wash and wax, and paint correction. I come to your location with all supplies needed.",
-      "hourlyRateUsd": 45.00
+      "hourlyRateUsd": 45.00,
+      "ownerUsername": "brian.jackson"
     },
     {
       "name": "Stephanie Moore",
@@ -178,7 +195,8 @@
       "rating": 4.5,
       "jobCategories": ["sewing", "alterations"],
       "description": "Professional seamstress offering alterations, custom clothing, and repairs. From simple hemming to wedding dress modifications. Quick turnaround available.",
-      "hourlyRateUsd": 40.00
+      "hourlyRateUsd": 40.00,
+      "ownerUsername": "stephanie.moore"
     }
   ]
 }

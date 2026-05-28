@@ -73,6 +73,18 @@ public sealed class AiAssistantService : IAiAssistantService
             var assistantMsg = await _ollamaClient.ChatAsync(model, messages, toolDefinitions, cancellationToken);
             messages.Add(assistantMsg);
 
+            // Some small models (e.g. llama3.2:3b) don't fill `tool_calls`; they emit
+            // {"name": "...", "parameters": {...}} as plain text in `content` instead.
+            // Recover by parsing the content and treating it as a tool call.
+            if ((assistantMsg.ToolCalls is null || assistantMsg.ToolCalls.Count == 0)
+                && TryParseContentToolCall(assistantMsg.Content, out var inlineCall))
+            {
+                _logger.LogInformation("Round {Round}: parsed inline tool call from content: {ToolName}",
+                    round + 1, inlineCall!.Function.Name);
+                assistantMsg.ToolCalls = new List<OllamaToolCall> { inlineCall };
+                assistantMsg.Content = null; // suppress the raw JSON from leaking into the final answer
+            }
+
             // No tool calls → model has produced its final answer
             if (assistantMsg.ToolCalls is not { Count: > 0 })
             {
@@ -127,6 +139,67 @@ public sealed class AiAssistantService : IAiAssistantService
             Sources  = _toolRegistry.All.Select(t => t.Name).ToList(),
             Mentions = mentions
         };
+    }
+
+    /// <summary>
+    /// Detects tool calls smuggled into the assistant's `content` field. Small models
+    /// often emit JSON of the form {"name": "...", "parameters": {...}} (or `"arguments"`)
+    /// instead of using Ollama's native `tool_calls`. Returns true if such a shape is found.
+    /// </summary>
+    private bool TryParseContentToolCall(string? content, out OllamaToolCall? call)
+    {
+        call = null;
+        if (string.IsNullOrWhiteSpace(content)) return false;
+
+        // Strip Markdown code fences if present (```json ... ```)
+        var trimmed = content.Trim();
+        if (trimmed.StartsWith("```"))
+        {
+            var firstNl = trimmed.IndexOf('\n');
+            if (firstNl > 0) trimmed = trimmed[(firstNl + 1)..];
+            var fenceEnd = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+            if (fenceEnd >= 0) trimmed = trimmed[..fenceEnd];
+            trimmed = trimmed.Trim();
+        }
+
+        // Find the first JSON object substring (the model may prefix prose).
+        var start = trimmed.IndexOf('{');
+        var end = trimmed.LastIndexOf('}');
+        if (start < 0 || end <= start) return false;
+        var jsonSlice = trimmed[start..(end + 1)];
+
+        JsonElement root;
+        try
+        {
+            root = JsonDocument.Parse(jsonSlice).RootElement;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object) return false;
+        if (!root.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String) return false;
+
+        var toolName = nameEl.GetString();
+        if (string.IsNullOrWhiteSpace(toolName) || _toolRegistry.Get(toolName) is null) return false;
+
+        // Arguments may live under "parameters" or "arguments"
+        Dictionary<string, JsonElement> args = new();
+        if (root.TryGetProperty("parameters", out var p) && p.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in p.EnumerateObject()) args[prop.Name] = prop.Value.Clone();
+        }
+        else if (root.TryGetProperty("arguments", out var a) && a.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in a.EnumerateObject()) args[prop.Name] = prop.Value.Clone();
+        }
+
+        call = new OllamaToolCall
+        {
+            Function = new OllamaToolCallFunction { Name = toolName!, Arguments = args }
+        };
+        return true;
     }
 
     /// <summary>

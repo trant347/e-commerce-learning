@@ -8,6 +8,8 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import javax.validation.constraints.NotBlank;
+
 @Document(collection = "taskmaster")
 @Data
 @Getter
@@ -29,12 +31,13 @@ public class TaskMaster {
 
     /**
      * The username of the registered user who owns this task master profile.
-     * Set when an application is accepted. Indexed for efficient lookup during
-     * profile queries and cascading cleanup on account deletion (via USER_DELETED Kafka event).
-     * Unique + sparse: one user can own at most one profile; null values are excluded
-     * from the index so legacy task masters without an owner do not conflict.
+     * Required: every task master must have an owner (a user, however, is not
+     * required to be a task master). Set when an application is accepted.
+     * Unique index enforces one profile per user; the index is non-sparse so
+     * a missing/null owner would also collide and be rejected by Mongo.
      */
-    @Indexed(unique = true, sparse = true)
+    @Indexed(unique = true)
+    @NotBlank(message = "ownerUsername is required")
     private String ownerUsername;
 
     public TaskMaster() {}

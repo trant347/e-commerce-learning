@@ -33,7 +33,7 @@ services:
 
 
   calendar-service:
-    image: booking-service
+    image: calendar-service
     environment:
     - ConnectionsString=${ConnectionsString}
     - ConsulConfig__ConsulAddress=http://consul:8500
@@ -42,6 +42,9 @@ services:
     - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
     - KafkaProducerConfig__BootstrapServers=kafka:29092
     - KafkaProducerConfig__Topic=bookings
+    - KafkaProducerConfig__NotificationTopic=notification-events
+    - JwtSettings__Secret=JwtSecretKey
+    - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     ports:
     - "8082:8080" #need to remove exposed port in production
     depends_on:
@@ -196,8 +199,8 @@ services:
     - |
       echo "Waiting for Ollama server to be ready..."
       sleep 10
-      echo "Pulling llama3.2:3b model (this may take a few minutes)..."
-      ollama pull llama3.2:3b
+      echo "Pulling llama3.1:8b-instruct-q4_K_S model (this may take a few minutes)..."
+      ollama pull llama3.1:8b-instruct-q4_K_S
       echo "Model pull complete!"
     restart: "no"
 
@@ -208,8 +211,8 @@ services:
     image: ai-assistant-service:latest
     environment:
     - Ollama__BaseUrl=http://ollama:11434
-    - Ollama__Model=llama3.2:3b
-    - Ollama__TimeoutSeconds=120
+    - Ollama__Model=llama3.1:8b-instruct-q4_K_S
+    - Ollama__TimeoutSeconds=180
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
     ports:

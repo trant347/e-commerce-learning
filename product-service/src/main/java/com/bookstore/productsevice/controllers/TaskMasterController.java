@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import javax.validation.Valid;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -88,7 +89,7 @@ public class TaskMasterController {
     }
 
     @PostMapping
-    public ResponseEntity<TaskMaster> createTaskMaster(@RequestBody TaskMaster taskMaster) throws Exception {
+    public ResponseEntity<TaskMaster> createTaskMaster(@Valid @RequestBody TaskMaster taskMaster) throws Exception {
         log.info("[TaskMasterController] POST /products — received: name='{}', location='{}', categories={}, hourlyRate={}, description='{}'",
                 taskMaster.getName(),
                 taskMaster.getLocation(),
