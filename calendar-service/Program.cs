@@ -51,6 +51,7 @@ builder.Services.AddSingleton<IConsulClient, ConsulClient>(p =>
 
 // Register the hosted service for Consul registration
 builder.Services.AddHostedService<ConsulHostedService>();
+builder.Services.AddHostedService<calendar_service.MessageQueue.UserEventConsumerWorker>();
 builder.Services.AddHealthChecks();
 var app = builder.Build();
 

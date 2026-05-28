@@ -1,6 +1,7 @@
 ﻿using calendar_service.Model;
 using calendar_service.Services.Contracts;
 using calendar_service.Services.DAO;
+using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -9,10 +10,12 @@ namespace calendar_service.Services.Implementation
     public class BookingService : IBookingService
     {
         private readonly IMongoCollection<Booking> _collection;
+        private readonly ILogger<BookingService> _logger;
 
-        public BookingService(IMongoDBService database)
+        public BookingService(IMongoDBService database, ILogger<BookingService> logger)
         {
             _collection = database.GetCollection<Booking>("Booking");
+            _logger = logger;
             EnsureIndexes();
         }
 
@@ -48,6 +51,9 @@ namespace calendar_service.Services.Implementation
             int durationHours,
             string? message)
         {
+            taskMasterUsername = NormalizeUsername(taskMasterUsername);
+            requesterUsername = NormalizeUsername(requesterUsername);
+
             slotStartUtc = NormalizeToHour(slotStartUtc);
             if (durationHours < 1 || durationHours > Booking.MaxDurationHours)
             {
@@ -58,7 +64,7 @@ namespace calendar_service.Services.Implementation
             {
                 throw new InvalidOperationException("Slot must be in the future");
             }
-            if (string.Equals(taskMasterUsername, requesterUsername, StringComparison.OrdinalIgnoreCase))
+            if (taskMasterUsername == requesterUsername)
             {
                 throw new InvalidOperationException("You cannot book yourself");
             }
@@ -76,7 +82,7 @@ namespace calendar_service.Services.Implementation
             // Reject if this requester already has a PENDING/ACCEPTED booking overlapping the same range.
             var ownOverlap = await FindOverlappingAsync(
                 taskMasterId, slotStartUtc, newEnd, Booking.StatusPending, Booking.StatusAccepted);
-            if (ownOverlap.Any(b => string.Equals(b.RequesterUsername, requesterUsername, StringComparison.OrdinalIgnoreCase)))
+            if (ownOverlap.Any(b => b.RequesterUsername == requesterUsername))
             {
                 throw new InvalidOperationException("You already have a pending or accepted booking overlapping this range");
             }
@@ -102,6 +108,8 @@ namespace calendar_service.Services.Implementation
             bool callerIsAdmin,
             bool callerIsTaskMaster)
         {
+            callerUsername = string.IsNullOrEmpty(callerUsername) ? callerUsername : NormalizeUsername(callerUsername);
+
             var fb = Builders<Booking>.Filter;
             var filter = fb.Eq(b => b.TaskMasterId, taskMasterId);
 
@@ -151,7 +159,7 @@ namespace calendar_service.Services.Implementation
         public Task<List<Booking>> ListIncomingForTaskMasterAsync(string taskMasterUsername, string? status)
         {
             var fb = Builders<Booking>.Filter;
-            var filter = fb.Eq(b => b.TaskMasterUsername, taskMasterUsername);
+            var filter = fb.Eq(b => b.TaskMasterUsername, NormalizeUsername(taskMasterUsername));
             if (!string.IsNullOrEmpty(status)) filter &= fb.Eq(b => b.Status, status);
             return _collection.Find(filter).SortByDescending(b => b.CreatedAt).ToListAsync();
         }
@@ -159,7 +167,7 @@ namespace calendar_service.Services.Implementation
         public Task<List<Booking>> ListOutgoingForRequesterAsync(string requesterUsername, string? status)
         {
             var fb = Builders<Booking>.Filter;
-            var filter = fb.Eq(b => b.RequesterUsername, requesterUsername);
+            var filter = fb.Eq(b => b.RequesterUsername, NormalizeUsername(requesterUsername));
             if (!string.IsNullOrEmpty(status)) filter &= fb.Eq(b => b.Status, status);
             return _collection.Find(filter).SortByDescending(b => b.CreatedAt).ToListAsync();
         }
@@ -171,10 +179,12 @@ namespace calendar_service.Services.Implementation
 
         public async Task<AcceptResult> AcceptAsync(string bookingId, string callerUsername, string? responseMessage)
         {
+            callerUsername = NormalizeUsername(callerUsername);
+
             var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
                 ?? throw new KeyNotFoundException("Booking not found");
 
-            if (!string.Equals(existing.TaskMasterUsername, callerUsername, StringComparison.OrdinalIgnoreCase))
+            if (existing.TaskMasterUsername != callerUsername)
             {
                 throw new UnauthorizedAccessException("Only the TaskMaster can accept this booking");
             }
@@ -235,10 +245,12 @@ namespace calendar_service.Services.Implementation
 
         public async Task<Booking?> DeclineAsync(string bookingId, string callerUsername, string? responseMessage)
         {
+            callerUsername = NormalizeUsername(callerUsername);
+
             var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync();
             if (existing == null) return null;
 
-            if (!string.Equals(existing.TaskMasterUsername, callerUsername, StringComparison.OrdinalIgnoreCase))
+            if (existing.TaskMasterUsername != callerUsername)
             {
                 throw new UnauthorizedAccessException("Only the TaskMaster can decline this booking");
             }
@@ -254,6 +266,38 @@ namespace calendar_service.Services.Implementation
             await _collection.UpdateOneAsync(b => b.Id == bookingId, update);
             return await _collection.Find(b => b.Id == bookingId).FirstAsync();
         }
+
+        public async Task<long> DeleteForUserAsync(string username)
+        {
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                _logger.LogWarning("DeleteForUserAsync called with empty username; skipping.");
+                return 0;
+            }
+
+            var normalized = NormalizeUsername(username);
+            var fb = Builders<Booking>.Filter;
+            // Plain equality on normalized (lowercase) usernames hits the existing
+            // (RequesterUsername, Status) and (TaskMasterUsername, Status) indexes.
+            var filter = fb.Eq(b => b.RequesterUsername, normalized)
+                         | fb.Eq(b => b.TaskMasterUsername, normalized);
+
+            var matched = await _collection.CountDocumentsAsync(filter);
+            _logger.LogInformation(
+                "Deleting bookings for user '{Username}' (normalized='{Normalized}'): {Matched} match(es) found.",
+                username, normalized, matched);
+
+            var result = await _collection.DeleteManyAsync(filter);
+            _logger.LogInformation(
+                "Deleted {DeletedCount} booking(s) for user '{Normalized}' (acknowledged={Acknowledged}).",
+                result.DeletedCount, normalized, result.IsAcknowledged);
+            return result.DeletedCount;
+        }
+
+        // Usernames are stored and compared lowercased so that lookups can use plain
+        // equality (and therefore the existing indexes) instead of case-insensitive regex.
+        private static string NormalizeUsername(string username) =>
+            string.IsNullOrEmpty(username) ? username : username.Trim().ToLowerInvariant();
 
         private static DateTime NormalizeToHour(DateTime dt)
         {

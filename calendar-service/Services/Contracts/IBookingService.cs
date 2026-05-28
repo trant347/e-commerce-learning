@@ -35,6 +35,13 @@ namespace calendar_service.Services.Contracts
         Task<AcceptResult> AcceptAsync(string bookingId, string callerUsername, string? responseMessage);
 
         Task<Booking?> DeclineAsync(string bookingId, string callerUsername, string? responseMessage);
+
+        /// <summary>
+        /// Cascade-cleanup after a user is deleted. Removes every booking where the user
+        /// is either the requester or the TaskMaster owner. Returns the deleted count.
+        /// Idempotent: safe to invoke on Kafka redelivery.
+        /// </summary>
+        Task<long> DeleteForUserAsync(string username);
     }
 
     public class AcceptResult

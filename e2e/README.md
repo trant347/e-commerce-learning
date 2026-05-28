@@ -99,6 +99,9 @@ npm run test:headed
 # Playwright UI mode (interactive)
 npm run test:ui
 
+# To run only 1 spec
+npx playwright test tests/booking-multihour.spec.ts --headed
+
 # open the last HTML report
 npm run report
 ```

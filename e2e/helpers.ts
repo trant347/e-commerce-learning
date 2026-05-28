@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
-import { FRONTEND_URL, AUTH_SERVICE_URL, PRODUCT_SERVICE_URL, NOTIFICATION_SERVICE_URL } from './config';
+import { FRONTEND_URL, AUTH_SERVICE_URL, PRODUCT_SERVICE_URL, CALENDAR_SERVICE_URL, NOTIFICATION_SERVICE_URL } from './config';
 
 const USER_NAME_KEY = 'USER_NAME_KEY_BOOKSTORE';
 
@@ -35,6 +35,7 @@ export async function waitForAllServices(): Promise<void> {
     waitForUrl(`${FRONTEND_URL}/`, 'frontend'),
     waitForUrl(`${AUTH_SERVICE_URL}/users`, 'authentication-service'),
     waitForUrl(`${PRODUCT_SERVICE_URL}/`, 'product-service'),
+    waitForUrl(`${CALENDAR_SERVICE_URL}/health`, 'calendar-service'),
     waitForUrl(`${NOTIFICATION_SERVICE_URL}/health`, 'notification-service'),
   ]);
 }
