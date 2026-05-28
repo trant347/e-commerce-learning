@@ -19,6 +19,11 @@ namespace calendar_service.Services.Implementation
             EnsureIndexes();
         }
 
+        /// <summary>
+        /// Creates indexes on first use. Also installs a partial-unique index that
+        /// makes two ACCEPTED bookings sharing the exact same (TaskMasterId, SlotStart)
+        /// a duplicate-key error — used as a race guard in <see cref="AcceptAsync"/>.
+        /// </summary>
         private void EnsureIndexes()
         {
             var keys = Builders<Booking>.IndexKeys;
@@ -43,6 +48,20 @@ namespace calendar_service.Services.Implementation
                 keys.Ascending(b => b.TaskMasterId).Ascending(b => b.SlotStart)));
         }
 
+        /// <summary>
+        /// Creates a new PENDING booking for <paramref name="requesterUsername"/> against
+        /// <paramref name="taskMasterId"/> covering the hour-aligned range
+        /// [<paramref name="slotStartUtc"/>, slotStartUtc + <paramref name="durationHours"/>).
+        /// </summary>
+        /// <remarks>
+        /// Validates duration (1..<see cref="Booking.MaxDurationHours"/>), rejects past slots,
+        /// and rejects self-booking. The booking is rejected if the requested range overlaps
+        /// (a) any ACCEPTED booking for the same TaskMaster, or (b) any of this requester's own
+        /// PENDING/ACCEPTED bookings for the same TaskMaster.
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when validation fails or an overlap is detected.
+        /// </exception>
         public async Task<Booking> CreateAsync(
             string taskMasterId,
             string taskMasterUsername,
@@ -102,6 +121,11 @@ namespace calendar_service.Services.Implementation
             return entity;
         }
 
+        /// <summary>
+        /// Returns the bookings to display on a TaskMaster's timetable, filtered for the caller's role.
+        /// Admins and the owning TaskMaster see ACCEPTED + PENDING + DECLINED (including past slots);
+        /// other callers see ACCEPTED slots plus their own PENDING bookings, and past slots are hidden.
+        /// </summary>
         public async Task<List<Booking>> GetTimetableAsync(
             string taskMasterId,
             string? callerUsername,
@@ -156,6 +180,10 @@ namespace calendar_service.Services.Implementation
             return list;
         }
 
+        /// <summary>
+        /// Lists incoming bookings addressed to <paramref name="taskMasterUsername"/>, newest first.
+        /// Optionally filters by status (PENDING / ACCEPTED / DECLINED / CANCELLED).
+        /// </summary>
         public Task<List<Booking>> ListIncomingForTaskMasterAsync(string taskMasterUsername, string? status)
         {
             var fb = Builders<Booking>.Filter;
@@ -164,6 +192,10 @@ namespace calendar_service.Services.Implementation
             return _collection.Find(filter).SortByDescending(b => b.CreatedAt).ToListAsync();
         }
 
+        /// <summary>
+        /// Lists bookings raised by <paramref name="requesterUsername"/>, newest first.
+        /// Optionally filters by status.
+        /// </summary>
         public Task<List<Booking>> ListOutgoingForRequesterAsync(string requesterUsername, string? status)
         {
             var fb = Builders<Booking>.Filter;
@@ -172,11 +204,22 @@ namespace calendar_service.Services.Implementation
             return _collection.Find(filter).SortByDescending(b => b.CreatedAt).ToListAsync();
         }
 
+        /// <summary>Looks up a single booking by its Mongo ObjectId. Returns null if not found.</summary>
         public Task<Booking?> GetByIdAsync(string id)
         {
             return _collection.Find(b => b.Id == id).FirstOrDefaultAsync()!;
         }
 
+        /// <summary>
+        /// Accepts a PENDING booking on behalf of the TaskMaster owner and atomically auto-declines
+        /// every other PENDING booking whose range overlaps the accepted slot.
+        /// </summary>
+        /// <returns>The accepted booking plus the list of bookings that were auto-declined.</returns>
+        /// <exception cref="KeyNotFoundException">No booking with the given id.</exception>
+        /// <exception cref="UnauthorizedAccessException">Caller is not the TaskMaster owner.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// Booking is not PENDING, or another ACCEPTED booking already overlaps this range.
+        /// </exception>
         public async Task<AcceptResult> AcceptAsync(string bookingId, string callerUsername, string? responseMessage)
         {
             callerUsername = NormalizeUsername(callerUsername);
@@ -243,6 +286,12 @@ namespace calendar_service.Services.Implementation
             return new AcceptResult { Accepted = accepted, AutoDeclined = siblings };
         }
 
+        /// <summary>
+        /// Declines a PENDING booking on behalf of the TaskMaster owner. Returns the updated
+        /// booking, or null if no booking with that id exists.
+        /// </summary>
+        /// <exception cref="UnauthorizedAccessException">Caller is not the TaskMaster owner.</exception>
+        /// <exception cref="InvalidOperationException">Booking is not in PENDING state.</exception>
         public async Task<Booking?> DeclineAsync(string bookingId, string callerUsername, string? responseMessage)
         {
             callerUsername = NormalizeUsername(callerUsername);
@@ -267,6 +316,12 @@ namespace calendar_service.Services.Implementation
             return await _collection.Find(b => b.Id == bookingId).FirstAsync();
         }
 
+        /// <summary>
+        /// Cascade-cleanup hook invoked after a user is deleted upstream. Removes every
+        /// booking where the user is either requester or TaskMaster owner. Idempotent
+        /// (safe on Kafka redelivery) and logs the counts for traceability.
+        /// </summary>
+        /// <returns>The number of bookings actually deleted.</returns>
         public async Task<long> DeleteForUserAsync(string username)
         {
             if (string.IsNullOrWhiteSpace(username))
