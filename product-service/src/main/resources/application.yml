@@ -1,4 +1,19 @@
 spring:
+  config:
+    # Spring Boot 3 ignores bootstrap.yml without spring-cloud-starter-bootstrap.
+    # Declaring consul as an *optional* config source lets the app start even when
+    # Consul is unreachable, while still pulling shared config when it is.
+    import: "optional:consul:"
+  cloud:
+    consul:
+      host: ${CONSUL_SERVER:consul}
+      port: ${CONSUL_PORT:8500}
+      discovery:
+        service-name: ${spring.application.name}
+      config:
+        enabled: ${SPRING_CLOUD_CONSUL_ENABLED:true}
+    bus:
+      enabled: ${SPRING_CLOUD_CONSUL_ENABLED:true}
   data:
     mongodb:
       port: ${mongo_port:27017}
