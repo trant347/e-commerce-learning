@@ -17,6 +17,8 @@ import org.springframework.data.domain.Sort;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
+import org.springframework.data.repository.query.FluentQuery;
 
 @Profile("unit_test")
 @Configuration
@@ -153,7 +155,7 @@ public class MockConfiguration {
             }
 
             @Override
-            public Iterable<TaskMaster> findAllById(Iterable<String> iterable) {
+            public List<TaskMaster> findAllById(Iterable<String> iterable) {
                 return null;
             }
 
@@ -174,6 +176,11 @@ public class MockConfiguration {
 
             @Override
             public void deleteAll(Iterable<? extends TaskMaster> iterable) {
+
+            }
+
+            @Override
+            public void deleteAllById(Iterable<? extends String> ids) {
 
             }
 
@@ -200,6 +207,11 @@ public class MockConfiguration {
             @Override
             public <S extends TaskMaster> boolean exists(Example<S> example) {
                 return false;
+            }
+
+            @Override
+            public <S extends TaskMaster, R> R findBy(Example<S> example, Function<FluentQuery.FetchableFluentQuery<S>, R> queryFunction) {
+                return null;
             }
         };
     }

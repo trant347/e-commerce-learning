@@ -19,9 +19,8 @@ import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.DockerComposeContainer;
-import org.testcontainers.shaded.com.fasterxml.jackson.core.type.TypeReference;
-import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
-import org.testcontainers.shaded.org.apache.http.HttpStatus;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Locale;
@@ -71,7 +70,7 @@ public class BookServiceApplicationTests {
 
     @Test
     public void shouldReturnCorrectErrorMessage() throws Exception {
-        MvcResult mockMvcResult = this.mockMvc.perform(get("/products?name=noname").header(HttpHeaders.ACCEPT_LANGUAGE, new Locale("zz"))).andExpect(status().is(HttpStatus.SC_BAD_REQUEST))
+        MvcResult mockMvcResult = this.mockMvc.perform(get("/products?name=noname").header(HttpHeaders.ACCEPT_LANGUAGE, new Locale("zz"))).andExpect(status().is(400))
                 .andReturn();
         String localizedErrorSummary = JsonPath.read(mockMvcResult.getResponse().getContentAsString(), "$.localizedErrorSummary.value");
         assertEquals(localizedErrorSummary, "zz:Validation failed");

@@ -4,21 +4,21 @@ package com.bookstore.productsevice.filter;
 import com.bookstore.productsevice.security.Secret;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Component;
 
-import javax.servlet.Filter;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
-import javax.servlet.annotation.WebFilter;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.annotation.WebFilter;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @WebFilter(urlPatterns = "/products/*")
@@ -71,9 +71,10 @@ public class JwtTokenFilter implements Filter {
 
         try {
             Claims claims = Jwts.parser()
-                    .setSigningKey(secret.getKey().getBytes())
-                    .parseClaimsJws(token)
-                    .getBody();
+                    .verifyWith(Keys.hmacShaKeyFor(secret.getKey().getBytes(StandardCharsets.UTF_8)))
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
 
             String username = claims.getSubject();
 
