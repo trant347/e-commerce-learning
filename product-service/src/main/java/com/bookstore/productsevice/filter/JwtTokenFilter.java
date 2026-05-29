@@ -4,7 +4,9 @@ package com.bookstore.productsevice.filter;
 import com.bookstore.productsevice.security.Secret;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import javax.crypto.spec.SecretKeySpec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
@@ -24,6 +26,7 @@ import java.util.List;
 @WebFilter(urlPatterns = "/products/*")
 public class JwtTokenFilter implements Filter {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtTokenFilter.class);
 
     @Autowired
     Secret secret;
@@ -67,11 +70,11 @@ public class JwtTokenFilter implements Filter {
             return;
         }
 
-        String token = header.replace("Bearer", "");
+        String token = header.replace("Bearer", "").trim();
 
         try {
             Claims claims = Jwts.parser()
-                    .verifyWith(Keys.hmacShaKeyFor(secret.getKey().getBytes(StandardCharsets.UTF_8)))
+                    .verifyWith(new SecretKeySpec(secret.getKey().getBytes(StandardCharsets.UTF_8), "HmacSHA512"))
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
@@ -85,6 +88,8 @@ public class JwtTokenFilter implements Filter {
                 servletRequest.setAttribute("authenticatedAuthorities", authorities);
             }
         }catch (Exception ex){
+            log.warn("[JwtTokenFilter] JWT verification failed for {}: {} - {}",
+                    ((HttpServletRequest)servletRequest).getRequestURI(), ex.getClass().getSimpleName(), ex.getMessage());
             ((HttpServletResponse)servletResponse).sendError(HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED ACCESS");
             return;
         }
