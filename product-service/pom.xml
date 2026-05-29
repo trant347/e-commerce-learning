@@ -128,6 +128,14 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- In-memory Spring Cloud Stream binder so integration tests can start the
+             ApplicationContext without a real binder (consul-binder is disabled in tests). -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-stream-test-binder</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>

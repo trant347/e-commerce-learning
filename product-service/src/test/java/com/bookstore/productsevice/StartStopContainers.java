@@ -6,9 +6,10 @@ import java.io.File;
 
 public class StartStopContainers {
     public static DockerComposeContainer startExternalServices() {
+        // Testcontainers ships an embedded docker/compose:1.29.2 image, which uses the
+        // v1 instance-name convention ("<service>_<index>").
         return new DockerComposeContainer(
                 new File("src/test/resources/docker-compose-test.yml")
-        ).withExposedService("mongodb_1",27017)
-                .withLocalCompose(true);
+        ).withExposedService("mongodb_1", 27017);
     }
 }

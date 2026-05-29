@@ -1,5 +1,6 @@
-mongodb:
-  image: mongo
-  ports:
-    - "27017:27017"
-  command: ["mongod"]
+services:
+  mongodb:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    command: ["mongod"]
