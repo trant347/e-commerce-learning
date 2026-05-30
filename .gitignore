@@ -11,3 +11,4 @@ node/
 obj/
 target/
 *.log
+.env

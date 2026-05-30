@@ -43,7 +43,7 @@ services:
     - KafkaProducerConfig__BootstrapServers=kafka:29092
     - KafkaProducerConfig__Topic=bookings
     - KafkaProducerConfig__NotificationTopic=notification-events
-    - JwtSettings__Secret=ChangeMeInProductionThisIsA64ByteJwtSecretKeyForHS512AlgorithmXX
+    - JwtSettings__Secret=${JwtSecret}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     ports:
     - "8082:8080" #need to remove exposed port in production
@@ -57,7 +57,7 @@ services:
     image: auth-service
     environment:
     - spring.cloud.consul.enabled=true
-    - security.jwt.secret=ChangeMeInProductionThisIsA64ByteJwtSecretKeyForHS512AlgorithmXX
+    - security.jwt.secret=${JwtSecret}
     - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     ports:
     - "8081:8081" #need to remove exposed port in production
