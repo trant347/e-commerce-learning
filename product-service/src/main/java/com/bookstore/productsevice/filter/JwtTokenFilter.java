@@ -74,7 +74,7 @@ public class JwtTokenFilter implements Filter {
 
         try {
             Claims claims = Jwts.parser()
-                    .verifyWith(new SecretKeySpec(secret.getKey().getBytes(StandardCharsets.UTF_8), "HmacSHA512"))
+                    .verifyWith(new SecretKeySpec(secret.getKey().getBytes(StandardCharsets.UTF_8), "HmacSHA256"))
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();

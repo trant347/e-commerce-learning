@@ -12,3 +12,4 @@ obj/
 target/
 *.log
 .env
+.fake

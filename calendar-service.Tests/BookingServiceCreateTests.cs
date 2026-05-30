@@ -190,5 +190,89 @@ namespace calendar_service.Tests
 
             Assert.Empty(inserted);
         }
+
+        /// <summary>
+        /// Race-loser path: two concurrent POSTs both pass the in-memory overlap check
+        /// (each runs FindAsync before the other commits its insert), so the second insert
+        /// is what trips the unique partial index in MongoDB. The service must translate
+        /// the resulting MongoWriteException into the same InvalidOperationException the
+        /// controller already maps to HTTP 409 — otherwise the user sees an opaque 500.
+        /// </summary>
+        [Fact]
+        public async Task CreateAsync_DuplicateKeyFromUniqueIndex_ThrowsInvalidOperation()
+        {
+            // Both overlap queries return empty → in-memory check passes (this is the race window).
+            var queue = new Queue<List<Booking>>();
+            queue.Enqueue(new List<Booking>());
+            queue.Enqueue(new List<Booking>());
+
+            var col = new Mock<IMongoCollection<Booking>>(MockBehavior.Loose);
+            var indexes = new Mock<IMongoIndexManager<Booking>>(MockBehavior.Loose);
+            col.SetupGet(c => c.Indexes).Returns(indexes.Object);
+            col.Setup(c => c.FindAsync(
+                    It.IsAny<FilterDefinition<Booking>>(),
+                    It.IsAny<FindOptions<Booking, Booking>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => BuildCursor(queue.Count > 0 ? queue.Dequeue() : new List<Booking>()));
+
+            // Simulate the partial-unique index rejecting the insert. MongoWriteException's
+            // public constructors vary across driver versions, so we build the instance via
+            // FormatterServices.GetUninitializedObject and fill in just the field the
+            // production catch clause reads: WriteError.Category == DuplicateKey.
+            var duplicateKey = BuildDuplicateKeyMongoWriteException();
+            col.Setup(c => c.InsertOneAsync(
+                    It.IsAny<Booking>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(duplicateKey);
+
+            var db = new Mock<IMongoDBService>();
+            db.Setup(d => d.GetCollection<Booking>("Booking")).Returns(col.Object);
+            var svc = new BookingService(db.Object, NullLogger<BookingService>.Instance);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                svc.CreateAsync(
+                    TaskMasterId, TaskMasterUsername, RequesterUsername,
+                    FutureSlot(48), durationHours: 1, message: null));
+
+            Assert.Contains("pending or accepted", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Builds a <see cref="MongoWriteException"/> whose <c>WriteError.Category</c> is
+        /// <see cref="ServerErrorCategory.DuplicateKey"/>. We use reflection so the test does
+        /// not depend on which constructors the MongoDB driver happens to expose publicly
+        /// in a given version.
+        /// </summary>
+        private static MongoWriteException BuildDuplicateKeyMongoWriteException()
+        {
+            var writeError = (WriteError)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(WriteError));
+            SetBackingField(writeError, "_category", ServerErrorCategory.DuplicateKey);
+            SetBackingField(writeError, "_code", 11000);
+            SetBackingField(writeError, "_message", "E11000 duplicate key error");
+
+            var ex = (MongoWriteException)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(MongoWriteException));
+            SetBackingField(ex, "_writeError", writeError);
+            return ex;
+        }
+
+        private static void SetBackingField(object target, string fieldName, object? value)
+        {
+            var type = target.GetType();
+            while (type != null)
+            {
+                var field = type.GetField(fieldName,
+                    System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+                if (field != null)
+                {
+                    field.SetValue(target, value);
+                    return;
+                }
+                type = type.BaseType;
+            }
+            throw new InvalidOperationException($"Field '{fieldName}' not found on {target.GetType().FullName}");
+        }
     }
 }

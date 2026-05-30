@@ -20,16 +20,16 @@ namespace calendar_service.Services.Implementation
         }
 
         /// <summary>
-        /// Creates indexes on first use. Also installs a partial-unique index that
-        /// makes two ACCEPTED bookings sharing the exact same (TaskMasterId, SlotStart)
-        /// a duplicate-key error — used as a race guard in <see cref="AcceptAsync"/>.
+        /// Creates indexes on first use. Also installs partial-unique indexes that
+        /// turn race-prone application-level checks into atomic database-level
+        /// duplicate-key errors. See <see cref="AcceptAsync"/> and <see cref="CreateAsync"/>.
         /// </summary>
         private void EnsureIndexes()
         {
             var keys = Builders<Booking>.IndexKeys;
 
-            // Weak guard: prevent two ACCEPTED bookings sharing the exact same SlotStart.
-            // Full overlap protection is enforced at the application layer in AcceptAsync.
+            // Race guard: two ACCEPTED bookings sharing the exact same (TaskMasterId, SlotStart)
+            // are a duplicate-key error. Full overlap protection is still enforced in AcceptAsync.
             var acceptedFilter = new BsonDocument("Status", Booking.StatusAccepted);
             _collection.Indexes.CreateOne(new CreateIndexModel<Booking>(
                 keys.Ascending(b => b.TaskMasterId).Ascending(b => b.SlotStart),
@@ -38,7 +38,32 @@ namespace calendar_service.Services.Implementation
                     Name = "uniq_taskmaster_slot_accepted",
                     Unique = true,
                     PartialFilterExpression = acceptedFilter
-                }));                
+                }));
+
+            // Race guard for CreateAsync: a given requester cannot have two non-terminal bookings
+            // (PENDING or ACCEPTED) for the same TaskMaster starting at the same slot.
+            // Without this, two near-simultaneous POSTs both pass the in-memory overlap check
+            // (each runs its read before the other's write commits), and we end up with
+            // duplicate PENDING rows. The unique index makes the second insert fail atomically
+            // at the DB layer, which CreateAsync translates into a 409.
+            // MongoDB 6.0+ allows $in in partialFilterExpression. We guard against two
+            // concurrent POSTs creating duplicate non-terminal bookings (PENDING or ACCEPTED)
+            // for the same (requester, taskmaster, slot). The in-memory overlap check in
+            // CreateAsync is racy (two requests each read before the other commits), so this
+            // unique index makes the loser's insert fail atomically with E11000, which the
+            // service translates into a 409 for the caller.
+            var activeFilter = new BsonDocument("Status",
+                new BsonDocument("$in", new BsonArray { Booking.StatusPending, Booking.StatusAccepted }));
+            _collection.Indexes.CreateOne(new CreateIndexModel<Booking>(
+                keys.Ascending(b => b.RequesterUsername)
+                    .Ascending(b => b.TaskMasterId)
+                    .Ascending(b => b.SlotStart),
+                new CreateIndexOptions<Booking>
+                {
+                    Name = "uniq_requester_taskmaster_slot_active",
+                    Unique = true,
+                    PartialFilterExpression = activeFilter
+                }));
 
             _collection.Indexes.CreateOne(new CreateIndexModel<Booking>(
                 keys.Ascending(b => b.TaskMasterUsername).Ascending(b => b.Status)));
@@ -117,7 +142,20 @@ namespace calendar_service.Services.Implementation
                 RequestMessage = message,
                 CreatedAt = DateTime.UtcNow
             };
-            await _collection.InsertOneAsync(entity);
+            try
+            {
+                await _collection.InsertOneAsync(entity);
+            }
+            catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                // Atomic race-loser path: the application-level overlap check above passed
+                // because the competing request had not yet inserted its row. The unique
+                // partial index on (RequesterUsername, TaskMasterId, SlotStart) for active
+                // statuses then rejected the second insert. Surface this as the same 409
+                // the caller would have seen if the in-memory check had caught it.
+                throw new InvalidOperationException(
+                    "You already have a pending or accepted booking overlapping this range");
+            }
             return entity;
         }
 

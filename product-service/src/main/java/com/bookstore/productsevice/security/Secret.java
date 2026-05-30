@@ -12,7 +12,7 @@ import java.time.LocalTime;
 @Configuration
 public class Secret {
 
-    @Value("JwtSecretKey")
+    @Value("${security.jwt.secret:JwtSecretKey}")
     public String key;
 
     public LocalTime expirationTime;

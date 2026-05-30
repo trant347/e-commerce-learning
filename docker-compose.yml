@@ -23,6 +23,7 @@ services:
     environment:
     - spring.cloud.consul.enabled=true
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
+    - SECURITY_JWT_SECRET=${JwtSecret}
     ports:
     - "8080:8080" #need to remove exposed port in production
     - "8000:8000" #debug port
@@ -57,7 +58,7 @@ services:
     image: auth-service
     environment:
     - spring.cloud.consul.enabled=true
-    - security.jwt.secret=${JwtSecret}
+    - SECURITY_JWT_SECRET=${JwtSecret}
     - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     ports:
     - "8081:8081" #need to remove exposed port in production
@@ -68,7 +69,7 @@ services:
     - kafka
 
   mongodb:
-    image: mongodb/mongodb-community-server:5.0-ubi8  
+    image: mongodb/mongodb-community-server:7.0-ubi8  
     ports:
     - "27017:27017"
     volumes:

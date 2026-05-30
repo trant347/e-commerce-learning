@@ -33,12 +33,12 @@ import static org.mockito.Mockito.when;
  * Regression coverage for {@link JwtTokenFilter#doFilter}. The bugs these tests defend against
  * all surfaced after the jjwt 0.9 → 0.13 upgrade, where verification got much stricter:
  *   - a leading space after stripping "Bearer" triggered MalformedJwtException
- *   - Keys.hmacShaKeyFor() rejected the shared HS512 secret as too short (WeakKeyException)
+ *   - Keys.hmacShaKeyFor() rejected the shared HS256 secret as too short (WeakKeyException)
  *   - exceptions in the filter were swallowed, so failures were invisible in logs
  */
 public class JwtTokenFilterTest {
 
-    // 64-byte / 512-bit secret — meets HS512 minimum so we can sign with the standard API.
+    // 64-byte / 512-bit secret — well over the HS256 minimum (32 bytes).
     private static final String SECRET_KEY =
             "ChangeMeInProductionThisIsA64ByteJwtSecretKeyForHS512AlgorithmXX";
 
@@ -73,7 +73,7 @@ public class JwtTokenFilterTest {
             ObjectMapper mapper = new ObjectMapper();
 
             Map<String, Object> header = new LinkedHashMap<>();
-            header.put("alg", "HS512");
+            header.put("alg", "HS256");
             String headerB64 = b64.encodeToString(mapper.writeValueAsBytes(header));
 
             Map<String, Object> claims = new LinkedHashMap<>();
@@ -84,8 +84,8 @@ public class JwtTokenFilterTest {
             String payloadB64 = b64.encodeToString(mapper.writeValueAsBytes(claims));
 
             String signingInput = headerB64 + "." + payloadB64;
-            Mac mac = Mac.getInstance("HmacSHA512");
-            mac.init(new SecretKeySpec(signingSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA512"));
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(signingSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             String sigB64 = b64.encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.US_ASCII)));
 
             return signingInput + "." + sigB64;
@@ -173,7 +173,7 @@ public class JwtTokenFilterTest {
 
     /**
      * Regression for the WeakKeyException production bug. jjwt 0.13 enforces RFC 7518 minimum
-     * key sizes on the *verify* path too (HS512 ≥ 512 bits = 64 bytes). The legacy 12-byte
+     * key sizes on the *verify* path too (HS256 ≥ 256 bits = 32 bytes). The legacy 12-byte
      * "JwtSecretKey" therefore can no longer be used end-to-end — this test pins that
      * behaviour so anyone shortening the shared secret in docker-compose / configs gets a red
      * test instead of a silent runtime 401.

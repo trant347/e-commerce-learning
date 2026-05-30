@@ -6,6 +6,6 @@ spring:
       discovery:
         service-name: ${spring.application.name}
       config:
-        enabled: ${spring.cloud.consul.enabled}
+        enabled: ${spring.cloud.consul.enabled:true}
     bus:
-      enabled: ${spring.cloud.consul.enabled}
+      enabled: ${spring.cloud.consul.enabled:true}
