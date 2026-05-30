@@ -1,4 +1,4 @@
-FROM maven:3.5-jdk-8-alpine as builder
+FROM maven:3.9-eclipse-temurin-25 as builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ RUN mvn package -DskipTests
 
 
 
-FROM eclipse-temurin:8-jre-alpine
+FROM eclipse-temurin:25-jre
 
 ARG version
 WORKDIR /app

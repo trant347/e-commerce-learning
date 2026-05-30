@@ -8,23 +8,19 @@ import com.bookstore.authentication.model.User;
 import com.bookstore.authentication.repository.UserRepository;
 import com.bookstore.authentication.validators.UserValidator;
 import com.mocks.MockConfiguration;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ActiveProfiles("test")
-@RunWith(SpringJUnit4ClassRunner.class)
 @TestPropertySource(
         properties = {
                 "spring.cloud.consul.enabled=false"
-
         }
 )
 @SpringBootTest(classes = MockConfiguration.class)
@@ -35,10 +31,7 @@ public class ValidatorTest {
 
     UserValidator userValidator;
 
-    @Rule
-    public final ExpectedException exception = ExpectedException.none();
-
-    @Before
+    @BeforeEach
     public void init() {
         userValidator = new UserValidator(userRepository);
     }
@@ -48,10 +41,7 @@ public class ValidatorTest {
 
         User user = new User().setEmail("tony@gmail.com").setUsername("tony");
 
-        exception.expect(EmailNotAvailableException.class);
-
-        userValidator.validate(user);
-
+        assertThrows(EmailNotAvailableException.class, () -> userValidator.validate(user));
     }
 
 
@@ -59,8 +49,7 @@ public class ValidatorTest {
     public void testEmailNotValid() throws Exception {
 
         User user = new User().setEmail("acde@com");
-        exception.expect(InvalidEmailException.class);
-        userValidator.validate(user);
+        assertThrows(InvalidEmailException.class, () -> userValidator.validate(user));
     }
 
 
@@ -68,10 +57,9 @@ public class ValidatorTest {
     public void testUsernameNotAvailable() throws Exception {
 
         User user = new User().setUsername("tony").setEmail("tony1@gmail.com");
-        exception.expect(UsernameNotAvailableException.class);
-        userValidator.validate(user);
-
+        assertThrows(UsernameNotAvailableException.class, () -> userValidator.validate(user));
     }
 
 
 }
+

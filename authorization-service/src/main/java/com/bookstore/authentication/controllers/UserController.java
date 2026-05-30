@@ -11,6 +11,7 @@ import com.bookstore.authentication.utils.JwtTokenUtil;
 import com.bookstore.authentication.validators.UserValidator;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +34,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -100,13 +103,14 @@ public class UserController {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
-        String token = bearer.replace("Bearer", "");
+        String token = bearer.replace("Bearer", "").trim();
 
-
+        SecretKey putKey = Keys.hmacShaKeyFor(jwtConfig.getSecret().getBytes(StandardCharsets.UTF_8));
         Claims claims = Jwts.parser()
-                .setSigningKey(jwtConfig.getSecret().getBytes())
-                .parseClaimsJws(token)
-                .getBody();
+                .verifyWith(putKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
 
         String username = claims.getSubject();
 
@@ -150,10 +154,12 @@ public class UserController {
 
         Claims claims;
         try {
+            SecretKey deleteKey = Keys.hmacShaKeyFor(jwtConfig.getSecret().getBytes(StandardCharsets.UTF_8));
             claims = Jwts.parser()
-                    .setSigningKey(jwtConfig.getSecret().getBytes())
-                    .parseClaimsJws(bearer.replace("Bearer", "").trim())
-                    .getBody();
+                    .verifyWith(deleteKey)
+                    .build()
+                    .parseSignedClaims(bearer.replace("Bearer", "").trim())
+                    .getPayload();
         } catch (Exception e) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
