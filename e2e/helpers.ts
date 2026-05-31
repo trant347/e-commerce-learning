@@ -34,7 +34,7 @@ export async function waitForAllServices(): Promise<void> {
   await Promise.all([
     waitForUrl(`${FRONTEND_URL}/`, 'frontend'),
     waitForUrl(`${AUTH_SERVICE_URL}/users`, 'authentication-service'),
-    waitForUrl(`${PRODUCT_SERVICE_URL}/`, 'product-service'),
+    waitForUrl(`${PRODUCT_SERVICE_URL}/products`, 'product-service'),
     waitForUrl(`${CALENDAR_SERVICE_URL}/health`, 'calendar-service'),
     waitForUrl(`${NOTIFICATION_SERVICE_URL}/health`, 'notification-service'),
   ]);
