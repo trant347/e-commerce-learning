@@ -24,8 +24,9 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
         }
     }, [taskMasterId]);
 
-    let onChange = (selected: Date) => {
-        setSelected(selected);
+    let onChange = (start: Date, hours: number) => {
+        setSelected(start);
+        setDuration(hours);
     };
 
     const onSubmit = () => {
@@ -49,18 +50,18 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
                 </h2>
             )}
             <Calendar events={props.events} onChange={onChange}/>
-            <div style={{ margin: '12px 0' }}>
-                <label htmlFor="duration-hours">Duration (hours):&nbsp;</label>
-                <input
-                    id="duration-hours"
-                    type="number"
-                    min={1}
-                    max={24}
-                    step={1}
-                    value={duration}
-                    onChange={e => setDuration(Math.max(1, Math.min(24, parseInt(e.target.value, 10) || 1)))}
-                    style={{ width: 70 }}
-                />
+            <div style={{ margin: '12px 0', fontSize: '0.95rem' }}>
+                {selectedDate ? (
+                    <span>
+                        Selected: <strong>{selectedDate.toLocaleString()}</strong>
+                        {' · '}
+                        <strong>{duration} {duration === 1 ? 'hour' : 'hours'}</strong>
+                    </span>
+                ) : (
+                    <span style={{ color: '#605e5c' }}>
+                        Click a time slot, then click another to set the end — or click and drag to select a range.
+                    </span>
+                )}
             </div>
             <Button onClick={onSubmit} disabled={!taskMasterId || !selectedDate || submitting} loading={submitting}>Submit</Button>
         </div>

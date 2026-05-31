@@ -1,79 +1,305 @@
+/* Microsoft Teams–style week calendar */
 .calendar {
-    width: 800px;
-    border: 1px solid #ccc;
-    font-family: sans-serif;
-  }
-  
-  .calendar-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px;
-    border-bottom: 1px solid #ccc;
-  }
-  
-  .calendar-header button {
-    background: none;
-    border: none;
-    font-size: 1.2em;
-    cursor: pointer;
-  }
-  
-  .calendar-grid {
-    display: grid;
-    grid-template-rows: auto 1fr;
-  }
-  
-  .weekdays {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    border-bottom: 1px solid #ccc;
-  }
-  
-  .weekday {
-    padding: 10px;
-    text-align: center;
-    font-weight: bold;
-  }
-  
-  .days {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    grid-gap: 1px;
-  }
-  
-  .day {
-    padding: 10px;
-    border: 1px solid #eee;
-    cursor: pointer;
-    position: relative;
-  }
-  
-  .day.disabled {
-    background-color: #f9f9f9;
-    color: #ccc;
-    cursor: default;
-  }
-  
-  .day.selected {
-    background-color: #e0eaff;
-  }
-  
-  .day-number {
-    font-weight: bold;
-    margin-bottom: 5px;
-  }
-  
-  .day-events {
-    font-size: 0.8em;
-  }
-  
-  .event {
-    background-color: #e0f2fe;
-    padding: 2px 5px;
-    margin-bottom: 2px;
-    border-radius: 3px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  --time-gutter-width: 64px;
+  --hour-height: 48px;
+  --border-color: #e1dfdd;
+  --header-bg: #f3f2f1;
+  --today-accent: #6264a7;
+  --event-bg: #ebebfa;
+  --event-border: #6264a7;
+  --event-text: #252423;
+
+  width: 100%;
+  max-width: 1200px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #fff;
+  color: #252423;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: #fff;
+}
+
+.calendar-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-header h2 {
+  margin: 0 0 0 8px;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.today-button,
+.nav-button {
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: #252423;
+  line-height: 1.2;
+}
+
+.today-button:hover,
+.nav-button:hover {
+  background: var(--header-bg);
+}
+
+.nav-button {
+  width: 28px;
+  padding: 4px 0;
+  text-align: center;
+}
+
+.view-label {
+  font-size: 0.875rem;
+  color: #605e5c;
+}
+
+/* Week view */
+.week-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+.week-header {
+  display: grid;
+  grid-template-columns: var(--time-gutter-width) repeat(7, 1fr);
+  border-bottom: 1px solid var(--border-color);
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.time-gutter-header {
+  border-right: 1px solid var(--border-color);
+}
+
+.day-header {
+  padding: 8px 4px;
+  text-align: center;
+  border-left: 1px solid var(--border-color);
+  cursor: pointer;
+  user-select: none;
+}
+
+.day-header:first-of-type {
+  border-left: none;
+}
+
+.day-header .day-name {
+  font-size: 0.75rem;
+  color: #605e5c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.day-header .day-date {
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+.day-header.today .day-date {
+  background: var(--today-accent);
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  line-height: 36px;
+  border-radius: 50%;
+  margin: 2px auto 0;
+}
+
+.day-header.selected:not(.today) .day-date {
+  color: var(--today-accent);
+  font-weight: 600;
+}
+
+.day-header:hover {
+  background: var(--header-bg);
+}
+
+.week-body {
+  display: grid;
+  grid-template-columns: var(--time-gutter-width) 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+.time-gutter {
+  border-right: 1px solid var(--border-color);
+  background: #fff;
+}
+
+.time-slot-label {
+  position: relative;
+  font-size: 0.7rem;
+  color: #605e5c;
+  text-align: right;
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+.time-slot-label span {
+  position: relative;
+  top: -6px;
+  background: #fff;
+  padding: 0 2px;
+}
+
+.day-columns {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  position: relative;
+}
+
+.day-column {
+  position: relative;
+  border-left: 1px solid var(--border-color);
+}
+
+.day-column:first-child {
+  border-left: none;
+}
+
+.day-column.today {
+  background: rgba(98, 100, 167, 0.04);
+}
+
+.day-column.past {
+  background: #f3f2f1;
+}
+
+.hour-cell.past {
+  background: #ebebeb;
+  cursor: not-allowed;
+}
+
+.day-header.past .day-name,
+.day-header.past .day-date {
+  color: #a19f9d;
+}
+
+.hour-cell {
+  border-bottom: 1px solid var(--border-color);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.day-column.selecting .hour-cell {
+  cursor: ns-resize;
+}
+
+/* Selection overlay (range picker) */
+.selection {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: rgba(98, 100, 167, 0.18);
+  border: 2px solid var(--today-accent);
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: var(--today-accent);
+  font-weight: 600;
+  box-sizing: border-box;
+  padding: 4px;
+  text-align: center;
+}
+
+.selection.pending {
+  border-style: dashed;
+}
+
+.selection-label {
+  font-size: 1.1rem;
+  line-height: 1.1;
+}
+
+.selection-time {
+  font-size: 0.7rem;
+  font-weight: 500;
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+/* Events absolutely positioned within the day column */
+.event {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: var(--event-bg);
+  border-left: 3px solid var(--event-border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+  color: var(--event-text);
+  overflow: hidden;
+  cursor: pointer;
+  box-sizing: border-box;
+  z-index: 1;
+}
+
+.event:hover {
+  background: #dcdcf5;
+}
+
+.event-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-time {
+  font-size: 0.7rem;
+  color: #605e5c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Current-time indicator */
+.now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid #e74c3c;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.now-dot {
+  position: absolute;
+  left: -5px;
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e74c3c;
+}
