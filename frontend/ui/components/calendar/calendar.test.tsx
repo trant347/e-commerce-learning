@@ -124,4 +124,78 @@ describe('Calendar', () => {
 
         expect(onChange.mock.calls.length).toBe(callsBefore);
     });
+
+    describe('clearing the selection', () => {
+        test('Escape clears the selection overlay and fires onClear', () => {
+            const onChange = jest.fn();
+            const onClear = jest.fn();
+            const { container } = render(
+                <Calendar events={[]} onChange={onChange} onClear={onClear} />
+            );
+
+            fireEvent.mouseDown(getCell(container, 1, 10)); // select Mon 10:00
+            expect(container.querySelector('.selection')).not.toBeNull();
+
+            fireEvent.keyDown(window, { key: 'Escape' });
+
+            expect(container.querySelector('.selection')).toBeNull();
+            expect(onClear).toHaveBeenCalledTimes(1);
+        });
+
+        test('clicking the × button on the overlay clears the selection', () => {
+            const onChange = jest.fn();
+            const onClear = jest.fn();
+            const { container } = render(
+                <Calendar events={[]} onChange={onChange} onClear={onClear} />
+            );
+
+            fireEvent.mouseDown(getCell(container, 1, 10));
+            const clearBtn = container.querySelector('.selection-clear') as HTMLElement | null;
+            expect(clearBtn).not.toBeNull();
+
+            fireEvent.click(clearBtn!);
+
+            expect(container.querySelector('.selection')).toBeNull();
+            expect(onClear).toHaveBeenCalledTimes(1);
+        });
+
+        test('Escape while typing in a textarea does NOT clear the selection', () => {
+            const onChange = jest.fn();
+            const onClear = jest.fn();
+            const { container } = render(
+                <div>
+                    <Calendar events={[]} onChange={onChange} onClear={onClear} />
+                    <textarea data-testid="desc" />
+                </div>
+            );
+
+            fireEvent.mouseDown(getCell(container, 1, 10));
+            const textarea = container.querySelector('[data-testid="desc"]') as HTMLTextAreaElement;
+            textarea.focus();
+
+            fireEvent.keyDown(textarea, { key: 'Escape' });
+
+            expect(container.querySelector('.selection')).not.toBeNull();
+            expect(onClear).not.toHaveBeenCalled();
+        });
+
+        test('Escape with no active selection does not call onClear', () => {
+            const onClear = jest.fn();
+            render(<Calendar events={[]} onChange={jest.fn()} onClear={onClear} />);
+
+            fireEvent.keyDown(window, { key: 'Escape' });
+
+            expect(onClear).not.toHaveBeenCalled();
+        });
+
+        test('omitting onClear is safe — Escape still clears the overlay', () => {
+            const { container } = render(<Calendar events={[]} onChange={jest.fn()} />);
+
+            fireEvent.mouseDown(getCell(container, 1, 10));
+            expect(container.querySelector('.selection')).not.toBeNull();
+
+            expect(() => fireEvent.keyDown(window, { key: 'Escape' })).not.toThrow();
+            expect(container.querySelector('.selection')).toBeNull();
+        });
+    });
 });
