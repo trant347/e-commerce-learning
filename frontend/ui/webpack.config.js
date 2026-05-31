@@ -2,10 +2,6 @@ const path = require('path');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin'); // For HTML generation
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
-const createStyledComponentsTransformer = require('typescript-plugin-styled-components').default;
-// 2. create a transformer;
-// the factory additionally accepts an options object which described below
-const styledComponentsTransformer = createStyledComponentsTransformer();
 
 module.exports = {
   mode: 'development', // or 'production' for optimized build
@@ -21,10 +17,7 @@ module.exports = {
     rules: [
      {
         test: /\.tsx?$/,
-        loader: 'ts-loader',
-        options: {
-            getCustomTransformers: () => ({ before: [styledComponentsTransformer] })
-        }
+        loader: 'ts-loader'
       },
       {
         test: /\.css$/i, // Handle CSS files

@@ -27,7 +27,7 @@ export enum ToastLevel {
 
 }
 
-function ToastContainer(props : { message, level, backgroundColor, icon, visible, onClose? }) : JSX.Element {
+function ToastContainer(props : { message, level, backgroundColor, icon, visible, onClose? }) : React.JSX.Element {
 
     return (
         <div className="notification-toast" style={{backgroundColor: `${props.backgroundColor}`}}>
@@ -48,7 +48,7 @@ function ToastContainer(props : { message, level, backgroundColor, icon, visible
     )
 }
 
-export default function withToastContainer(props: ToastProps) : JSX.Element {
+export default function withToastContainer(props: ToastProps) : React.JSX.Element {
    let backgroundColor = "#03c6fc";
    let icon = "info circle";
 

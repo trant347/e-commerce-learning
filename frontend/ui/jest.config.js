@@ -3,6 +3,7 @@ module.exports = {
     testEnvironment: 'jsdom',
     roots: ['<rootDir>'],
     testMatch: ['<rootDir>/**/*.(test|spec).(ts|tsx)'],
+    setupFiles: ['<rootDir>/polyfills/findDOMNode.js'],
     moduleNameMapper: {
         '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
         '\\.(png|jpg|jpeg|gif|svg)$': '<rootDir>/__mocks__/fileMock.js'
@@ -10,7 +11,7 @@ module.exports = {
     transform: {
         '^.+\\.(ts|tsx)$': ['ts-jest', {
             tsconfig: {
-                jsx: 'react',
+                jsx: 'react-jsx',
                 esModuleInterop: true,
                 target: 'es2017',
                 module: 'commonjs',

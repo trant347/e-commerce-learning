@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { render, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 // Mock the api services BEFORE importing the component under test.
 jest.mock('../api/bookingServices', () => ({
@@ -36,20 +36,25 @@ function findSubmitButton(container: HTMLElement): HTMLButtonElement {
 
 describe('Booking page — Submit button', () => {
     test('is disabled on first render when no time slot has been selected', () => {
-        const props = { events: [], match: { params: { id: 'tm-1' } } };
-
         // Render is wrapped in act() by RTL; we don't need to await the async
         // services because the Submit button's disabled state is derived
         // synchronously from `selectedDate`, which starts as null.
-        const { container } = render(<CalendarPage {...props} />);
+        const { container } = render(
+            <MemoryRouter>
+                <CalendarPage events={[]} taskMasterId="tm-1" />
+            </MemoryRouter>
+        );
 
         const submit = findSubmitButton(container);
         expect(submit.disabled).toBe(true);
     });
 
     test('becomes enabled once a time slot is selected', () => {
-        const props = { events: [], match: { params: { id: 'tm-1' } } };
-        const { container } = render(<CalendarPage {...props} />);
+        const { container } = render(
+            <MemoryRouter>
+                <CalendarPage events={[]} taskMasterId="tm-1" />
+            </MemoryRouter>
+        );
 
         // Click an available cell — Mon 10:00 (Sun=0, Mon=1) in the freshly rendered week.
         const dayCols = container.querySelectorAll('.day-column');

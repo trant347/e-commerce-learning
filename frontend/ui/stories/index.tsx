@@ -1,4 +1,3 @@
-import * as React from 'react';
 import 'bootstrap/dist/css/bootstrap.css';
 
 import ProductBox from '../components/product-box/product-box';

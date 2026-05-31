@@ -1,4 +1,3 @@
-import * as React from 'react';
 import {FunctionComponent, useState} from "react";
 
 import './modal.css';

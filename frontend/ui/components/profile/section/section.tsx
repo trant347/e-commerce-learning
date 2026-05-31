@@ -48,7 +48,7 @@ export interface SectionProps {
 }
 
 
-export default function({ userProfile, onSave } : SectionProps) : JSX.Element {
+export default function({ userProfile, onSave } : SectionProps) : React.JSX.Element {
 
     let [editMode, setEditMode] = React.useState(false);
     
@@ -98,7 +98,7 @@ export default function({ userProfile, onSave } : SectionProps) : JSX.Element {
                         
                         {
                             editMode && <StyledButtonSection>
-                                            <Button type="Submit"> Save </Button>
+                                            <Button type="submit"> Save </Button>
                                             <Button 
                                                 onClick= { 
                                                     () => {
@@ -119,7 +119,7 @@ export default function({ userProfile, onSave } : SectionProps) : JSX.Element {
 
 }
 
-function getFieldComponent({ value, name, label, type}, fieldName, setFieldValue, editMode) : JSX.Element {
+function getFieldComponent({ value, name, label, type}, fieldName, setFieldValue, editMode) : React.JSX.Element {
 
     switch(type) {
         case FieldType.DROPDOWN:

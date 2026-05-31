@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import ProductBox from "../components/product-box/product-box";
 
 import {TaskMaster} from "../common/interfaces";
@@ -18,8 +19,9 @@ export interface Action {
     payload: any
 }
 
-export default function Home({ history }) {
+export default function Home() {
 
+    const navigate = useNavigate();
 
     const initialStates = {
         taskMasters: [],
@@ -28,7 +30,7 @@ export default function Home({ history }) {
         hasMore: true
     };
 
-    const [state, dispatch] = React.useReducer<TaskMasterState, Action>(taskMasterReducer, initialStates);
+    const [state, dispatch] = React.useReducer(taskMasterReducer, initialStates);
 
     // Always-current ref so the IntersectionObserver (created once) can read latest hasMore.
     const hasMoreRef = React.useRef(state.hasMore);
@@ -74,7 +76,7 @@ export default function Home({ history }) {
     }, [bottomBoundaryRef, scrollObserver]);
 
     const openTaskMaster = (taskMaster: TaskMaster) => {
-        history.push(`/product/${taskMaster.id}`);
+        navigate(`/product/${taskMaster.id}`);
     }  
 
     

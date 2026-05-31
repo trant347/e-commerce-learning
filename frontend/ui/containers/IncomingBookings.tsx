@@ -1,6 +1,5 @@
-import * as React from 'react';
 import { useContext, useEffect, useState } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../context/userContext';
 import { Booking, BookingService, BookingStatus } from '../api/bookingServices';
@@ -30,7 +29,7 @@ function formatSlot(iso: string, durationHours: number): string {
 
 export default function IncomingBookings() {
     const { username } = useContext(UserContext);
-    const history = useHistory();
+    const navigate = useNavigate();
 
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [filter, setFilter] = useState<FilterStatus>('PENDING');
@@ -40,8 +39,7 @@ export default function IncomingBookings() {
     const [pendingId, setPendingId] = useState<string | null>(null);
 
     if (!username) {
-        history.replace('/');
-        return null;
+        return <Navigate to="/" replace />;
     }
 
     const reload = () => {

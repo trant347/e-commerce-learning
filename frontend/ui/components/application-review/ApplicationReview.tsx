@@ -1,6 +1,5 @@
-import * as React from 'react';
 import { useState, useEffect, useContext } from 'react';
-import { useHistory, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Navigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import ApplicationBadgeContext from '../../context/applicationBadgeContext';
@@ -17,8 +16,8 @@ interface RouteParams {
 export default function ApplicationReview() {
     const { username } = useContext(UserContext);
     const { decrementUnviewedCount } = useContext(ApplicationBadgeContext);
-    const history = useHistory();
-    const { id } = useParams<RouteParams>();
+    const navigate = useNavigate();
+    const { id } = useParams<keyof RouteParams>() as RouteParams;
 
     const [application, setApplication] = useState<TaskMasterApplication | null>(null);
     const [loading, setLoading] = useState(true);
@@ -29,8 +28,7 @@ export default function ApplicationReview() {
 
     // Admin-only page
     if (username !== 'admin') {
-        history.replace('/');
-        return null;
+        return <Navigate to="/" replace />;
     }
 
     useEffect(() => {
@@ -107,7 +105,7 @@ export default function ApplicationReview() {
     return (
         <div className="new-taskmaster-page">
             <div className="review-header">
-                <button className="back-btn" onClick={() => history.goBack()}>
+                <button className="back-btn" onClick={() => navigate(-1)}>
                     <i className="arrow left icon" /> Back
                 </button>
                 <h1><i className="file alternate icon" /> Application Review</h1>

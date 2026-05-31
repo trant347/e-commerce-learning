@@ -50,7 +50,7 @@ const initialStatusValue = {
     visible: false
 };
 
-export default function() : JSX.Element {
+export default function() : React.JSX.Element {
 
     let [status , setStatus] = React.useState(initialStatusValue);
 
@@ -107,7 +107,7 @@ export default function() : JSX.Element {
                                 <ErrorMessage name="password" component="div" className="error-message"/>
                             </div>
                         
-                            <Button type="Submit" disabled={isSubmitting}> Submit </Button>                      
+                            <Button type="submit" disabled={isSubmitting}> Submit </Button>                      
                         </FormAny>
                     )
                 }           

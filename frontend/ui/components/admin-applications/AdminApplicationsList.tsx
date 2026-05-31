@@ -1,6 +1,5 @@
-import * as React from 'react';
 import { useState, useEffect, useContext } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
@@ -13,7 +12,7 @@ type FilterStatus = 'ALL' | 'PENDING' | 'ACCEPTED' | 'DECLINED';
 
 export default function AdminApplicationsList() {
     const { username } = useContext(UserContext);
-    const history = useHistory();
+    const navigate = useNavigate();
 
     const [applications, setApplications] = useState<TaskMasterApplication[]>([]);
     const [filter, setFilter] = useState<FilterStatus>('PENDING');
@@ -22,8 +21,7 @@ export default function AdminApplicationsList() {
 
     // Admin-only page
     if (username !== 'admin') {
-        history.replace('/');
-        return null;
+        return <Navigate to="/" replace />;
     }
 
     useEffect(() => {
@@ -118,7 +116,7 @@ export default function AdminApplicationsList() {
                                 <td>
                                     <button
                                         className="review-btn"
-                                        onClick={() => history.push(`/admin/applications/${app.id}`)}
+                                        onClick={() => navigate(`/admin/applications/${app.id}`)}
                                     >
                                         Review
                                     </button>

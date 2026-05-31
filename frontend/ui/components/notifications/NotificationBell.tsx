@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Popup, Label, List, Icon } from 'semantic-ui-react';
 import { formatDistance } from 'date-fns';
 import { Notification } from '../../api/notificationServices';
@@ -16,7 +16,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
     unreadCount,
     onMarkAsRead
 }) => {
-    const history = useHistory();
+    const navigate = useNavigate();
 
     const resolveActionUrl = (actionType: string | undefined, payload: Record<string, string> | undefined): string | null => {
         if (!actionType) return null;
@@ -102,7 +102,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                             onClick={() => {
                                 if (onMarkAsRead) onMarkAsRead(notification.id);
                                 const url = resolveActionUrl(notification.actionType, notification.actionPayload);
-                                if (url) history.push(url);
+                                if (url) navigate(url);
                             }}
                         >
                             <List.Icon 

@@ -4,7 +4,7 @@ import { Dropdown } from 'semantic-ui-react';
 
 import LookupServices from '../../api/lookupServices';
 
-export default function(props) : JSX.Element {
+export default function(props) : React.JSX.Element {
 
         let { options = [], isAsync, groupId, value, onChange } = props;   
 

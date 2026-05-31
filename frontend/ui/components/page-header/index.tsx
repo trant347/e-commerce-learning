@@ -9,7 +9,7 @@ import Modal from '../modal/modal';
 import { useState, Fragment, useEffect } from "react";
 
 
-import { Link, useHistory } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import ApplicationBadgeContext from '../../context/applicationBadgeContext';
@@ -44,7 +44,7 @@ export default function(props) {
 
         let tabs = ["For You", "Top Rated", "New TaskMasters"];
 
-        let history = useHistory();
+        let navigate = useNavigate();
 
         let topCategories = ["Plumbing","Cleaning","Electrical", "Tutoring", "Pet Care", "Moving"]
 
@@ -125,12 +125,12 @@ export default function(props) {
                                             <Menu.Item
                                                 name='profile'                                             
                                                 >
-                                                 <StyledLinkHovered onClick={() => history.push('/profile')}> My Profile </StyledLinkHovered>                                       
+                                                 <StyledLinkHovered onClick={() => navigate('/profile')}> My Profile </StyledLinkHovered>                                       
                                             </Menu.Item>
 
                                             {isTaskMaster && (
                                                 <Menu.Item name='incoming-bookings'>
-                                                    <StyledLinkHovered onClick={() => history.push('/bookings/incoming')}>
+                                                    <StyledLinkHovered onClick={() => navigate('/bookings/incoming')}>
                                                         <i className="calendar alternate icon" /> Booking Requests
                                                     </StyledLinkHovered>
                                                 </Menu.Item>
@@ -138,7 +138,7 @@ export default function(props) {
 
                                             {username === 'admin' && (
                                                 <Menu.Item name='new-taskmaster'>
-                                                    <StyledLinkHovered onClick={() => history.push('/admin/new-taskmaster')}>
+                                                    <StyledLinkHovered onClick={() => navigate('/admin/new-taskmaster')}>
                                                         <i className="user plus icon" /> Add TaskMaster
                                                     </StyledLinkHovered>
                                                 </Menu.Item>
@@ -146,7 +146,7 @@ export default function(props) {
 
                                             {username === 'admin' && (
                                                 <Menu.Item name='applications'>
-                                                    <StyledLinkHovered onClick={() => history.push('/admin/applications')}>
+                                                    <StyledLinkHovered onClick={() => navigate('/admin/applications')}>
                                                         <i className="tasks icon" /> Applications
                                                         {unviewedApplicationCount > 0 && (
                                                             <Label circular color='red' size='mini' style={{ marginLeft: '6px' }}>
@@ -164,7 +164,7 @@ export default function(props) {
                                                     onClick={
                                                         () => {
                                                             setUsername(null);
-                                                            history.push('/');
+                                                            navigate('/');
                                                         }
                                                     }> 
                                                     Log out 
@@ -227,7 +227,7 @@ export default function(props) {
                         callback={({username}) => {
                             setUsername(username);
                             setLoginPopupVisibility(false);
-                            history.push("/");
+                            navigate("/");
                         }}
                     />
                 }
@@ -238,7 +238,7 @@ export default function(props) {
 }
 
 
-function SignInOrJoinPopUp({ showLoginPopup }) : JSX.Element {
+function SignInOrJoinPopUp({ showLoginPopup }) : React.JSX.Element {
     return (
         <Popup 
             hoverable

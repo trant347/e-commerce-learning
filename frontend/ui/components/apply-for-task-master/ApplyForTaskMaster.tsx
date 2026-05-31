@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useContext } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
@@ -18,7 +18,7 @@ interface FormState {
 
 export default function ApplyForTaskMaster() {
     const { username } = useContext(UserContext);
-    const history = useHistory();
+    const navigate = useNavigate();
 
     const [form, setForm] = useState<FormState>({
         name: '',
@@ -37,8 +37,7 @@ export default function ApplyForTaskMaster() {
 
     // Must be logged in to apply
     if (!username) {
-        history.replace('/signin');
-        return null;
+        return <Navigate to="/signin" replace />;
     }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -105,7 +104,7 @@ export default function ApplyForTaskMaster() {
                     <p style={{ marginTop: '0.75rem' }}>
                         Your application is under review. You'll receive a notification once an admin has made a decision.
                     </p>
-                    <button className="submit-btn" style={{ marginTop: '1rem' }} onClick={() => history.push('/')}>
+                    <button className="submit-btn" style={{ marginTop: '1rem' }} onClick={() => navigate('/')}>
                         Back to Home
                     </button>
                 </div>

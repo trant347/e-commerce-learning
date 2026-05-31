@@ -1,10 +1,11 @@
 import * as React from "react";
+import { useParams } from "react-router-dom";
 import { Calendar, Event, BusyRange } from "../components/calendar/calendar";
 import { Button } from "semantic-ui-react";
 import { Booking, BookingService } from "../api/bookingServices";
 import { TaskMasterServices } from "../api/taskMasterServices";
 
-export default function CalendarPage(props: {events: Event[], match?: any}) {
+export default function CalendarPage(props: {events: Event[], taskMasterId?: string}) {
 
     let [selectedDate, setSelected] = React.useState<Date | null>(null);
     let [duration, setDuration] = React.useState<number>(1);
@@ -16,7 +17,8 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
     // unique index as a hard guarantee, but disabling the button is the cheap UX fix here.
     let [submitting, setSubmitting] = React.useState<boolean>(false);
     let [busy, setBusy] = React.useState<BusyRange[]>([]);
-    const taskMasterId: string | undefined = props.match?.params?.id;
+    const routeParams = useParams<{ id?: string }>();
+    const taskMasterId: string | undefined = props.taskMasterId ?? routeParams.id;
 
     React.useEffect(() => {
         if (taskMasterId) {

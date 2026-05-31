@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useContext } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
@@ -18,7 +18,7 @@ interface FormState {
 
 export default function NewTaskMaster() {
     const { username } = useContext(UserContext);
-    const history = useHistory();
+    const navigate = useNavigate();
 
     const [form, setForm] = useState<FormState>({
         name: '',
@@ -36,8 +36,7 @@ export default function NewTaskMaster() {
 
     // Guard: redirect non-admin users away
     if (username !== 'admin') {
-        history.replace('/');
-        return null;
+        return <Navigate to="/" replace />;
     }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -87,7 +86,7 @@ export default function NewTaskMaster() {
                 jobCategories: categories,
             });
 
-            history.push(`/product/${created.id}`);
+            navigate(`/product/${created.id}`);
         } catch (err) {
             setFeedback({ type: 'error', message: 'Failed to create TaskMaster. Please try again.' });
         } finally {

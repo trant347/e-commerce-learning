@@ -23,7 +23,7 @@ export default function({ username }) {
         shouldSubmitForm: false
     };
 
-    let [userData, dispatchUserData] = React.useReducer<StateInterface, {type: string, payload: any}>(profileReducer,initUserValue);
+    let [userData, dispatchUserData] = React.useReducer(profileReducer, initUserValue);
 
     const userProfileService = new UserProfileServices();   
    
