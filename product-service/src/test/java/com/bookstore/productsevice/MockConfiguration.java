@@ -63,6 +63,11 @@ public class MockConfiguration {
             }
 
             @Override
+            public Optional<TaskMaster> findByOwnerUsername(String ownerUsername) {
+                return Optional.empty();
+            }
+
+            @Override
             public Optional<Document> getBooksUsingNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
                 return Optional.empty();
             }

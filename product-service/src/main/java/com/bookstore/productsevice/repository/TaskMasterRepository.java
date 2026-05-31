@@ -4,6 +4,7 @@ import com.bookstore.productsevice.model.TaskMaster;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface TaskMasterRepository extends MongoRepository<TaskMaster, String>, FacetRepository {
     List<TaskMaster> findAllByName(String name);
@@ -12,4 +13,5 @@ public interface TaskMasterRepository extends MongoRepository<TaskMaster, String
     List<TaskMaster> findTaskMasterByHourlyRateUsdBetween(double low, double high);
     List<TaskMaster> findTaskMasterByRatingGreaterThanEqual(double rating);
     long deleteByOwnerUsername(String ownerUsername);
+    Optional<TaskMaster> findByOwnerUsername(String ownerUsername);
 }

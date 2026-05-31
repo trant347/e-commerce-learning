@@ -20,6 +20,7 @@ import styled from 'styled-components';
 
 import { NotificationBell } from '../notifications/NotificationBell';
 import { useNotifications } from '../../hooks/useNotifications';
+import { TaskMasterServices } from '../../api/taskMasterServices';
 
 const StyledNav = styled.nav`
     padding-left: 10%;
@@ -57,6 +58,15 @@ export default function(props) {
 
         // Use the notifications hook
         const { notifications, unreadCount, markAsRead, lastNotification } = useNotifications(username);
+
+        const [isTaskMaster, setIsTaskMaster] = useState<boolean>(false);
+
+        useEffect(() => {
+            if (!username) { setIsTaskMaster(false); return; }
+            TaskMasterServices.getMyTaskMaster()
+                .then(tm => setIsTaskMaster(tm != null))
+                .catch(() => setIsTaskMaster(false));
+        }, [username]);
 
         // Increment badge in real-time when a new application arrives via SSE
         useEffect(() => {
@@ -117,6 +127,14 @@ export default function(props) {
                                                 >
                                                  <StyledLinkHovered onClick={() => history.push('/profile')}> My Profile </StyledLinkHovered>                                       
                                             </Menu.Item>
+
+                                            {isTaskMaster && (
+                                                <Menu.Item name='incoming-bookings'>
+                                                    <StyledLinkHovered onClick={() => history.push('/bookings/incoming')}>
+                                                        <i className="calendar alternate icon" /> Booking Requests
+                                                    </StyledLinkHovered>
+                                                </Menu.Item>
+                                            )}
 
                                             {username === 'admin' && (
                                                 <Menu.Item name='new-taskmaster'>

@@ -15,10 +15,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
@@ -130,6 +132,23 @@ public class TaskMasterController {
                 .orElseThrow(() -> new ItemNotFoundException(id));
         log.debug("[TaskMasterController] Found task master id='{}' name='{}'", id, taskMaster.getName());
         return new ResponseEntity<>(taskMaster, HttpStatus.OK);
+    }
+
+    /**
+     * Returns the TaskMaster profile owned by the authenticated caller, or 404 if the caller
+     * does not own one. Used by the frontend to gate TaskMaster-only UI (e.g. the
+     * "Booking Requests" menu) without scanning the full catalog.
+     */
+    @GetMapping("/me/taskmaster")
+    public ResponseEntity<TaskMaster> getMyTaskMaster(HttpServletRequest request) {
+        Object attr = request.getAttribute("authenticatedUsername");
+        if (attr == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        String username = attr.toString();
+        Optional<TaskMaster> tm = taskMasterRepository.findByOwnerUsername(username);
+        return tm.<ResponseEntity<TaskMaster>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/facet-search")

@@ -25,6 +25,8 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
             case 'VIEW_MY_APPLICATION':    return '/my-application';
             case 'VIEW_ADMIN_APPLICATION': return `/admin/applications/${p.applicationId}`;
             case 'VIEW_TASKMASTER':        return `/product/${p.taskMasterId}`;
+            case 'VIEW_INCOMING_BOOKING_REQUEST': return '/bookings/incoming';
+            case 'VIEW_OUTGOING_BOOKING_REQUEST': return p.taskMasterId ? `/booking/${p.taskMasterId}` : '/';
             default: return null;
         }
     };

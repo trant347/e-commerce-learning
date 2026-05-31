@@ -18,6 +18,18 @@ export const TaskMasterServices : ITaskMasterServices  = {
         ).then(res => res.data);
     },
 
+    getMyTaskMaster(): Promise<TaskMaster | null> {
+        const token = localStorage.getItem('token');
+        return axios.get(
+            '/products/me/taskmaster',
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(res => res.data)
+         .catch(err => {
+             if (err?.response?.status === 404) return null;
+             throw err;
+         });
+    },
+
     getTaskMastersAtPage(pageIndex: number, limit: number): Promise<TaskMaster[]> {
         return axios.get(`/products?page=${pageIndex}&limit=${limit}`).then(res => res.data);
     },

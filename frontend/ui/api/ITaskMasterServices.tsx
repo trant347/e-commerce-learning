@@ -7,6 +7,8 @@ export default interface ITaskMasterServices {
 
     getTaskMasterById(id: string) : Promise<TaskMaster>,
 
+    getMyTaskMaster(): Promise<TaskMaster | null>;
+
     getTaskMastersAtPage(pageIndex: number, limit: number): Promise<TaskMaster[]>;
 
     createTaskMaster(taskMaster: Omit<TaskMaster, 'id'>): Promise<TaskMaster>;

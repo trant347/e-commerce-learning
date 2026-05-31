@@ -70,6 +70,11 @@ const AsyncAdminApplicationsList = loadable({
     loading: LoadingComponent
 });
 
+const AsyncIncomingBookings = loadable({
+    loader: () => import('./IncomingBookings'),
+    loading: LoadingComponent
+});
+
 export interface IAppContext {
     username: string
 }
@@ -123,6 +128,7 @@ export default class App extends React.Component<{},IAppContext>{
                             <Route path="/apply" component={AsyncApplyForTaskMaster}></Route>
                             <Route path="/admin/applications/:id" component={AsyncApplicationReview}></Route>
                             <Route path="/admin/applications" component={AsyncAdminApplicationsList}></Route>
+                            <Route path="/bookings/incoming" component={AsyncIncomingBookings}></Route>
                         </Switch>
 
 
