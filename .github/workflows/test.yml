@@ -71,3 +71,23 @@ jobs:
       - name: Run tests
         run: dotnet test --no-restore --nologo --verbosity normal
 
+  frontend-tests:
+    name: frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/ui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test -- --ci --colors=false

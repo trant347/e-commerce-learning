@@ -217,12 +217,7 @@ export default function(props) {
                                 }
                             </li>
                             <li> Best Value </li>
-                        </ul>
-                        <ul>
-                            <li> $USD </li>
-                            <li> $0.00 </li>
-                            <li> 0 </li>
-                        </ul>
+                        </ul>                    
                     </StyledNav>
                 </header>
 
