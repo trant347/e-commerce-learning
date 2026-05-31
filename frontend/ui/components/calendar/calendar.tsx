@@ -23,8 +23,16 @@ export interface Event {
   end: Date;
 }
 
+export interface BusyRange {
+  start: Date;
+  end: Date;
+  label?: string;
+}
+
 interface CalendarProps {
   events: Event[];
+  /** Time ranges the TaskMaster is unavailable. Cells overlapping these ranges are disabled. */
+  busy?: BusyRange[];
   /** Fires whenever the user selects a time range. Single-click = 1 hour. */
   onChange: (start: Date, durationHours: number) => void;
 }
@@ -34,7 +42,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 type Cell = { dayIndex: number; hour: number };
 
-export const Calendar: React.FC<CalendarProps> = ({ events, onChange }) => {
+export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const weekStart = useMemo(() => startOfWeek(currentDate, { weekStartsOn: 0 }), [currentDate]);
@@ -62,16 +70,37 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onChange }) => {
     [todayStart, now, currentHour]
   );
 
+  const isBusyCell = useCallback(
+    (day: Date, hour: number) => {
+      if (!busy || busy.length === 0) return false;
+      const cellStart = addHours(startOfDay(day), hour);
+      const cellEnd = addHours(cellStart, 1);
+      return busy.some(b => b.start < cellEnd && b.end > cellStart);
+    },
+    [busy]
+  );
+
+  const rangeHasBusy = useCallback(
+    (dayIndex: number, startHour: number, endHour: number) => {
+      for (let h = startHour; h <= endHour; h++) {
+        if (isBusyCell(days[dayIndex], h)) return true;
+      }
+      return false;
+    },
+    [days, isBusyCell]
+  );
+
   const emitSelection = useCallback(
     (a: Cell, f: Cell) => {
       if (a.dayIndex !== f.dayIndex) return;
       const day = days[a.dayIndex];
       const startHour = Math.min(a.hour, f.hour);
       const endHour = Math.max(a.hour, f.hour);
+      if (rangeHasBusy(a.dayIndex, startHour, endHour)) return;
       const start = addHours(startOfDay(day), startHour);
       onChange(start, endHour - startHour + 1);
     },
-    [days, onChange]
+    [days, onChange, rangeHasBusy]
   );
 
   useEffect(() => {
@@ -91,8 +120,12 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onChange }) => {
   const handleCellMouseDown = (dayIndex: number, hour: number) => (e: React.MouseEvent) => {
     e.preventDefault();
     if (isPastCell(days[dayIndex], hour)) return;
+    if (isBusyCell(days[dayIndex], hour)) return;
     const cell: Cell = { dayIndex, hour };
     if (mode === 'awaiting-end' && anchor && anchor.dayIndex === dayIndex) {
+      const startHour = Math.min(anchor.hour, hour);
+      const endHour = Math.max(anchor.hour, hour);
+      if (rangeHasBusy(dayIndex, startHour, endHour)) return;
       setFocus(cell);
       emitSelection(anchor, cell);
       setMode('idle');
@@ -109,6 +142,7 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onChange }) => {
     if (mode !== 'dragging' || !anchor) return;
     if (dayIndex !== anchor.dayIndex) return;
     if (isPastCell(days[dayIndex], hour)) return;
+    if (isBusyCell(days[dayIndex], hour)) return;
     if (!focus || focus.hour !== hour) movedRef.current = true;
     setFocus({ dayIndex, hour });
   };
@@ -212,13 +246,16 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onChange }) => {
                 >
                   {HOURS.map(h => {
                     const past = isPastCell(day, h);
+                    const isBusy = !past && isBusyCell(day, h);
+                    const disabled = past || isBusy;
+                    const cls = past ? 'past' : (isBusy ? 'busy' : '');
                     return (
                       <div
                         key={h}
-                        className={`hour-cell ${past ? 'past' : ''}`}
+                        className={`hour-cell ${cls}`}
                         style={{ height: `${HOUR_HEIGHT}px` }}
-                        onMouseDown={past ? undefined : handleCellMouseDown(dayIndex, h)}
-                        onMouseEnter={past ? undefined : handleCellMouseEnter(dayIndex, h)}
+                        onMouseDown={disabled ? undefined : handleCellMouseDown(dayIndex, h)}
+                        onMouseEnter={disabled ? undefined : handleCellMouseEnter(dayIndex, h)}
                       />
                     );
                   })}

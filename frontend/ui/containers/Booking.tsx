@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Calendar, Event } from "../components/calendar/calendar";
+import { Calendar, Event, BusyRange } from "../components/calendar/calendar";
 import { Button } from "semantic-ui-react";
-import { BookingService } from "../api/bookingServices";
+import { Booking, BookingService } from "../api/bookingServices";
 import { TaskMasterServices } from "../api/taskMasterServices";
 
 export default function CalendarPage(props: {events: Event[], match?: any}) {
@@ -15,6 +15,7 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
     // and one of them (whichever loses the race) comes back as 409. The backend has a DB-level
     // unique index as a hard guarantee, but disabling the button is the cheap UX fix here.
     let [submitting, setSubmitting] = React.useState<boolean>(false);
+    let [busy, setBusy] = React.useState<BusyRange[]>([]);
     const taskMasterId: string | undefined = props.match?.params?.id;
 
     React.useEffect(() => {
@@ -24,6 +25,24 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
                 .catch(() => setTaskMasterName(null));
         }
     }, [taskMasterId]);
+
+    const loadTimetable = React.useCallback(() => {
+        if (!taskMasterId) { setBusy([]); return; }
+        BookingService.getTimetable(taskMasterId)
+            .then((bookings: Booking[]) => {
+                const ranges: BusyRange[] = bookings
+                    .filter(b => b.status === 'ACCEPTED')
+                    .map(b => {
+                        const start = new Date(b.slotStart);
+                        const end = new Date(start.getTime() + b.durationHours * 60 * 60 * 1000);
+                        return { start, end, label: b.status };
+                    });
+                setBusy(ranges);
+            })
+            .catch(() => setBusy([]));
+    }, [taskMasterId]);
+
+    React.useEffect(loadTimetable, [loadTimetable]);
 
     let onChange = (start: Date, hours: number) => {
         setSelected(start);
@@ -42,6 +61,8 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
             .then(() => {
                 alert("Booking request sent!");
                 setDescription("");
+                setSelected(null);
+                loadTimetable();
             })
             .catch(err => alert(err?.response?.data?.error ?? "Failed to send booking request"))
             .finally(() => setSubmitting(false));
@@ -56,7 +77,7 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
             )}
             <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 600px', minWidth: 0 }}>
-                    <Calendar events={props.events} onChange={onChange}/>
+                    <Calendar events={props.events} busy={busy} onChange={onChange}/>
                 </div>
                 <div style={{ flex: '0 1 320px', minWidth: '260px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div>
@@ -94,7 +115,7 @@ export default function CalendarPage(props: {events: Event[], match?: any}) {
                             </span>
                         )}
                     </div>
-                    <Button onClick={onSubmit} disabled={!taskMasterId || !selectedDate || submitting} loading={submitting}>Submit</Button>
+                    <Button color={!taskMasterId || !selectedDate ? undefined : 'green'} onClick={onSubmit} disabled={!taskMasterId || !selectedDate || submitting} loading={submitting}>Submit</Button>
                 </div>
             </div>
         </div>

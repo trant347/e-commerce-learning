@@ -195,6 +195,17 @@
   cursor: not-allowed;
 }
 
+.hour-cell.busy {
+  background: repeating-linear-gradient(
+    45deg,
+    #f3f2f1,
+    #f3f2f1 6px,
+    #e1dfdd 6px,
+    #e1dfdd 12px
+  );
+  cursor: not-allowed;
+}
+
 .day-header.past .day-name,
 .day-header.past .day-date {
   color: #a19f9d;
