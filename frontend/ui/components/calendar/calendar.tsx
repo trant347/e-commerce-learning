@@ -75,8 +75,8 @@ export const Calendar: React.FC<CalendarProps> = ({ events, onChange }) => {
   );
 
   useEffect(() => {
+    if (mode !== 'dragging') return;
     const onUp = () => {
-      if (mode !== 'dragging') return;
       if (movedRef.current && anchor && focus) {
         emitSelection(anchor, focus);
         setMode('idle');
