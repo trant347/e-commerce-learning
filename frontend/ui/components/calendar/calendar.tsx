@@ -35,6 +35,8 @@ interface CalendarProps {
   busy?: BusyRange[];
   /** Fires whenever the user selects a time range. Single-click = 1 hour. */
   onChange: (start: Date, durationHours: number) => void;
+  /** Fires when the user clears their selection (e.g. pressing Delete/Backspace). */
+  onClear?: () => void;
 }
 
 const HOUR_HEIGHT = 48; // px per hour
@@ -42,7 +44,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 type Cell = { dayIndex: number; hour: number };
 
-export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange }) => {
+export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange, onClear }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const weekStart = useMemo(() => startOfWeek(currentDate, { weekStartsOn: 0 }), [currentDate]);
@@ -56,6 +58,7 @@ export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange }) =>
   const [focus, setFocus] = useState<Cell | null>(null);
   const [mode, setMode] = useState<'idle' | 'dragging' | 'awaiting-end'>('idle');
   const movedRef = useRef(false);
+  const dayColumnRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const now = new Date();
   const todayStart = startOfDay(now);
@@ -116,6 +119,72 @@ export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange }) =>
     window.addEventListener('mouseup', onUp);
     return () => window.removeEventListener('mouseup', onUp);
   }, [mode, anchor, focus, emitSelection]);
+
+  // While dragging (cell-drag or handle-resize), track the mouse against the
+  // anchor's day column so resize works even when the cursor leaves the
+  // .hour-cell elements (fast drags, drags onto the handle itself, etc).
+  useEffect(() => {
+    if (mode !== 'dragging' || !anchor) return;
+    const onMove = (e: MouseEvent) => {
+      const col = dayColumnRefs.current[anchor.dayIndex];
+      if (!col) return;
+      const rect = col.getBoundingClientRect();
+      const hour = Math.max(0, Math.min(23, Math.floor((e.clientY - rect.top) / HOUR_HEIGHT)));
+      if (isPastCell(days[anchor.dayIndex], hour)) return;
+      if (isBusyCell(days[anchor.dayIndex], hour)) return;
+      if (focus && focus.hour === hour && focus.dayIndex === anchor.dayIndex) return;
+      movedRef.current = true;
+      setFocus({ dayIndex: anchor.dayIndex, hour });
+    };
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, [mode, anchor, focus, days, isPastCell, isBusyCell]);
+
+  const clearSelection = useCallback(() => {
+    setAnchor(null);
+    setFocus(null);
+    setMode('idle');
+    movedRef.current = false;
+    onClear?.();
+  }, [onClear]);
+
+  /** Start a resize drag from the top or bottom edge of the current selection. */
+  const startResize = (edge: 'top' | 'bottom') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!anchor || !focus) return;
+    const dayIndex = anchor.dayIndex;
+    const startHour = Math.min(anchor.hour, focus.hour);
+    const endHour = Math.max(anchor.hour, focus.hour);
+    // The edge the user grabbed is the one that moves; the opposite edge stays put.
+    const fixedHour = edge === 'top' ? endHour : startHour;
+    const activeHour = edge === 'top' ? startHour : endHour;
+    setAnchor({ dayIndex, hour: fixedHour });
+    setFocus({ dayIndex, hour: activeHour });
+    setMode('dragging');
+    movedRef.current = true; // emit on mouseup even if the user doesn't actually move
+  };
+
+  // Esc cancels the current selection. Ignore when typing in a field so the
+  // description textarea still gets Esc for its own purposes (and we don't
+  // hijack Esc when there's nothing to clear).
+  useEffect(() => {
+    if (!anchor || !focus) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+          return;
+        }
+      }
+      e.preventDefault();
+      clearSelection();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [anchor, focus, clearSelection]);
 
   const handleCellMouseDown = (dayIndex: number, hour: number) => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -242,6 +311,7 @@ export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange }) =>
               return (
                 <div
                   key={day.toISOString()}
+                  ref={el => { dayColumnRefs.current[dayIndex] = el; }}
                   className={`day-column ${isToday(day) ? 'today' : ''} ${dayIsPast ? 'past' : ''} ${mode !== 'idle' ? 'selecting' : ''}`}
                 >
                   {HOURS.map(h => {
@@ -271,6 +341,26 @@ export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange }) =>
                       className={`selection ${mode === 'awaiting-end' ? 'pending' : ''}`}
                       style={{ top: `${sel.top}px`, height: `${sel.height}px` }}
                     >
+                      <div
+                        className="selection-handle top"
+                        onMouseDown={startResize('top')}
+                        title="Drag to resize"
+                      />
+                      <div
+                        className="selection-handle bottom"
+                        onMouseDown={startResize('bottom')}
+                        title="Drag to resize"
+                      />
+                      <button
+                        type="button"
+                        className="selection-clear"
+                        aria-label="Clear selection"
+                        title="Clear selection (Esc)"
+                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); }}
+                        onClick={e => { e.stopPropagation(); clearSelection(); }}
+                      >
+                        ×
+                      </button>
                       <div className="selection-label">
                         {sel.hours} {sel.hours === 1 ? 'hour' : 'hours'}
                       </div>

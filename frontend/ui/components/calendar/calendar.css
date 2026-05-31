@@ -258,6 +258,57 @@
   opacity: 0.8;
 }
 
+/* Clear (×) button on the selection overlay. The overlay itself is
+   pointer-events: none so the cells beneath stay interactive, so the
+   button has to re-enable pointer events on itself. */
+.selection-clear {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--today-accent);
+  font-size: 1rem;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.selection-clear:hover {
+  background: var(--today-accent);
+  color: #fff;
+}
+
+/* Resize handles on the top/bottom edges of the selection overlay. They
+   re-enable pointer events (overlay is pointer-events: none) so the cursor
+   shows the ns-resize affordance and mousedown starts a resize drag. */
+.selection-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  pointer-events: auto;
+  z-index: 3;
+}
+
+.selection-handle.top {
+  top: -4px;
+}
+
+.selection-handle.bottom {
+  bottom: -4px;
+}
+
 /* Events absolutely positioned within the day column */
 .event {
   position: absolute;

@@ -79,7 +79,7 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
             )}
             <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 600px', minWidth: 0 }}>
-                    <Calendar events={props.events} busy={busy} onChange={onChange}/>
+                    <Calendar events={props.events} busy={busy} onChange={onChange} onClear={() => { setSelected(null); setDuration(1); }}/>
                 </div>
                 <div style={{ flex: '0 1 320px', minWidth: '260px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div>
