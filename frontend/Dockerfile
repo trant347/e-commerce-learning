@@ -11,6 +11,6 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["sh", "-c", "NODE_ENV=production node --require ./tracing.js ./bin/www"]
 
 

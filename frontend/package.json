@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "set NODE_ENV=production &&  node ./bin/www",
+    "start": "set NODE_ENV=production && node --require ./tracing.js ./bin/www",
     "storybook": "cd ./ui && npm run storybook",
     "webpack": "cd ./ui && webpack --watch",
     "build": "cd ./ui && webpack",
@@ -11,6 +11,11 @@
     "debug-production": "NODE_ENV=production nodemon --inspect-brk=0.0.0.0:9229 ./bin/www"
   },
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.55.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
+    "@opentelemetry/sdk-metrics": "^1.30.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
     "axios": "0.19.2",
     "consul": "0.34.1",
     "cookie-parser": "1.4.4",
