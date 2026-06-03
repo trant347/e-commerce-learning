@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using calendar_service.Services.Contracts;
 using Confluent.Kafka;
@@ -11,6 +13,8 @@ namespace calendar_service.MessageQueue
     /// </summary>
     public class UserEventConsumerWorker : BackgroundService
     {
+        private static readonly ActivitySource s_activitySource = new("Kafka.Consumer");
+
         public const string Topic = "user-events";
         private const string UserDeletedType = "USER_DELETED";
 
@@ -55,6 +59,7 @@ namespace calendar_service.MessageQueue
                         var result = consumer.Consume(stoppingToken);
                         if (result?.Message?.Value == null) continue;
 
+                        using var activity = StartConsumerActivity(result);
                         await HandleAsync(result.Message.Value);
                     }
                     catch (ConsumeException ex)
@@ -102,6 +107,32 @@ namespace calendar_service.MessageQueue
             var deleted = await bookings.DeleteForUserAsync(username);
 
             _logger.LogInformation("USER_DELETED cascade for '{Username}': bookings={Count}", username, deleted);
+        }
+
+        private static Activity? StartConsumerActivity(ConsumeResult<string, string> result)
+        {
+            ActivityContext parentContext = default;
+
+            if (result.Message?.Headers != null)
+            {
+                var header = result.Message.Headers.FirstOrDefault(h => h.Key == "traceparent");
+                if (header != null)
+                {
+                    var traceparent = Encoding.UTF8.GetString(header.GetValueBytes());
+                    ActivityContext.TryParse(traceparent, null, out parentContext);
+                }
+            }
+
+            var activity = s_activitySource.StartActivity(
+                $"{Topic} process",
+                ActivityKind.Consumer,
+                parentContext);
+
+            activity?.SetTag("messaging.system", "kafka");
+            activity?.SetTag("messaging.destination.name", Topic);
+            activity?.SetTag("messaging.operation", "process");
+
+            return activity;
         }
     }
 }

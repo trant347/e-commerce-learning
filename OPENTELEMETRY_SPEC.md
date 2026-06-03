@@ -360,6 +360,10 @@ environment:
    - Jaeger — trace UI at http://localhost:16686 (http://localhost:16686)
    - Prometheus — metrics at http://localhost:9090 (http://localhost:9090)
 
+   To search for trace, in Jaeger UI, copy the id from traceparent or x-trace-id and search for that
+
+   Traceparent Format: version-traceId-spanId-flags
+
 ## Files Summary
 
 | File | Action | Description |

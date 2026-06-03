@@ -1,4 +1,6 @@
-﻿using Confluent.Kafka;
+﻿using System.Diagnostics;
+using System.Text;
+using Confluent.Kafka;
 using System.Text.Json;
 using worker_service.Contracts;
 using worker_service.MessageQueue;
@@ -8,6 +10,8 @@ namespace worker_service
 {
     public class BookingJobConsumerWorker : BackgroundService
     {
+        private static readonly ActivitySource s_activitySource = new("Kafka.Consumer");
+
         private readonly ILogger<BookingJobConsumerWorker> _logger;
         private readonly IConfiguration _configuration;
         private readonly ConsumerConfig _consumerConfig;
@@ -61,6 +65,7 @@ namespace worker_service
                         var consumeResult = consumer.Consume(stoppingToken);
                         if (consumeResult != null)
                         {
+                            using var activity = StartConsumerActivity(consumeResult);
                             var bookingJob = consumeResult.Message.Value;
                             _logger.LogInformation($"Received booking job: {bookingJob.Id}");
                             // Process the booking job
@@ -101,6 +106,32 @@ namespace worker_service
         {
             _logger.LogInformation("Booking Job Consumer Worker stopping at: {time}", DateTimeOffset.Now);
             await base.StopAsync(stoppingToken);
+        }
+
+        private static Activity? StartConsumerActivity(ConsumeResult<string, BookingJobMessage> result)
+        {
+            ActivityContext parentContext = default;
+
+            if (result.Message?.Headers != null)
+            {
+                var header = result.Message.Headers.FirstOrDefault(h => h.Key == "traceparent");
+                if (header != null)
+                {
+                    var traceparent = Encoding.UTF8.GetString(header.GetValueBytes());
+                    ActivityContext.TryParse(traceparent, null, out parentContext);
+                }
+            }
+
+            var activity = s_activitySource.StartActivity(
+                $"{result.Topic} process",
+                ActivityKind.Consumer,
+                parentContext);
+
+            activity?.SetTag("messaging.system", "kafka");
+            activity?.SetTag("messaging.destination.name", result.Topic);
+            activity?.SetTag("messaging.operation", "process");
+
+            return activity;
         }
     }
 }

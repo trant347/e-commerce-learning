@@ -11,6 +11,7 @@
     "debug-production": "NODE_ENV=production nodemon --inspect-brk=0.0.0.0:9229 ./bin/www"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-node": "^0.55.0",
     "@opentelemetry/exporter-metrics-otlp-grpc": "^0.57.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",

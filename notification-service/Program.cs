@@ -15,6 +15,7 @@ var otelEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(otelServiceName))
     .WithTracing(tracing => tracing
+        .AddSource("Kafka.Consumer")
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(opt => opt.Endpoint = new Uri(otelEndpoint)))

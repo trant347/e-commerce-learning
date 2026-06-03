@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using Confluent.Kafka;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
@@ -11,6 +13,8 @@ namespace ai_assistant_service.MessageQueue;
 /// </summary>
 public sealed class CategoryRefreshConsumerWorker : BackgroundService
 {
+    private static readonly ActivitySource s_activitySource = new("Kafka.Consumer");
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly SearchTaskMastersTool _searchTool;
     private readonly IConfiguration _configuration;
@@ -66,11 +70,12 @@ public sealed class CategoryRefreshConsumerWorker : BackgroundService
         {
             try
             {
-                // Consume blocks until a message arrives or the token is cancelled.
-                consumer.Consume(stoppingToken);
+                var result = consumer.Consume(stoppingToken);
 
+                using var activity = StartConsumerActivity(result, topic);
                 _logger.LogInformation("Received categories-updated event — refreshing category list");
-                await RefreshCategoriesAsync(stoppingToken);            }
+                await RefreshCategoriesAsync(stoppingToken);
+            }
             catch (OperationCanceledException)
             {
                 break;
@@ -115,5 +120,35 @@ public sealed class CategoryRefreshConsumerWorker : BackgroundService
             _logger.LogWarning(ex, "Failed to refresh categories from product-service");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Extracts W3C traceparent from Kafka message headers and starts a consumer
+    /// Activity linked to the producer's trace, enabling end-to-end distributed tracing.
+    /// </summary>
+    private static Activity? StartConsumerActivity(ConsumeResult<Ignore, Ignore> result, string topic)
+    {
+        ActivityContext parentContext = default;
+
+        if (result.Message?.Headers != null)
+        {
+            var header = result.Message.Headers.FirstOrDefault(h => h.Key == "traceparent");
+            if (header != null)
+            {
+                var traceparent = Encoding.UTF8.GetString(header.GetValueBytes());
+                ActivityContext.TryParse(traceparent, null, out parentContext);
+            }
+        }
+
+        var activity = s_activitySource.StartActivity(
+            $"{topic} process",
+            ActivityKind.Consumer,
+            parentContext);
+
+        activity?.SetTag("messaging.system", "kafka");
+        activity?.SetTag("messaging.destination.name", topic);
+        activity?.SetTag("messaging.operation", "process");
+
+        return activity;
     }
 }

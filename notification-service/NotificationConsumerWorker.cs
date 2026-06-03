@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using notification_service.Contracts;
@@ -7,6 +9,8 @@ namespace notification_service
 {
     public class NotificationConsumerWorker : BackgroundService
     {
+        private static readonly ActivitySource s_activitySource = new("Kafka.Consumer");
+
         private readonly ILogger<NotificationConsumerWorker> _logger;
         private readonly ConsumerConfig _consumerConfig;
         private readonly IServiceProvider _serviceProvider;
@@ -53,6 +57,8 @@ namespace notification_service
                     try
                     {
                         var consumeResult = consumer.Consume(stoppingToken);
+
+                        using var activity = StartConsumerActivity(consumeResult);
                         _logger.LogInformation("Message consumed from topic {Topic}, partition {Partition}, offset {Offset}",
                             consumeResult.Topic, consumeResult.Partition, consumeResult.Offset);
 
@@ -115,6 +121,32 @@ namespace notification_service
                 consumer.Close();
                 _logger.LogInformation("NotificationConsumerWorker closed");
             }
+        }
+
+        private static Activity? StartConsumerActivity(ConsumeResult<string, string> result)
+        {
+            ActivityContext parentContext = default;
+
+            if (result.Message?.Headers != null)
+            {
+                var header = result.Message.Headers.FirstOrDefault(h => h.Key == "traceparent");
+                if (header != null)
+                {
+                    var traceparent = Encoding.UTF8.GetString(header.GetValueBytes());
+                    ActivityContext.TryParse(traceparent, null, out parentContext);
+                }
+            }
+
+            var activity = s_activitySource.StartActivity(
+                $"{result.Topic} process",
+                ActivityKind.Consumer,
+                parentContext);
+
+            activity?.SetTag("messaging.system", "kafka");
+            activity?.SetTag("messaging.destination.name", result.Topic);
+            activity?.SetTag("messaging.operation", "process");
+
+            return activity;
         }
     }
 }
