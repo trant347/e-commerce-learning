@@ -1,7 +1,7 @@
 # OpenTelemetry Observability Specification
 
 ## Overview
-Add distributed tracing and metrics collection across all 7 microservices using OpenTelemetry, with Jaeger for trace visualization, Prometheus for metrics storage, and Grafana for dashboards.
+Add distributed tracing and metrics collection across all 7 microservices using OpenTelemetry, with Jaeger for trace visualization and Prometheus for metrics storage.
 
 ## Goals
 - End-to-end distributed tracing across all services (Java, .NET, Node.js)
@@ -31,13 +31,7 @@ Add distributed tracing and metrics collection across all 7 microservices using 
      ┌─────────────┐              ┌─────────────────┐
      │   Jaeger     │              │   Prometheus     │
      │  (port 16686)│              │   (port 9090)    │
-     └─────────────┘              └────────┬──────────┘
-                                           │
-                                           ▼
-                                    ┌─────────────┐
-                                    │   Grafana    │
-                                    │  (port 3001) │
-                                    └─────────────┘
+     └─────────────┘              └──────────────────┘
 
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
 │ calendar-service │  │ notification-svc │  │  worker-service  │
@@ -125,28 +119,6 @@ scrape_configs:
   - job_name: 'otel-collector'
     static_configs:
       - targets: ['otel-collector:8889']
-```
-
-### 4. Grafana
-- **Image**: `grafana/grafana:latest`
-- **Port**: 3001 (avoids conflict with frontend on 3000)
-- **Auto-provisioned datasources**: Jaeger + Prometheus
-- **Config file**: `otel/grafana/provisioning/datasources/datasources.yml`
-
-```yaml
-# otel/grafana/provisioning/datasources/datasources.yml
-apiVersion: 1
-datasources:
-  - name: Jaeger
-    type: jaeger
-    access: proxy
-    url: http://jaeger:16686
-    isDefault: false
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
-    isDefault: true
 ```
 
 ## Service Instrumentation
@@ -380,22 +352,13 @@ environment:
     depends_on:
       - otel-collector
     restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-    volumes:
-      - ./otel/grafana/provisioning:/etc/grafana/provisioning
-    ports:
-      - "3001:3000"
-    depends_on:
-      - prometheus
-      - jaeger
-    restart: unless-stopped
 ```
+
+## URLs
+
+   - OTel Collector — central telemetry hub (ports 4317/4318)
+   - Jaeger — trace UI at http://localhost:16686 (http://localhost:16686)
+   - Prometheus — metrics at http://localhost:9090 (http://localhost:9090)
 
 ## Files Summary
 
@@ -403,8 +366,7 @@ environment:
 |------|--------|-------------|
 | `otel/otel-collector-config.yml` | **Create** | OTel Collector pipeline configuration |
 | `otel/prometheus.yml` | **Create** | Prometheus scrape configuration |
-| `otel/grafana/provisioning/datasources/datasources.yml` | **Create** | Grafana auto-provisioned datasources |
-| `docker-compose.yml` | **Modify** | Add 4 observability containers + env vars for all services |
+| `docker-compose.yml` | **Modify** | Add 3 observability containers + env vars for all services |
 | `authorization-service/pom.xml` | **Modify** | Add 3 Maven dependencies |
 | `authorization-service/src/main/resources/application.yml` | **Modify** | Add tracing + metrics config |
 | `product-service/pom.xml` | **Modify** | Add 3 Maven dependencies |
@@ -426,5 +388,5 @@ environment:
 - MongoDB tracing for .NET services (add `MongoDB.Driver.Core.Extensions.DiagnosticSources`)
 - Custom business metrics (e.g., bookings per minute, task completions)
 - Trace sampling strategies for production (tail-based sampling)
-- Alerting rules in Grafana/Prometheus
+- Alerting rules in Prometheus
 - Log correlation (attach trace IDs to structured logs)
