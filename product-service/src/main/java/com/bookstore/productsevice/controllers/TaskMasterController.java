@@ -31,7 +31,8 @@ public class TaskMasterController {
 
     private static final Logger log = LoggerFactory.getLogger(TaskMasterController.class);
 
-    private static final int ITEM_PER_PAGE = 20;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 100;
 
     @Autowired
     public TaskMasterRepository taskMasterRepository;
@@ -71,15 +72,11 @@ public class TaskMasterController {
 
     @GetMapping
     public ResponseEntity<List<TaskMaster>> getTaskMasters(
-            @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer limit) {
+            @RequestParam(required = false, defaultValue = "0") Integer page,
+            @RequestParam(required = false, defaultValue = "20") Integer limit) {
         log.debug("[TaskMasterController] GET /products page={} limit={}", page, limit);
-        List<TaskMaster> taskMasters;
-        if (page != null && limit != null) {
-            taskMasters = taskMasterRepository.findAll(PageRequest.of(page, limit)).getContent();
-        } else {
-            taskMasters = taskMasterRepository.findAll();
-        }
+        int effectiveLimit = Math.min(limit, MAX_PAGE_SIZE);
+        List<TaskMaster> taskMasters = taskMasterRepository.findAll(PageRequest.of(page, effectiveLimit)).getContent();
         log.debug("[TaskMasterController] getAll → {} results", taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -164,7 +161,7 @@ public class TaskMasterController {
             sortedFields = new String[]{"rating", "hourlyRateUsd"};
         }
 
-        Map<String, ?> results = taskMasterSearchService.getTaskMastersByNameFacetSearch(name, page, ITEM_PER_PAGE, sortedFields);
+        Map<String, ?> results = taskMasterSearchService.getTaskMastersByNameFacetSearch(name, page, DEFAULT_PAGE_SIZE, sortedFields);
 
         if (results.get("taskMasters") == null) {
             log.warn("[TaskMasterController] facet-search name='{}' page={} → no taskMasters in result", name, page);

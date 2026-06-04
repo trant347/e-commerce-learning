@@ -5,7 +5,7 @@ import ProductBox from "../components/product-box/product-box";
 import {TaskMaster} from "../common/interfaces";
 import {TaskMasterServices} from "../api/taskMasterServices";
 
-export const ITEMS_PER_PAGE = 6;
+export const ITEMS_PER_PAGE = 20;
 
 export interface TaskMasterState {
     taskMasters: TaskMaster[], 
