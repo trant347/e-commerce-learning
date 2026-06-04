@@ -4,6 +4,7 @@ import com.bookstore.productsevice.exception.ItemNotFoundException;
 import com.bookstore.productsevice.messaging.CategoryEventPublisher;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.services.ProductCacheService;
 import com.bookstore.productsevice.services.queries.TaskMasterSearchService;
 import com.bookstore.productsevice.storage.StorageService;
 import com.bookstore.productsevice.validators.TaskMasterValidator;
@@ -16,14 +17,10 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
-
-import org.springframework.data.domain.PageRequest;
 
 @RestController
 @RequestMapping("/products")
@@ -46,10 +43,13 @@ public class TaskMasterController {
     @Autowired
     private CategoryEventPublisher categoryEventPublisher;
 
+    @Autowired
+    private ProductCacheService productCacheService;
+
     @GetMapping(params = "name")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByName(@RequestParam String name) {
         log.debug("[TaskMasterController] GET /products?name='{}'", name);
-        List<TaskMaster> taskMasters = taskMasterRepository.findAllByName(name);
+        List<TaskMaster> taskMasters = productCacheService.getByName(name);
         log.debug("[TaskMasterController] name='{}' → {} results", name, taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -57,7 +57,7 @@ public class TaskMasterController {
     @GetMapping(params = "location")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByLocation(@RequestParam String location) {
         log.debug("[TaskMasterController] GET /products?location='{}'", location);
-        List<TaskMaster> taskMasters = taskMasterRepository.findAllByLocation(location);
+        List<TaskMaster> taskMasters = productCacheService.getByLocation(location);
         log.debug("[TaskMasterController] location='{}' → {} results", location, taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -65,7 +65,7 @@ public class TaskMasterController {
     @GetMapping(params = "category")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByCategory(@RequestParam String category) {
         log.debug("[TaskMasterController] GET /products?category='{}'", category);
-        List<TaskMaster> taskMasters = taskMasterRepository.findAllByJobCategoriesContaining(category);
+        List<TaskMaster> taskMasters = productCacheService.getByCategory(category);
         log.debug("[TaskMasterController] category='{}' → {} results", category, taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -76,7 +76,7 @@ public class TaskMasterController {
             @RequestParam(required = false, defaultValue = "20") Integer limit) {
         log.debug("[TaskMasterController] GET /products page={} limit={}", page, limit);
         int effectiveLimit = Math.min(limit, MAX_PAGE_SIZE);
-        List<TaskMaster> taskMasters = taskMasterRepository.findAll(PageRequest.of(page, effectiveLimit)).getContent();
+        List<TaskMaster> taskMasters = productCacheService.getPage(page, effectiveLimit);
         log.debug("[TaskMasterController] getAll → {} results", taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -113,6 +113,8 @@ public class TaskMasterController {
         }
         log.info("[TaskMasterController] Saved successfully, id='{}'", response.getId());
 
+        productCacheService.evictOnCreate();
+
         try {
             categoryEventPublisher.publishCategoriesUpdated();
         } catch (Exception e) {
@@ -125,8 +127,10 @@ public class TaskMasterController {
     @GetMapping("/{id}")
     public ResponseEntity<TaskMaster> getTaskMasterById(@PathVariable String id) {
         log.debug("[TaskMasterController] GET /products/{}", id);
-        TaskMaster taskMaster = taskMasterRepository.findById(id)
-                .orElseThrow(() -> new ItemNotFoundException(id));
+        TaskMaster taskMaster = productCacheService.getItemById(id);
+        if (taskMaster == null) {
+            throw new ItemNotFoundException(id);
+        }
         log.debug("[TaskMasterController] Found task master id='{}' name='{}'", id, taskMaster.getName());
         return new ResponseEntity<>(taskMaster, HttpStatus.OK);
     }
@@ -182,7 +186,7 @@ public class TaskMasterController {
     @GetMapping("/by-rating")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByMinRating(@RequestParam double minRating) {
         log.debug("[TaskMasterController] GET /products/by-rating minRating={}", minRating);
-        List<TaskMaster> taskMasters = taskMasterRepository.findTaskMasterByRatingGreaterThanEqual(minRating);
+        List<TaskMaster> taskMasters = productCacheService.getByMinRating(minRating);
         log.debug("[TaskMasterController] by-rating minRating={} → {} results", minRating, taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -192,7 +196,7 @@ public class TaskMasterController {
             @RequestParam double minRate,
             @RequestParam double maxRate) {
         log.debug("[TaskMasterController] GET /products/by-rate-range minRate={} maxRate={}", minRate, maxRate);
-        List<TaskMaster> taskMasters = taskMasterRepository.findTaskMasterByHourlyRateUsdBetween(minRate, maxRate);
+        List<TaskMaster> taskMasters = productCacheService.getByRateRange(minRate, maxRate);
         log.debug("[TaskMasterController] by-rate-range [{}, {}] → {} results", minRate, maxRate, taskMasters.size());
         return new ResponseEntity<>(taskMasters, HttpStatus.OK);
     }
@@ -200,13 +204,7 @@ public class TaskMasterController {
     @GetMapping("/categories")
     public ResponseEntity<List<String>> getCategories() {
         log.debug("[TaskMasterController] GET /products/categories");
-        List<String> categories = taskMasterRepository.findAll().stream()
-                .filter(tm -> tm.getJobCategories() != null)
-                .flatMap(tm -> Arrays.stream(tm.getJobCategories()))
-                .filter(c -> c != null && !c.isBlank())
-                .distinct()
-                .sorted()
-                .collect(Collectors.toList());
+        List<String> categories = productCacheService.getCategories();
         log.debug("[TaskMasterController] categories → {} distinct values", categories.size());
         return ResponseEntity.ok(categories);
     }

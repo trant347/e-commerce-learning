@@ -27,6 +27,7 @@ services:
     - spring.cloud.consul.enabled=true
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
     - SECURITY_JWT_SECRET=${JwtSecret}
+    - SPRING_DATA_REDIS_HOST=redis
     - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     - OTEL_SERVICE_NAME=product-service
     - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
@@ -37,6 +38,7 @@ services:
     - mongodb
     - consul
     - authentication-service
+    - redis
     - otel-collector
 
 
@@ -237,6 +239,7 @@ services:
     - Ollama__TimeoutSeconds=180
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
+    - Redis__ConnectionString=redis:6379
     - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     - OTEL_SERVICE_NAME=ai-assistant-service
     ports:
@@ -245,6 +248,7 @@ services:
     - product-service
     - calendar-service
     - ollama
+    - redis
     - otel-collector
     restart: unless-stopped
 

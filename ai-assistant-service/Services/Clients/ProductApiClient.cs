@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ai_assistant_service.Services.Contracts;
+using Microsoft.Extensions.Caching.Distributed;
 
 namespace ai_assistant_service.Services.Clients;
 
@@ -7,31 +8,68 @@ public sealed class ProductApiClient : IProductApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<ProductApiClient> _logger;
+    private readonly IDistributedCache _cache;
 
-    public ProductApiClient(HttpClient httpClient, ILogger<ProductApiClient> logger)
+    private static readonly TimeSpan ProductCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CategoriesCacheTtl = TimeSpan.FromMinutes(30);
+
+    public ProductApiClient(HttpClient httpClient, ILogger<ProductApiClient> logger, IDistributedCache cache)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _cache = cache;
     }
 
     public async Task<string> FetchProductContextAsync(string? category, string? location, CancellationToken cancellationToken)
     {
+        string path;
+        if (!string.IsNullOrWhiteSpace(category))
+            path = $"/products?category={Uri.EscapeDataString(category)}";
+        else if (!string.IsNullOrWhiteSpace(location))
+            path = $"/products?location={Uri.EscapeDataString(location)}";
+        else
+            path = "/products";
+
+        string cacheKey = $"products:{path}";
+
+        // Try cache first
         try
         {
-            // Use specific filter endpoints when arguments are provided
-            string path;
-            if (!string.IsNullOrWhiteSpace(category))
-                path = $"/products?category={Uri.EscapeDataString(category)}";
-            else if (!string.IsNullOrWhiteSpace(location))
-                path = $"/products?location={Uri.EscapeDataString(location)}";
-            else
-                path = "/products";
+            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            if (cached != null)
+            {
+                _logger.LogDebug("[Cache] HIT ai-assistant key={CacheKey}", cacheKey);
+                return cached;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Cache] Redis read failed for key={CacheKey}, falling through to HTTP", cacheKey);
+        }
 
+        // Cache miss — call product-service
+        try
+        {
             _logger.LogInformation("Fetching task masters: {Path}", path);
-
             var response = await _httpClient.GetAsync(path, cancellationToken);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsStringAsync(cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            // Cache the response
+            try
+            {
+                await _cache.SetStringAsync(cacheKey, body, new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = ProductCacheTtl
+                }, cancellationToken);
+                _logger.LogDebug("[Cache] STORED ai-assistant key={CacheKey}", cacheKey);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Cache] Redis write failed for key={CacheKey}", cacheKey);
+            }
+
+            return body;
         }
         catch (Exception ex)
         {
@@ -42,12 +80,44 @@ public sealed class ProductApiClient : IProductApiClient
 
     public async Task<string[]> FetchCategoriesAsync(CancellationToken cancellationToken)
     {
+        const string cacheKey = "products:categories";
+
+        // Try cache first
+        try
+        {
+            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            if (cached != null)
+            {
+                _logger.LogDebug("[Cache] HIT ai-assistant key={CacheKey}", cacheKey);
+                return JsonSerializer.Deserialize<string[]>(cached) ?? [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Cache] Redis read failed for key={CacheKey}, falling through to HTTP", cacheKey);
+        }
+
+        // Cache miss — call product-service
         try
         {
             _logger.LogInformation("Fetching categories from product-service");
             var response = await _httpClient.GetAsync("/products/categories", cancellationToken);
             response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            // Cache the response
+            try
+            {
+                await _cache.SetStringAsync(cacheKey, json, new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = CategoriesCacheTtl
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Cache] Redis write failed for key={CacheKey}", cacheKey);
+            }
+
             return JsonSerializer.Deserialize<string[]>(json) ?? [];
         }
         catch (Exception ex)

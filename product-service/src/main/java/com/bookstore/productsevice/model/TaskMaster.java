@@ -15,7 +15,9 @@ import jakarta.validation.constraints.NotBlank;
 @Getter
 @Setter
 @Accessors(chain = true)
-public class TaskMaster {
+public class TaskMaster implements java.io.Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @Id
     private String id;

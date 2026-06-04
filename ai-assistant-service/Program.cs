@@ -27,6 +27,12 @@ builder.Services.AddLogging();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration["Redis:ConnectionString"] ?? "redis:6379";
+    options.InstanceName = "ai:";
+});
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(corsBuilder =>
