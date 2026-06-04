@@ -3,6 +3,7 @@ package com.bookstore.productsevice.services;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.data.domain.Page;
@@ -41,7 +42,7 @@ public class ProductCacheServiceTest {
         repository = mock(TaskMasterRepository.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
-        cacheService = new ProductCacheService(redisTemplate, repository, new ObjectMapper());
+        cacheService = new ProductCacheService(redisTemplate, repository, new ObjectMapper(), new SimpleMeterRegistry());
 
         sampleTm1 = new TaskMaster()
                 .setId("tm-1").setName("Alice").setLocation("New York")

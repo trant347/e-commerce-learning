@@ -277,3 +277,62 @@ All cache operations must be wrapped in try-catch with fallback to the current b
 | MGET returns partial nulls | Fetch missing items from MongoDB, backfill into cache |
 | Two layers out of sync | Independent TTLs and key prefixes. ai-assistant layer is just an optimization over HTTP |
 | Complexity vs. simple caching | This is a learning project — the goal is to practice the Amazon-style pattern |
+
+---
+
+## 10. Observability: Cache Metrics
+
+Cache performance is tracked via Micrometer (product-service) and `System.Diagnostics.Metrics` (ai-assistant-service). Both flow through OpenTelemetry to Prometheus.
+
+### 10.1 Metrics Emitted
+
+#### product-service (Micrometer counters)
+
+| Metric Name | Tag | Description |
+|---|---|---|
+| `cache.hits` | `type=item` | Single product lookup served from Redis |
+| `cache.hits` | `type=list` | Paginated page served from Redis ID list |
+| `cache.hits` | `type=filter` | Filter query (name/location/category/rating) served from Redis |
+| `cache.hits` | `type=categories` | Categories list served from Redis |
+| `cache.misses` | `type=item` | Single product fell through to MongoDB |
+| `cache.misses` | `type=list` | Paginated page fell through to MongoDB |
+| `cache.misses` | `type=filter` | Filter query fell through to MongoDB |
+| `cache.misses` | `type=categories` | Categories fell through to MongoDB |
+| `cache.errors` | `type=read` | Redis GET/MGET failed (connection timeout, etc.) |
+| `cache.errors` | `type=write` | Redis SET failed |
+| `cache.evictions` | — | Cache invalidation triggered (by create/edit/delete) |
+
+#### ai-assistant-service (.NET System.Diagnostics.Metrics, meter: `AiAssistant.Cache`)
+
+| Metric Name | Tag | Description |
+|---|---|---|
+| `cache.hits` | `type=products` | Product HTTP response served from Redis |
+| `cache.hits` | `type=categories` | Categories HTTP response served from Redis |
+| `cache.misses` | `type=products` | Product data fell through to HTTP call |
+| `cache.misses` | `type=categories` | Categories fell through to HTTP call |
+| `cache.errors` | `type=read` | Redis read failed |
+| `cache.errors` | `type=write` | Redis write failed |
+
+### 10.2 Useful Prometheus Queries
+
+```promql
+# Cache hit ratio (product-service, all types)
+sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m])))
+
+# Cache hit ratio by type
+rate(cache_hits_total{type="item"}[5m]) / (rate(cache_hits_total{type="item"}[5m]) + rate(cache_misses_total{type="item"}[5m]))
+
+# Cache errors per minute (early warning for Redis issues)
+rate(cache_errors_total[1m])
+
+# Evictions per hour (how often mutations flush the cache)
+increase(cache_evictions_total[1h])
+```
+
+### 10.3 Alerting Thresholds (Suggested)
+
+| Condition | Alert |
+|---|---|
+| `cache_errors_total` rate > 10/min for 5 min | Redis connectivity issue — check Redis health |
+| Cache hit ratio < 50% for 15 min | Cache is not effective — check TTLs and key patterns |
+| `cache_evictions_total` rate > 60/hour | Unusually frequent mutations — investigate cause |

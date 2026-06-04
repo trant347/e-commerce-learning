@@ -3,6 +3,8 @@ package com.bookstore.productsevice.services;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -40,12 +42,38 @@ public class ProductCacheService {
     private final TaskMasterRepository repository;
     private final ObjectMapper objectMapper;
 
+    // ── Metrics ─────────────────────────────────────────────────────────
+    private final Counter itemHits;
+    private final Counter itemMisses;
+    private final Counter listHits;
+    private final Counter listMisses;
+    private final Counter filterHits;
+    private final Counter filterMisses;
+    private final Counter categoriesHits;
+    private final Counter categoriesMisses;
+    private final Counter cacheReadErrors;
+    private final Counter cacheWriteErrors;
+    private final Counter cacheEvictions;
+
     public ProductCacheService(RedisTemplate<String, Object> redisTemplate,
                                TaskMasterRepository repository,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               MeterRegistry meterRegistry) {
         this.redisTemplate = redisTemplate;
         this.repository = repository;
         this.objectMapper = objectMapper;
+
+        this.itemHits         = Counter.builder("cache.hits").tag("type", "item").register(meterRegistry);
+        this.itemMisses       = Counter.builder("cache.misses").tag("type", "item").register(meterRegistry);
+        this.listHits         = Counter.builder("cache.hits").tag("type", "list").register(meterRegistry);
+        this.listMisses       = Counter.builder("cache.misses").tag("type", "list").register(meterRegistry);
+        this.filterHits       = Counter.builder("cache.hits").tag("type", "filter").register(meterRegistry);
+        this.filterMisses     = Counter.builder("cache.misses").tag("type", "filter").register(meterRegistry);
+        this.categoriesHits   = Counter.builder("cache.hits").tag("type", "categories").register(meterRegistry);
+        this.categoriesMisses = Counter.builder("cache.misses").tag("type", "categories").register(meterRegistry);
+        this.cacheReadErrors  = Counter.builder("cache.errors").tag("type", "read").register(meterRegistry);
+        this.cacheWriteErrors = Counter.builder("cache.errors").tag("type", "write").register(meterRegistry);
+        this.cacheEvictions   = Counter.builder("cache.evictions").register(meterRegistry);
     }
 
     // ── Item cache ──────────────────────────────────────────────────────
@@ -55,9 +83,11 @@ public class ProductCacheService {
         TaskMaster cached = getItemFromCache(key);
         if (cached != null) {
             log.debug("[Cache] HIT item {}", id);
+            itemHits.increment();
             return cached;
         }
         log.debug("[Cache] MISS item {}", id);
+        itemMisses.increment();
         Optional<TaskMaster> fromDb = repository.findById(id);
         fromDb.ifPresent(this::cacheItem);
         return fromDb.orElse(null);
@@ -67,7 +97,7 @@ public class ProductCacheService {
 
     public List<TaskMaster> getPage(int page, int limit) {
         String listKey = LIST_PREFIX + "page:" + page + ":limit:" + limit;
-        return getViaFragmentCache(listKey, () -> {
+        return getViaFragmentCache(listKey, listHits, listMisses, () -> {
             List<TaskMaster> items = repository.findAll(PageRequest.of(page, limit)).getContent();
             return new ArrayList<>(items);
         });
@@ -77,27 +107,27 @@ public class ProductCacheService {
 
     public List<TaskMaster> getByName(String name) {
         String listKey = FILTER_PREFIX + "name:" + name;
-        return getViaFragmentCache(listKey, () -> repository.findAllByName(name));
+        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findAllByName(name));
     }
 
     public List<TaskMaster> getByLocation(String location) {
         String listKey = FILTER_PREFIX + "location:" + location;
-        return getViaFragmentCache(listKey, () -> repository.findAllByLocation(location));
+        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findAllByLocation(location));
     }
 
     public List<TaskMaster> getByCategory(String category) {
         String listKey = FILTER_PREFIX + "category:" + category;
-        return getViaFragmentCache(listKey, () -> repository.findAllByJobCategoriesContaining(category));
+        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findAllByJobCategoriesContaining(category));
     }
 
     public List<TaskMaster> getByMinRating(double minRating) {
         String listKey = FILTER_PREFIX + "rating:" + minRating;
-        return getViaFragmentCache(listKey, () -> repository.findTaskMasterByRatingGreaterThanEqual(minRating));
+        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findTaskMasterByRatingGreaterThanEqual(minRating));
     }
 
     public List<TaskMaster> getByRateRange(double minRate, double maxRate) {
         String listKey = FILTER_PREFIX + "rate:" + minRate + ":" + maxRate;
-        return getViaFragmentCache(listKey, () -> repository.findTaskMasterByHourlyRateUsdBetween(minRate, maxRate));
+        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findTaskMasterByHourlyRateUsdBetween(minRate, maxRate));
     }
 
     // ── Categories cache ────────────────────────────────────────────────
@@ -108,13 +138,16 @@ public class ProductCacheService {
             Object cached = redisTemplate.opsForValue().get(CATEGORIES_KEY);
             if (cached instanceof List<?> list) {
                 log.debug("[Cache] HIT categories");
+                categoriesHits.increment();
                 return list.stream().map(Object::toString).collect(Collectors.toList());
             }
         } catch (Exception e) {
             log.warn("[Cache] Redis read failed for categories, falling through to DB", e);
+            cacheReadErrors.increment();
         }
 
         log.debug("[Cache] MISS categories");
+        categoriesMisses.increment();
         List<String> categories = repository.findAll().stream()
                 .filter(tm -> tm.getJobCategories() != null)
                 .flatMap(tm -> Arrays.stream(tm.getJobCategories()))
@@ -127,6 +160,7 @@ public class ProductCacheService {
             redisTemplate.opsForValue().set(CATEGORIES_KEY, categories, ITEM_TTL_MINUTES, TimeUnit.MINUTES);
         } catch (Exception e) {
             log.warn("[Cache] Redis write failed for categories", e);
+            cacheWriteErrors.increment();
         }
         return categories;
     }
@@ -139,6 +173,7 @@ public class ProductCacheService {
         evictByPattern(LIST_PREFIX + "*");
         evictByPattern(FILTER_PREFIX + "*");
         deleteKey(CATEGORIES_KEY);
+        cacheEvictions.increment();
     }
 
     /** Called after a product is edited (future use). */
@@ -147,6 +182,7 @@ public class ProductCacheService {
         deleteKey(ITEM_PREFIX + id);
         evictByPattern(FILTER_PREFIX + "*");
         deleteKey(CATEGORIES_KEY);
+        cacheEvictions.increment();
     }
 
     /** Called after a product is deleted (future use). */
@@ -156,6 +192,7 @@ public class ProductCacheService {
         evictByPattern(LIST_PREFIX + "*");
         evictByPattern(FILTER_PREFIX + "*");
         deleteKey(CATEGORIES_KEY);
+        cacheEvictions.increment();
     }
 
     // ── Core fragment cache logic ───────────────────────────────────────
@@ -166,17 +203,20 @@ public class ProductCacheService {
      * 2. On hit → MGET individual items, backfill misses from MongoDB
      * 3. On miss → query MongoDB, cache IDs (short TTL) + items (long TTL)
      */
-    private List<TaskMaster> getViaFragmentCache(String listKey, Supplier<List<TaskMaster>> dbQuery) {
+    private List<TaskMaster> getViaFragmentCache(String listKey, Counter hitCounter, Counter missCounter,
+                                                   Supplier<List<TaskMaster>> dbQuery) {
         // Step 1: Try to get ID list from cache
         List<String> cachedIds = getIdListFromCache(listKey);
 
         if (cachedIds != null) {
             log.debug("[Cache] HIT list key={}", listKey);
+            hitCounter.increment();
             return assembleFromIds(cachedIds);
         }
 
         // Cache miss — query MongoDB
         log.debug("[Cache] MISS list key={}", listKey);
+        missCounter.increment();
         List<TaskMaster> items = dbQuery.get();
 
         // Cache the results
@@ -260,6 +300,7 @@ public class ProductCacheService {
                     ITEM_PREFIX + item.getId(), item, ITEM_TTL_MINUTES, TimeUnit.MINUTES);
         } catch (Exception e) {
             log.warn("[Cache] Failed to cache item id={}", item.getId(), e);
+            cacheWriteErrors.increment();
         }
     }
 
@@ -272,6 +313,7 @@ public class ProductCacheService {
             }
         } catch (Exception e) {
             log.warn("[Cache] Redis read failed for key={}", key, e);
+            cacheReadErrors.increment();
         }
         return null;
     }
@@ -281,6 +323,7 @@ public class ProductCacheService {
             redisTemplate.opsForValue().set(key, ids, LIST_TTL_MINUTES, TimeUnit.MINUTES);
         } catch (Exception e) {
             log.warn("[Cache] Failed to cache ID list key={}", key, e);
+            cacheWriteErrors.increment();
         }
     }
 
@@ -290,6 +333,7 @@ public class ProductCacheService {
             return convertToTaskMaster(value);
         } catch (Exception e) {
             log.warn("[Cache] Redis read failed for key={}", key, e);
+            cacheReadErrors.increment();
             return null;
         }
     }

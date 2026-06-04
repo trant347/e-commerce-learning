@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using ai_assistant_service.Services.Contracts;
 using Microsoft.Extensions.Caching.Distributed;
@@ -12,6 +13,11 @@ public sealed class ProductApiClient : IProductApiClient
 
     private static readonly TimeSpan ProductCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CategoriesCacheTtl = TimeSpan.FromMinutes(30);
+
+    private static readonly Meter CacheMeter = new("AiAssistant.Cache", "1.0");
+    private static readonly Counter<long> CacheHits = CacheMeter.CreateCounter<long>("cache.hits", description: "Cache hit count");
+    private static readonly Counter<long> CacheMisses = CacheMeter.CreateCounter<long>("cache.misses", description: "Cache miss count");
+    private static readonly Counter<long> CacheErrors = CacheMeter.CreateCounter<long>("cache.errors", description: "Cache error count");
 
     public ProductApiClient(HttpClient httpClient, ILogger<ProductApiClient> logger, IDistributedCache cache)
     {
@@ -39,15 +45,18 @@ public sealed class ProductApiClient : IProductApiClient
             if (cached != null)
             {
                 _logger.LogDebug("[Cache] HIT ai-assistant key={CacheKey}", cacheKey);
+                CacheHits.Add(1, new KeyValuePair<string, object?>("type", "products"));
                 return cached;
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[Cache] Redis read failed for key={CacheKey}, falling through to HTTP", cacheKey);
+            CacheErrors.Add(1, new KeyValuePair<string, object?>("type", "read"));
         }
 
         // Cache miss — call product-service
+        CacheMisses.Add(1, new KeyValuePair<string, object?>("type", "products"));
         try
         {
             _logger.LogInformation("Fetching task masters: {Path}", path);
@@ -67,6 +76,7 @@ public sealed class ProductApiClient : IProductApiClient
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "[Cache] Redis write failed for key={CacheKey}", cacheKey);
+                CacheErrors.Add(1, new KeyValuePair<string, object?>("type", "write"));
             }
 
             return body;
@@ -89,15 +99,18 @@ public sealed class ProductApiClient : IProductApiClient
             if (cached != null)
             {
                 _logger.LogDebug("[Cache] HIT ai-assistant key={CacheKey}", cacheKey);
+                CacheHits.Add(1, new KeyValuePair<string, object?>("type", "categories"));
                 return JsonSerializer.Deserialize<string[]>(cached) ?? [];
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[Cache] Redis read failed for key={CacheKey}, falling through to HTTP", cacheKey);
+            CacheErrors.Add(1, new KeyValuePair<string, object?>("type", "read"));
         }
 
         // Cache miss — call product-service
+        CacheMisses.Add(1, new KeyValuePair<string, object?>("type", "categories"));
         try
         {
             _logger.LogInformation("Fetching categories from product-service");
@@ -116,6 +129,7 @@ public sealed class ProductApiClient : IProductApiClient
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "[Cache] Redis write failed for key={CacheKey}", cacheKey);
+                CacheErrors.Add(1, new KeyValuePair<string, object?>("type", "write"));
             }
 
             return JsonSerializer.Deserialize<string[]>(json) ?? [];
