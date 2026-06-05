@@ -7,7 +7,8 @@ import axios from 'axios';
 
 export interface UserProfileService {
     getUserProfile(username:string) : Promise<UserProfile>,
-    updateUserProfile(user: UserProfile) : Promise<any>
+    updateUserProfile(user: UserProfile) : Promise<any>,
+    deleteUser(username: string) : Promise<any>
 }
 
 
@@ -21,6 +22,15 @@ export default class UserProfileServiceImpl implements UserProfileService {
         return axios.put(
                     `/user/${user.username}`, 
                     user,
+                    {
+                        headers:  { Authorization: `Bearer ${Auth.getToken()}` }
+                    }
+                );
+    }
+
+    deleteUser(username: string) : Promise<any> {
+        return axios.delete(
+                    `/user/${username}`,
                     {
                         headers:  { Authorization: `Bearer ${Auth.getToken()}` }
                     }

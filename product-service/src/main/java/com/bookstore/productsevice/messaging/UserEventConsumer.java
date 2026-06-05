@@ -1,7 +1,9 @@
 package com.bookstore.productsevice.messaging;
 
+import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.ApplicationRepository;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.services.ProductCacheService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -20,13 +22,16 @@ public class UserEventConsumer {
 
     private final TaskMasterRepository taskMasterRepository;
     private final ApplicationRepository applicationRepository;
+    private final ProductCacheService productCacheService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     public UserEventConsumer(TaskMasterRepository taskMasterRepository,
-                             ApplicationRepository applicationRepository) {
+                             ApplicationRepository applicationRepository,
+                             ProductCacheService productCacheService) {
         this.taskMasterRepository = taskMasterRepository;
         this.applicationRepository = applicationRepository;
+        this.productCacheService = productCacheService;
     }
 
     @KafkaListener(topics = TOPIC, groupId = "product-service-user-events")
@@ -52,9 +57,16 @@ public class UserEventConsumer {
             return;
         }
 
+        // Look up the task master first so we can evict its cache entry.
+        TaskMaster taskMaster = taskMasterRepository.findByOwnerUsername(username).orElse(null);
+
         // Idempotent: deleting zero documents is a normal outcome on redelivery.
         long taskMastersDeleted = taskMasterRepository.deleteByOwnerUsername(username);
         long applicationsDeleted = applicationRepository.deleteAllByApplicantUsername(username);
+
+        if (taskMaster != null) {
+            productCacheService.evictOnDelete(taskMaster.getId());
+        }
 
         logger.info("USER_DELETED cascade for '{}': taskMasters={}, applications={}",
                 username, taskMastersDeleted, applicationsDeleted);

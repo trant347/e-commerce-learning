@@ -95,9 +95,8 @@ public class UserController {
         return new ResponseEntity<>(userRepository.findFirstByUsername(username),HttpStatus.OK);
     }
 
-    @PutMapping
-    public ResponseEntity<User> updateUserInfo(@RequestBody User user, @RequestHeader(value = "Authorization") String bearer) throws Exception {
-
+    @PutMapping(value="/{username}")
+    public ResponseEntity<User> updateUserInfo(@PathVariable String username, @RequestBody User user, @RequestHeader(value = "Authorization") String bearer) throws Exception {
 
         if(bearer == null || bearer.indexOf("Bearer") == -1) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
@@ -112,9 +111,9 @@ public class UserController {
                 .parseSignedClaims(token)
                 .getPayload();
 
-        String username = claims.getSubject();
+        String tokenUsername = claims.getSubject();
 
-        if(!username.equals(user.getUsername())) {
+        if(!tokenUsername.equals(user.getUsername())) {
             throw new InvalidUserIdException("Username is not matched");
         }
 
@@ -168,11 +167,12 @@ public class UserController {
         Object authoritiesClaim = claims.get("authorities");
         List<?> authorities = authoritiesClaim instanceof List ? (List<?>) authoritiesClaim : Collections.emptyList();
         boolean isAdmin = authorities.stream().anyMatch(a -> "ROLE_ADMIN".equals(String.valueOf(a)));
+        boolean isSelf = Objects.equals(callerUsername, username);
 
-        if (!isAdmin) {
-            return new ResponseEntity<>(Collections.singletonMap("error", "Admin access required."), HttpStatus.FORBIDDEN);
+        if (!isAdmin && !isSelf) {
+            return new ResponseEntity<>(Collections.singletonMap("error", "You can only delete your own profile."), HttpStatus.FORBIDDEN);
         }
-        if (Objects.equals(callerUsername, username)) {
+        if (isAdmin && isSelf) {
             return new ResponseEntity<>(Collections.singletonMap("error", "Admins cannot delete themselves."), HttpStatus.FORBIDDEN);
         }
 

@@ -5,9 +5,11 @@ import styled from 'styled-components';
 import './profile.css';
 
 import UserProfileServices from '../../api/userProfileServices';
+import Auth from '../../api/authenticationStorage';
 import { UserProfile, UserSection, FieldType } from '../../api/user-type';
 
 import Section from './section/section';
+import Dialog from '../dialog/dialog';
 import profileReducer, { UPDATE, REPLACE_ALL, SET_SUBMIT, StateInterface } from './profileReducer';
 
 
@@ -26,6 +28,20 @@ export default function({ username }) {
     let [userData, dispatchUserData] = React.useReducer(profileReducer, initUserValue);
 
     const userProfileService = new UserProfileServices();   
+
+    const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+    const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+
+    const handleDeleteProfile = async () => {
+        setShowDeleteConfirm(false);
+        try {
+            await userProfileService.deleteUser(username);
+            Auth.deauthenticateUser();
+            window.location.href = '/';
+        } catch (e) {
+            setErrorMessage(e.response?.data?.error || 'Failed to delete profile.');
+        }
+    };
    
     React.useEffect(() => {      
 
@@ -33,7 +49,7 @@ export default function({ username }) {
             try {
                 await userProfileService.updateUserProfile(user);            
             } catch (e) {
-                alert(e.response?.data?.message);
+                setErrorMessage(e.response?.data?.message || 'Failed to update profile.');
                 throw e;
             } finally {
                 dispatchUserData({ 
@@ -107,9 +123,32 @@ export default function({ username }) {
                             ) 
                         )
                     }
+                    <DeleteButton onClick={() => setShowDeleteConfirm(true)}>
+                        Delete Profile
+                    </DeleteButton>
                 </div>
                  
             </div>
+
+            {showDeleteConfirm && (
+                <Dialog
+                    title="Delete Profile"
+                    message="Are you sure you want to delete your profile? This action cannot be undone and all your data will be permanently removed."
+                    variant="confirm"
+                    confirmLabel="Delete"
+                    onConfirm={handleDeleteProfile}
+                    onClose={() => setShowDeleteConfirm(false)}
+                />
+            )}
+
+            {errorMessage && (
+                <Dialog
+                    title="Error"
+                    message={errorMessage}
+                    variant="alert"
+                    onClose={() => setErrorMessage(null)}
+                />
+            )}
         </div>
     );
 }
@@ -235,3 +274,19 @@ const BreadCrumb = styled.ul`
 const StyledLink = styled.a`
     cursor: pointer
 `;
+
+const DeleteButton = styled.button`
+    margin-top: 2em;
+    padding: 0.6em 1.5em;
+    background-color: #d9534f;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em;
+
+    &:hover {
+        background-color: #c9302c;
+    }
+`;
+

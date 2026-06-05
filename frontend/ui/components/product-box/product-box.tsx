@@ -74,12 +74,7 @@ export default class ProductBox extends React.Component<Props, Readonly<State>> 
                         </div>
                         <div className="content-section"> ${this.props.hourlyRateUsd}/hr </div>
                     </Card.Description>
-                </Card.Content>
-                <Card.Content extra>
-                    <Button primary>
-                        <Button.Content>View Profile</Button.Content>
-                    </Button>
-                </Card.Content>
+                </Card.Content>              
             </Card>
         );
 
