@@ -46,6 +46,11 @@ logging:
 server:
   port: 8080
 
+# MCP Server configuration
+spring.ai.mcp.server:
+  name: product-service-mcp
+  version: 1.0.0
+
 management:
   tracing:
     sampling:
