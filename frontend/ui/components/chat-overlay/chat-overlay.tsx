@@ -110,7 +110,11 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
 
         try {
             const userId = Auth.getUser();
-            const response = await AiAssistantServices.chat(text, userId);
+            // Send prior messages as history (exclude the welcome message and current user message)
+            const history = nextMessages
+                .slice(1, -1)  // skip initial assistant greeting and last user message (sent as `message`)
+                .map(m => ({ role: m.role, content: m.content }));
+            const response = await AiAssistantServices.chat(text, userId, history);
             const assistantMessage: IChatMessage = {
                 role: 'assistant',
                 content: response.answer || 'No answer returned from assistant.',

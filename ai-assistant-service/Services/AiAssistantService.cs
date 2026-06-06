@@ -63,9 +63,23 @@ public sealed class AiAssistantService : IAiAssistantService
         // Seed the conversation
         var messages = new List<OllamaChatMessage>
         {
-            new() { Role = "system", Content = systemPrompt },
-            new() { Role = "user",   Content = request.Message }
+            new() { Role = "system", Content = systemPrompt }
         };
+
+        // Include conversation history for multi-turn context
+        if (request.History is { Count: > 0 })
+        {
+            foreach (var h in request.History)
+            {
+                if (!string.IsNullOrWhiteSpace(h.Content) 
+                    && (h.Role == "user" || h.Role == "assistant"))
+                {
+                    messages.Add(new OllamaChatMessage { Role = h.Role, Content = h.Content });
+                }
+            }
+        }
+
+        messages.Add(new OllamaChatMessage { Role = "user", Content = request.Message });
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)

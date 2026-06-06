@@ -12,9 +12,14 @@ export interface ChatResponse {
     mentions: TaskMasterMention[];
 }
 
+export interface ChatHistoryMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 class AiAssistantServices {
-    chat(message: string, userId?: string): Promise<ChatResponse> {
-        return axios.post('/api/ai-assistant/chat', { message, userId }).then((res) => res.data);
+    chat(message: string, userId?: string, history?: ChatHistoryMessage[]): Promise<ChatResponse> {
+        return axios.post('/api/ai-assistant/chat', { message, userId, history }).then((res) => res.data);
     }
 }
 

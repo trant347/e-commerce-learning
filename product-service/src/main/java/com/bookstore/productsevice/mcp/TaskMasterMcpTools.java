@@ -37,14 +37,15 @@ public class TaskMasterMcpTools {
 
     @Tool(name = "search_task_masters",
             description = "Search for task masters (service providers) in the marketplace. "
-                    + "All filters are optional and can be combined. Returns up to 10 results. "
-                    + "IMPORTANT: when a user says 'less than X dollars', set maxRate=X. "
-                    + "When a user says 'more than X dollars', set minRate=X. "
-                    + "Always set the category when the user mentions a type of service.")
+                    + "Returns up to 10 results. "
+                    + "IMPORTANT: always call get_categories first to get the exact category list, "
+                    + "then use a category value from that list. "
+                    + "If the user's request does not match any category, do NOT call this tool. "
+                    + "Instead, politely ask the user to clarify what service they need. "
+                    + "When a user says 'less than X dollars', set maxRate=X. "
+                    + "When a user says 'more than X dollars', set minRate=X.")
     public String searchTaskMasters(
-            @ToolParam(description = "Job category to filter by, e.g. 'pet care', 'plumbing', 'cleaning', 'tutoring', 'automotive'. "
-                    + "Infer from context, e.g. 'take care of my dog' means 'pet care'.",
-                    required = false)
+            @ToolParam(description = "Job category to filter by. REQUIRED. Must be an exact value from get_categories.")
             String category,
             @ToolParam(description = "City or region to filter by, e.g. 'New York, NY'.",
                     required = false)
@@ -68,6 +69,10 @@ public class TaskMasterMcpTools {
         Double minRateVal = parseDoubleOrNull(minRate);
         Double maxRateVal = parseDoubleOrNull(maxRate);
         Double minRatingVal = parseDoubleOrNull(minRating);
+
+        if (sanitizedCategory == null) {
+            return "{\"error\": \"Please specify what type of service you are looking for so I can help you find the right task master.\"}";
+        }
 
         List<TaskMaster> results = productCacheService.searchWithFilters(
                 sanitizedCategory, sanitizedLocation, minRateVal, maxRateVal, minRatingVal, MAX_RESULTS);
