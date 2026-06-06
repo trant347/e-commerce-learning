@@ -246,6 +246,8 @@ public sealed class AiAssistantService : IAiAssistantService
 
                 foreach (var item in items)
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+
                     if (item.TryGetProperty("id", out var idEl) &&
                         item.TryGetProperty("name", out var nameEl))
                     {

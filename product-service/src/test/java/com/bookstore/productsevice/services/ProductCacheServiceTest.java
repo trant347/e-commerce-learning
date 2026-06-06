@@ -15,6 +15,8 @@ import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -288,6 +290,154 @@ public class ProductCacheServiceTest {
         verify(redisTemplate).delete("products:categories");
     }
 
+    // ── searchWithFilters (used by MCP search_task_masters) ─────────────
+
+    @Test
+    public void searchWithFilters_cacheMiss_passesLimitToRepository() {
+        String key = "products:filter:search:Plumbing:null:null:25.0:null:limit:10";
+        when(valueOps.get(key)).thenReturn(null);
+        when(repository.searchWithFilters("Plumbing", null, null, 25.0, null, 10))
+                .thenReturn(List.of(sampleTm1));
+
+        List<TaskMaster> result = cacheService.searchWithFilters(
+                "Plumbing", null, null, 25.0, null, 10);
+
+        assertThat(result).hasSize(1);
+        verify(repository).searchWithFilters("Plumbing", null, null, 25.0, null, 10);
+        verify(valueOps).set(eq(key), eq(List.of("tm-1")), anyLong(), any());
+    }
+
+    @Test
+    public void searchWithFilters_cacheHit_skipsDb() {
+        String key = "products:filter:search:Plumbing:New York:null:null:null:limit:10";
+        when(valueOps.get(key)).thenReturn(List.of("tm-1"));
+        when(valueOps.multiGet(List.of("products:item:tm-1")))
+                .thenReturn(List.of(sampleTm1));
+
+        List<TaskMaster> result = cacheService.searchWithFilters(
+                "Plumbing", "New York", null, null, null, 10);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getName()).isEqualTo("Alice");
+        verify(repository, never()).searchWithFilters(anyString(), anyString(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    public void searchWithFilters_differentLimits_useDifferentCacheKeys() {
+        String key5  = "products:filter:search:Plumbing:null:null:null:null:limit:5";
+        String key10 = "products:filter:search:Plumbing:null:null:null:null:limit:10";
+
+        when(valueOps.get(key5)).thenReturn(null);
+        when(valueOps.get(key10)).thenReturn(null);
+        when(repository.searchWithFilters("Plumbing", null, null, null, null, 5))
+                .thenReturn(List.of(sampleTm1));
+        when(repository.searchWithFilters("Plumbing", null, null, null, null, 10))
+                .thenReturn(List.of(sampleTm1, sampleTm2));
+
+        List<TaskMaster> r5 = cacheService.searchWithFilters("Plumbing", null, null, null, null, 5);
+        List<TaskMaster> r10 = cacheService.searchWithFilters("Plumbing", null, null, null, null, 10);
+
+        assertThat(r5).hasSize(1);
+        assertThat(r10).hasSize(2);
+        verify(valueOps).set(eq(key5), anyList(), anyLong(), any());
+        verify(valueOps).set(eq(key10), anyList(), anyLong(), any());
+    }
+
+    // ── Upper-cap tests: ensure limit is honored end-to-end ─────────────
+
+    @Test
+    public void searchWithFilters_repositoryReturnsAtMostLimit_resultsAreCapped() {
+        int limit = 10;
+        // Repository (Mongo) is responsible for applying the limit; verify the service
+        // surfaces exactly what it returns and never exceeds the cap.
+        List<TaskMaster> capped = generateTaskMasters(limit);
+
+        String key = "products:filter:search:Plumbing:null:null:null:null:limit:" + limit;
+        when(valueOps.get(key)).thenReturn(null);
+        when(repository.searchWithFilters("Plumbing", null, null, null, null, limit))
+                .thenReturn(capped);
+
+        List<TaskMaster> result = cacheService.searchWithFilters(
+                "Plumbing", null, null, null, null, limit);
+
+        assertThat(result).hasSize(limit);
+        verify(repository).searchWithFilters("Plumbing", null, null, null, null, limit);
+        // The cached id list should also contain at most `limit` ids
+        List<String> expectedIds = capped.stream().map(TaskMaster::getId).collect(Collectors.toList());
+        verify(valueOps).set(eq(key), eq(expectedIds), anyLong(), any());
+    }
+
+    @Test
+    public void getByCategoryLimited_passesLimitAsPageable() {
+        int limit = 10;
+        when(valueOps.get("products:filter:category:Plumbing:limit:" + limit)).thenReturn(null);
+        when(repository.findAllByJobCategoriesContaining(eq("Plumbing"), eq(PageRequest.of(0, limit))))
+                .thenReturn(generateTaskMasters(limit));
+
+        List<TaskMaster> result = cacheService.getByCategoryLimited("Plumbing", limit);
+
+        assertThat(result).hasSize(limit);
+        verify(repository).findAllByJobCategoriesContaining("Plumbing", PageRequest.of(0, limit));
+        // Unlimited overload must not be invoked when the limited variant is requested
+        verify(repository, never()).findAllByJobCategoriesContaining("Plumbing");
+    }
+
+    @Test
+    public void getByLocationLimited_passesLimitAsPageable() {
+        int limit = 10;
+        when(valueOps.get("products:filter:location:Chicago:limit:" + limit)).thenReturn(null);
+        when(repository.findAllByLocation(eq("Chicago"), eq(PageRequest.of(0, limit))))
+                .thenReturn(generateTaskMasters(limit));
+
+        List<TaskMaster> result = cacheService.getByLocationLimited("Chicago", limit);
+
+        assertThat(result).hasSize(limit);
+        verify(repository).findAllByLocation("Chicago", PageRequest.of(0, limit));
+        verify(repository, never()).findAllByLocation("Chicago");
+    }
+
+    @Test
+    public void getByRateRangeLimited_passesLimitAsPageable() {
+        int limit = 10;
+        when(valueOps.get("products:filter:rate:0.0:25.0:limit:" + limit)).thenReturn(null);
+        when(repository.findTaskMasterByHourlyRateUsdBetween(eq(0.0), eq(25.0), eq(PageRequest.of(0, limit))))
+                .thenReturn(generateTaskMasters(limit));
+
+        List<TaskMaster> result = cacheService.getByRateRangeLimited(0.0, 25.0, limit);
+
+        assertThat(result).hasSize(limit);
+        verify(repository).findTaskMasterByHourlyRateUsdBetween(0.0, 25.0, PageRequest.of(0, limit));
+    }
+
+    @Test
+    public void getByMinRatingLimited_passesLimitAsPageable() {
+        int limit = 10;
+        when(valueOps.get("products:filter:rating:4.0:limit:" + limit)).thenReturn(null);
+        when(repository.findTaskMasterByRatingGreaterThanEqual(eq(4.0), eq(PageRequest.of(0, limit))))
+                .thenReturn(generateTaskMasters(limit));
+
+        List<TaskMaster> result = cacheService.getByMinRatingLimited(4.0, limit);
+
+        assertThat(result).hasSize(limit);
+        verify(repository).findTaskMasterByRatingGreaterThanEqual(4.0, PageRequest.of(0, limit));
+    }
+
+    @Test
+    public void searchWithFilters_repositoryReturnsFewerThanLimit_returnsAll() {
+        int limit = 10;
+        List<TaskMaster> few = generateTaskMasters(3);
+
+        String key = "products:filter:search:Plumbing:null:null:null:null:limit:" + limit;
+        when(valueOps.get(key)).thenReturn(null);
+        when(repository.searchWithFilters("Plumbing", null, null, null, null, limit))
+                .thenReturn(few);
+
+        List<TaskMaster> result = cacheService.searchWithFilters(
+                "Plumbing", null, null, null, null, limit);
+
+        assertThat(result).hasSize(3);
+    }
+
     // ── Order preservation ──────────────────────────────────────────────
 
     @Test
@@ -306,5 +456,19 @@ public class ProductCacheServiceTest {
         assertThat(result).hasSize(2);
         assertThat(result.get(0).getName()).isEqualTo("Bob");
         assertThat(result.get(1).getName()).isEqualTo("Alice");
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────
+
+    private static List<TaskMaster> generateTaskMasters(int count) {
+        return IntStream.range(0, count)
+                .mapToObj(i -> new TaskMaster()
+                        .setId("tm-cap-" + i)
+                        .setName("Provider " + i)
+                        .setLocation("New York")
+                        .setRating(4.5)
+                        .setHourlyRateUsd(20.0)
+                        .setJobCategories(new String[]{"Plumbing"}))
+                .collect(Collectors.toList());
     }
 }
