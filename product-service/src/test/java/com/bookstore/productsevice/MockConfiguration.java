@@ -68,6 +68,31 @@ public class MockConfiguration {
             }
 
             @Override
+            public List<TaskMaster> findAllByLocation(String location, Pageable pageable) {
+                return null;
+            }
+
+            @Override
+            public List<TaskMaster> findAllByJobCategoriesContaining(String category, Pageable pageable) {
+                return null;
+            }
+
+            @Override
+            public List<TaskMaster> findTaskMasterByHourlyRateUsdBetween(double low, double high, Pageable pageable) {
+                return null;
+            }
+
+            @Override
+            public List<TaskMaster> findTaskMasterByRatingGreaterThanEqual(double rating, Pageable pageable) {
+                return null;
+            }
+
+            @Override
+            public List<TaskMaster> searchWithFilters(String category, String location, Double minRate, Double maxRate, Double minRating, int limit) {
+                return new ArrayList<>();
+            }
+
+            @Override
             public Optional<Document> getBooksUsingNameFacetSearch(String name, int page, int itemsPerPage, String[] sortFields) {
                 return Optional.empty();
             }

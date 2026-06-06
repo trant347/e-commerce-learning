@@ -130,6 +130,41 @@ public class ProductCacheService {
         return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findTaskMasterByHourlyRateUsdBetween(minRate, maxRate));
     }
 
+    // ── Limited filter methods (for MCP tools — push limit to MongoDB) ──
+
+    public List<TaskMaster> getByLocationLimited(String location, int limit) {
+        String listKey = FILTER_PREFIX + "location:" + location + ":limit:" + limit;
+        return getViaFragmentCache(listKey, filterHits, filterMisses,
+                () -> repository.findAllByLocation(location, PageRequest.of(0, limit)));
+    }
+
+    public List<TaskMaster> getByCategoryLimited(String category, int limit) {
+        String listKey = FILTER_PREFIX + "category:" + category + ":limit:" + limit;
+        return getViaFragmentCache(listKey, filterHits, filterMisses,
+                () -> repository.findAllByJobCategoriesContaining(category, PageRequest.of(0, limit)));
+    }
+
+    public List<TaskMaster> getByRateRangeLimited(double minRate, double maxRate, int limit) {
+        String listKey = FILTER_PREFIX + "rate:" + minRate + ":" + maxRate + ":limit:" + limit;
+        return getViaFragmentCache(listKey, filterHits, filterMisses,
+                () -> repository.findTaskMasterByHourlyRateUsdBetween(minRate, maxRate, PageRequest.of(0, limit)));
+    }
+
+    public List<TaskMaster> getByMinRatingLimited(double minRating, int limit) {
+        String listKey = FILTER_PREFIX + "rating:" + minRating + ":limit:" + limit;
+        return getViaFragmentCache(listKey, filterHits, filterMisses,
+                () -> repository.findTaskMasterByRatingGreaterThanEqual(minRating, PageRequest.of(0, limit)));
+    }
+
+    public List<TaskMaster> searchWithFilters(String category, String location,
+                                               Double minRate, Double maxRate,
+                                               Double minRating, int limit) {
+        String listKey = FILTER_PREFIX + "search:" + category + ":" + location
+                + ":" + minRate + ":" + maxRate + ":" + minRating + ":limit:" + limit;
+        return getViaFragmentCache(listKey, filterHits, filterMisses,
+                () -> repository.searchWithFilters(category, location, minRate, maxRate, minRating, limit));
+    }
+
     // ── Categories cache ────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")

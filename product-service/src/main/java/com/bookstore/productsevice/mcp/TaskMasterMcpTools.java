@@ -24,6 +24,7 @@ import java.util.List;
 public class TaskMasterMcpTools {
 
     private static final Logger log = LoggerFactory.getLogger(TaskMasterMcpTools.class);
+    private static final int MAX_RESULTS = 10;
 
     private final ProductCacheService productCacheService;
     private final ObjectMapper objectMapper;
@@ -36,27 +37,40 @@ public class TaskMasterMcpTools {
 
     @Tool(name = "search_task_masters",
             description = "Search for task masters (service providers) in the marketplace. "
-                    + "Use this when the user asks about available professionals, skills, pricing, location, or ratings. "
-                    + "Optionally filter by category (e.g. plumbing, cleaning, tutoring) or location.")
+                    + "All filters are optional and can be combined. Returns up to 10 results. "
+                    + "IMPORTANT: when a user says 'less than X dollars', set maxRate=X. "
+                    + "When a user says 'more than X dollars', set minRate=X. "
+                    + "Always set the category when the user mentions a type of service.")
     public String searchTaskMasters(
-            @ToolParam(description = "Job category to filter by, e.g. 'plumbing', 'cleaning', 'tutoring'. "
-                    + "Leave empty to return all.", required = false)
+            @ToolParam(description = "Job category to filter by, e.g. 'pet care', 'plumbing', 'cleaning', 'tutoring', 'automotive'. "
+                    + "Infer from context, e.g. 'take care of my dog' means 'pet care'.",
+                    required = false)
             String category,
-            @ToolParam(description = "City or region to filter by, e.g. 'New York, NY'. "
-                    + "Leave empty to search all locations.", required = false)
-            String location) {
+            @ToolParam(description = "City or region to filter by, e.g. 'New York, NY'.",
+                    required = false)
+            String location,
+            @ToolParam(description = "Minimum hourly rate in USD (inclusive). Numeric only, no $ sign. Example: 20",
+                    required = false)
+            String minRate,
+            @ToolParam(description = "Maximum hourly rate in USD (inclusive). Numeric only, no $ sign. "
+                    + "Use this for 'under', 'less than', 'cheaper than' queries. Example: 25",
+                    required = false)
+            String maxRate,
+            @ToolParam(description = "Minimum rating threshold (0-5). Use for quality/top-rated queries.",
+                    required = false)
+            String minRating) {
 
-        log.info("[MCP] search_task_masters called: category='{}', location='{}'", category, location);
+        log.info("[MCP] search_task_masters called: category='{}', location='{}', minRate='{}', maxRate='{}', minRating='{}'",
+                category, location, minRate, maxRate, minRating);
 
-        List<TaskMaster> results;
+        String sanitizedCategory = sanitizeString(category);
+        String sanitizedLocation = sanitizeString(location);
+        Double minRateVal = parseDoubleOrNull(minRate);
+        Double maxRateVal = parseDoubleOrNull(maxRate);
+        Double minRatingVal = parseDoubleOrNull(minRating);
 
-        if (category != null && !category.isBlank()) {
-            results = productCacheService.getByCategory(category);
-        } else if (location != null && !location.isBlank()) {
-            results = productCacheService.getByLocation(location);
-        } else {
-            results = productCacheService.getPage(0, 20);
-        }
+        List<TaskMaster> results = productCacheService.searchWithFilters(
+                sanitizedCategory, sanitizedLocation, minRateVal, maxRateVal, minRatingVal, MAX_RESULTS);
 
         log.info("[MCP] search_task_masters returning {} results", results.size());
         return toJson(results);
@@ -89,6 +103,26 @@ public class TaskMasterMcpTools {
 
         log.info("[MCP] get_categories returning {} categories", categories.size());
         return toJson(categories);
+    }
+
+    private static String sanitizeString(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("null") || trimmed.equalsIgnoreCase("none")) {
+            return null;
+        }
+        return trimmed;
+    }
+
+    private static Double parseDoubleOrNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        String cleaned = value.trim().replaceAll("[^0-9.]", "");
+        if (cleaned.isEmpty()) return null;
+        try {
+            return Double.parseDouble(cleaned);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private String toJson(Object value) {

@@ -57,6 +57,9 @@ public sealed class AiAssistantService : IAiAssistantService
             toolDefinitions.Count, 
             string.Join(", ", _toolRegistry.All.Select(t => t.Name)));
 
+        _logger.LogDebug("Tool schemas being sent to Ollama: {ToolSchemas}",
+            JsonSerializer.Serialize(toolDefinitions));
+
         // Seed the conversation
         var messages = new List<OllamaChatMessage>
         {
