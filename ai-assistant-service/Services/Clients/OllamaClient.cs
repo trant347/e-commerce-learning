@@ -66,7 +66,10 @@ public sealed class OllamaClient : IOllamaClient
             Model = model,
             Messages = messages,
             Tools = tools,
-            Stream = false
+            Stream = false,
+            // qwen3 enables "thinking" by default which produces large <think> blocks
+            // before any tool call and causes timeouts on CPU. Disable explicitly.
+            Think = false
         };
 
         try
@@ -130,6 +133,9 @@ public sealed class OllamaClient : IOllamaClient
 
         [JsonPropertyName("stream")]
         public bool Stream { get; set; }
+
+        [JsonPropertyName("think")]
+        public bool? Think { get; set; }
     }
 
     private sealed class OllamaChatResponse
