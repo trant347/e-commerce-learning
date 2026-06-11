@@ -1,11 +1,13 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.messaging.ApplicationEventPublisher;
+import com.bookstore.productsevice.messaging.CategoryEventPublisher;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.model.TaskMasterApplication;
 import com.bookstore.productsevice.model.TaskMasterApplication.ApplicationStatus;
 import com.bookstore.productsevice.repository.ApplicationRepository;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.services.ProductCacheService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -38,13 +40,19 @@ public class ApplicationController {
     private final ApplicationRepository applicationRepository;
     private final TaskMasterRepository taskMasterRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ProductCacheService productCacheService;
+    private final CategoryEventPublisher categoryEventPublisher;
 
     public ApplicationController(ApplicationRepository applicationRepository,
                                  TaskMasterRepository taskMasterRepository,
-                                 ApplicationEventPublisher eventPublisher) {
+                                 ApplicationEventPublisher eventPublisher,
+                                 ProductCacheService productCacheService,
+                                 CategoryEventPublisher categoryEventPublisher) {
         this.applicationRepository = applicationRepository;
         this.taskMasterRepository = taskMasterRepository;
         this.eventPublisher = eventPublisher;
+        this.productCacheService = productCacheService;
+        this.categoryEventPublisher = categoryEventPublisher;
     }
 
     // -------------------------------------------------------------------------
@@ -154,7 +162,14 @@ public class ApplicationController {
             log.info("[ApplicationController] Created TaskMaster id='{}' for user='{}'",
                     saved.getId(), application.getApplicantUsername());
 
-            // Update application status
+            productCacheService.evictOnCreate();
+
+            try {
+                categoryEventPublisher.publishCategoriesUpdated();
+            } catch (Exception e) {
+                log.warn("[ApplicationController] Kafka publish failed (non-fatal): {}", e.getMessage());
+            }
+
             application.setStatus(ApplicationStatus.ACCEPTED)
                        .setCreatedTaskMasterId(saved.getId());
             TaskMasterApplication updatedApplication = applicationRepository.save(application);

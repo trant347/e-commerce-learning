@@ -13,7 +13,8 @@ namespace ai_assistant_service.Services.Mcp;
 public sealed class McpRemoteTool : IToolDefinition
 {
     private readonly McpClientTool _mcpTool;
-    private readonly object _parametersSchema;
+    private object _parametersSchema;
+    private readonly Dictionary<string, Dictionary<string, object>> _propertyOverrides = new();
 
     public McpRemoteTool(McpClientTool mcpTool)
     {
@@ -30,6 +31,25 @@ public sealed class McpRemoteTool : IToolDefinition
     public string Description => _mcpTool.Description ?? string.Empty;
 
     public object ParametersSchema => _parametersSchema;
+
+    /// <summary>
+    /// Constrains a parameter to a fixed list of values by adding an <c>enum</c> entry
+    /// to its schema. Used to bake the live category list into the search tool so small
+    /// models (e.g. llama3.2:3b) pick a real value instead of guessing or sending null.
+    /// </summary>
+    public void SetParameterEnum(string parameterName, IReadOnlyList<string> values)
+    {
+        if (string.IsNullOrWhiteSpace(parameterName) || values is null || values.Count == 0) return;
+
+        if (!_propertyOverrides.TryGetValue(parameterName, out var overrides))
+        {
+            overrides = new Dictionary<string, object>();
+            _propertyOverrides[parameterName] = overrides;
+        }
+        overrides["enum"] = values.ToArray();
+
+        _parametersSchema = NormalizeSchema(_mcpTool.JsonSchema);
+    }
 
     public async Task<string> ExecuteAsync(
         IReadOnlyDictionary<string, string> arguments,
@@ -51,8 +71,9 @@ public sealed class McpRemoteTool : IToolDefinition
     /// <summary>
     /// Strips MCP/JSON Schema metadata ($schema, additionalProperties, etc.)
     /// down to the minimal {type, properties, required} that Ollama expects.
+    /// Applies any per-property overrides registered via <see cref="SetParameterEnum"/>.
     /// </summary>
-    private static object NormalizeSchema(JsonElement schema)
+    private object NormalizeSchema(JsonElement schema)
     {
         var properties = new Dictionary<string, object>();
         var required = new List<string>();
@@ -74,6 +95,14 @@ public sealed class McpRemoteTool : IToolDefinition
                     propDict["enum"] = enumEl.EnumerateArray()
                         .Select(e => e.GetString() ?? string.Empty)
                         .ToArray();
+                }
+
+                if (_propertyOverrides.TryGetValue(prop.Name, out var overrides))
+                {
+                    foreach (var kvp in overrides)
+                    {
+                        propDict[kvp.Key] = kvp.Value;
+                    }
                 }
 
                 properties[prop.Name] = propDict;

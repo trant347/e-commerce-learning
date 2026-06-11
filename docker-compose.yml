@@ -223,8 +223,8 @@ services:
     - |
       echo "Waiting for Ollama server to be ready..."
       sleep 10
-      echo "Pulling qwen3:8b model (this may take a few minutes)..."
-      ollama pull qwen3:8b
+      echo "Pulling qwen2.5:7b-instruct model (this may take a few minutes)..."
+      ollama pull qwen2.5:7b-instruct
       echo "Model pull complete!"
     restart: "no"
 
@@ -235,7 +235,7 @@ services:
     image: ai-assistant-service:latest
     environment:
     - Ollama__BaseUrl=http://ollama:11434
-    - Ollama__Model=qwen3:8b
+    - Ollama__Model=qwen2.5:7b-instruct
     - Ollama__TimeoutSeconds=600
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080

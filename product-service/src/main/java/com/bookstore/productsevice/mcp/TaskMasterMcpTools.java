@@ -37,13 +37,15 @@ public class TaskMasterMcpTools {
 
     @Tool(name = "search_task_masters",
             description = "Search for task masters (service providers) in the marketplace. "
-                    + "Returns up to 10 results. "
-                    + "IMPORTANT: always call get_categories first to get the exact category list, "
-                    + "then use a category value from that list. "
-                    + "If the user's request does not match any category, do NOT call this tool. "
-                    + "Instead, politely ask the user to clarify what service they need. "
+                    + "Returns up to 10 results as a JSON array, each item including hourlyRateUsd, rating, location, etc. "
+                    + "Only pass parameters the user EXPLICITLY mentioned in their message. "
+                    + "Never invent a location or rate. "
                     + "When a user says 'less than X dollars', set maxRate=X. "
-                    + "When a user says 'more than X dollars', set minRate=X.")
+                    + "When a user says 'more than X dollars', set minRate=X. "
+                    + "For ranking words like 'cheapest', 'most expensive', 'best rated', 'closest' WITHOUT a specific number, "
+                    + "do NOT add minRate/maxRate/location filters — call with only the category, then pick the matching "
+                    + "item from the returned list by inspecting its hourlyRateUsd or rating field. "
+                    + "If the user's request does not match any category, do NOT call this tool; ask them to clarify instead.")
     public String searchTaskMasters(
             @ToolParam(description = "Job category to filter by. REQUIRED. Must be an exact value from get_categories.")
             String category,

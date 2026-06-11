@@ -59,6 +59,62 @@ public class ToolRegistryTests
         Assert.NotNull(registry.Get("fake_tool"));
     }
 
+    [Fact]
+    public async Task ExecuteAsync_UnwrapsSingleElementArrayArgument()
+    {
+        // llama3.2:3b commonly emits scalar args wrapped in arrays:
+        //   {"category": ["tutoring"]}  →  category should arrive as "tutoring".
+        var fake = new FakeTool();
+        var registry = new ToolRegistry(new IToolDefinition[] { fake });
+
+        using var doc = JsonDocument.Parse(
+            "{\"category\": [\"tutoring\"], \"maxRate\": [\"50\"]}");
+        var args = doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value);
+
+        await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+
+        Assert.Equal("tutoring", fake.LastArgs!["category"]);
+        Assert.Equal("50", fake.LastArgs!["maxRate"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NormalizesPlaceholderStrings()
+    {
+        // Small models often pass "nil" / "null" / "none" as string placeholders for
+        // optional arguments. Treat them as absent so downstream filters don't try to
+        // match against the literal text.
+        var fake = new FakeTool();
+        var registry = new ToolRegistry(new IToolDefinition[] { fake });
+
+        using var doc = JsonDocument.Parse(
+            "{\"location\": \"nil\", \"minRating\": [\"none\"], \"category\": \"tutoring\"}");
+        var args = doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value);
+
+        await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+
+        Assert.Equal(string.Empty, fake.LastArgs!["location"]);
+        Assert.Equal(string.Empty, fake.LastArgs!["minRating"]);
+        Assert.Equal("tutoring", fake.LastArgs!["category"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JoinsMultiElementArraysWithCommas()
+    {
+        var fake = new FakeTool();
+        var registry = new ToolRegistry(new IToolDefinition[] { fake });
+
+        using var doc = JsonDocument.Parse(
+            "{\"categories\": [\"tutoring\", \"education\"]}");
+        var args = doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value);
+
+        await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+
+        Assert.Equal("tutoring,education", fake.LastArgs!["categories"]);
+    }
+
     private sealed class FakeTool : IToolDefinition
     {
         public string Name => "fake_tool";
