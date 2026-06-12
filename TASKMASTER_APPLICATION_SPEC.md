@@ -10,7 +10,7 @@ Any authenticated user can apply to become a TaskMaster. Admins review pending a
 
 | # | Actor | Action | Outcome |
 |---|-------|--------|---------|
-| 1 | User  | Clicks "New TaskMasters" in the nav bar | Navigated to the application form at `/apply` |
+| 1 | User  | Clicks "Apply for TaskMaster" in the nav bar | Navigated to the application form at `/apply` |
 | 2 | User  | Submits the application form | Application saved as PENDING; admin notified via bell |
 | 3 | User  | Tries to submit a second application while one is PENDING | Receives a 409 Conflict error |
 | 4 | Admin | Receives notification bell with "X has applied to become a TaskMaster" | Clicks it → lands on `/admin/applications/{id}` review page |

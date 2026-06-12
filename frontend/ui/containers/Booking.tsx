@@ -4,6 +4,7 @@ import { Calendar, Event, BusyRange } from "../components/calendar/calendar";
 import { Button } from "semantic-ui-react";
 import { Booking, BookingService } from "../api/bookingServices";
 import { TaskMasterServices } from "../api/taskMasterServices";
+import Dialog from "../components/dialog/dialog";
 
 export default function CalendarPage(props: {events: Event[], taskMasterId?: string}) {
 
@@ -17,6 +18,8 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
     // unique index as a hard guarantee, but disabling the button is the cheap UX fix here.
     let [submitting, setSubmitting] = React.useState<boolean>(false);
     let [busy, setBusy] = React.useState<BusyRange[]>([]);
+    let [successOpen, setSuccessOpen] = React.useState<boolean>(false);
+    let [errorMessage, setErrorMessage] = React.useState<string | null>(null);
     const routeParams = useParams<{ id?: string }>();
     const taskMasterId: string | undefined = props.taskMasterId ?? routeParams.id;
 
@@ -61,12 +64,12 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
         const trimmed = description.trim();
         BookingService.create(taskMasterId, slot, duration, trimmed.length > 0 ? trimmed : undefined)
             .then(() => {
-                alert("Booking request sent!");
+                setSuccessOpen(true);
                 setDescription("");
                 setSelected(null);
                 loadTimetable();
             })
-            .catch(err => alert(err?.response?.data?.error ?? "Failed to send booking request"))
+            .catch(err => setErrorMessage(err?.response?.data?.error ?? "Failed to send booking request"))
             .finally(() => setSubmitting(false));
     };
 
@@ -120,6 +123,20 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
                     <Button color={!taskMasterId || !selectedDate ? undefined : 'green'} onClick={onSubmit} disabled={!taskMasterId || !selectedDate || submitting} loading={submitting}>Submit</Button>
                 </div>
             </div>
+            {successOpen && (
+                <Dialog
+                    title="Booking request sent"
+                    message="Your booking request has been sent. You will be notified once the TaskMaster responds."
+                    onClose={() => setSuccessOpen(false)}
+                />
+            )}
+            {errorMessage && (
+                <Dialog
+                    title="Booking failed"
+                    message={errorMessage}
+                    onClose={() => setErrorMessage(null)}
+                />
+            )}
         </div>
     );
 };

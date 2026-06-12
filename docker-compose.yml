@@ -16,11 +16,12 @@ services:
     - "3000:3000"
     environment:
     - NODE_ENV=production
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    - OTEL_SERVICE_NAME=frontend
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # - OTEL_SERVICE_NAME=frontend
     depends_on:
       - product-service
-      - otel-collector
+      # - otel-collector
   product-service:
     image: product-service
     environment:
@@ -28,8 +29,9 @@ services:
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
     - SECURITY_JWT_SECRET=${JwtSecret}
     - SPRING_DATA_REDIS_HOST=redis
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-    - OTEL_SERVICE_NAME=product-service
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    # - OTEL_SERVICE_NAME=product-service
     - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
     ports:
     - "8080:8080" #need to remove exposed port in production
@@ -39,7 +41,7 @@ services:
     - consul
     - authentication-service
     - redis
-    - otel-collector
+    # - otel-collector
 
 
   calendar-service:
@@ -55,15 +57,16 @@ services:
     - KafkaProducerConfig__NotificationTopic=notification-events
     - JwtSettings__Secret=${JwtSecret}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    - OTEL_SERVICE_NAME=calendar-service
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # - OTEL_SERVICE_NAME=calendar-service
     ports:
     - "8082:8080" #need to remove exposed port in production
     depends_on:
     - mongodb
     - consul
     - kafka
-    - otel-collector
+    # - otel-collector
 
 
   authentication-service:
@@ -72,8 +75,9 @@ services:
     - spring.cloud.consul.enabled=true
     - SECURITY_JWT_SECRET=${JwtSecret}
     - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-    - OTEL_SERVICE_NAME=authorization-service
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    # - OTEL_SERVICE_NAME=authorization-service
     - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
     ports:
     - "8081:8081" #need to remove exposed port in production
@@ -82,7 +86,7 @@ services:
     - mongodb
     - consul
     - kafka
-    - otel-collector
+    # - otel-collector
 
   mongodb:
     image: mongodb/mongodb-community-server:7.0-ubi8  
@@ -158,15 +162,16 @@ services:
     - KafkaConsumerConfig__BootstrapServers=kafka:29092
     - KafkaConsumerConfig__GroupId=notification-service-group
     - KafkaConsumerConfig__Topic__0=notification-events
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    - OTEL_SERVICE_NAME=notification-service
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # - OTEL_SERVICE_NAME=notification-service
     ports:
     - "8084:8080"
     depends_on:
     - mongodb
     - kafka-init
     - kafka
-    - otel-collector
+    # - otel-collector
     restart: unless-stopped
 
   worker-service:
@@ -182,15 +187,16 @@ services:
     - Kafka__GroupId=worker-service-group
     - Kafka__Topics_0=bookings
     - Kafka__OutputTopics_0=notification-events
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    - OTEL_SERVICE_NAME=worker-service
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # - OTEL_SERVICE_NAME=worker-service
     ports:
     - "8085:8080"
     depends_on:
     - calendar-service
     - kafka
     - kafka-init
-    - otel-collector
+    # - otel-collector
     restart: unless-stopped
 
   ollama:
@@ -240,8 +246,9 @@ services:
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
     - Redis__ConnectionString=redis:6379
-    - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    - OTEL_SERVICE_NAME=ai-assistant-service
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # - OTEL_SERVICE_NAME=ai-assistant-service
     ports:
     - "8086:8080"
     depends_on:
@@ -249,41 +256,41 @@ services:
     - calendar-service
     - ollama
     - redis
-    - otel-collector
+    # - otel-collector
     restart: unless-stopped
 
-  # ─── Observability Stack ───
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-    ports:
-      - "16686:16686"
-    restart: unless-stopped
+  # ─── Observability Stack (disabled to save memory) ───
+  # jaeger:
+  #   image: jaegertracing/all-in-one:latest
+  #   environment:
+  #     - COLLECTOR_OTLP_ENABLED=true
+  #   ports:
+  #     - "16686:16686"
+  #   restart: unless-stopped
 
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./otel/otel-collector-config.yml:/etc/otelcol/config.yaml
-    ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "8889:8889"
-    depends_on:
-      - jaeger
-    restart: unless-stopped
+  # otel-collector:
+  #   image: otel/opentelemetry-collector-contrib:latest
+  #   command: ["--config=/etc/otelcol/config.yaml"]
+  #   volumes:
+  #     - ./otel/otel-collector-config.yml:/etc/otelcol/config.yaml
+  #   ports:
+  #     - "4317:4317"
+  #     - "4318:4318"
+  #     - "8889:8889"
+  #   depends_on:
+  #     - jaeger
+  #   restart: unless-stopped
 
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./otel/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    depends_on:
-      - otel-collector
-    restart: unless-stopped
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   volumes:
+  #     - ./otel/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus-data:/prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   depends_on:
+  #     - otel-collector
+  #   restart: unless-stopped
 
 volumes:
   zookeeper-data:
@@ -291,4 +298,4 @@ volumes:
   zookeeper-logs:
   ollama-data:
   mongodb-data:
-  prometheus-data:
+  # prometheus-data:

@@ -24,6 +24,7 @@ const AsyncApplyForTaskMaster = React.lazy(() => import('../components/apply-for
 const AsyncApplicationReview = React.lazy(() => import('../components/application-review/ApplicationReview'));
 const AsyncAdminApplicationsList = React.lazy(() => import('../components/admin-applications/AdminApplicationsList'));
 const AsyncIncomingBookings = React.lazy(() => import('./IncomingBookings'));
+const AsyncMyCalendar = React.lazy(() => import('./MyCalendar'));
 
 export interface IAppContext {
     username: string
@@ -66,6 +67,7 @@ export default class App extends React.Component<{}, IAppContext> {
                                     <Route path="/admin/applications/:id" element={<AsyncApplicationReview />} />
                                     <Route path="/admin/applications" element={<AsyncAdminApplicationsList />} />
                                     <Route path="/bookings/incoming" element={<AsyncIncomingBookings />} />
+                                    <Route path="/my-calendar" element={<AsyncMyCalendar />} />
                                 </Routes>
                             </React.Suspense>
                         </div>

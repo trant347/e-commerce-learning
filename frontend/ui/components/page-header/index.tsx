@@ -136,6 +136,14 @@ export default function(props) {
                                                 </Menu.Item>
                                             )}
 
+                                            {isTaskMaster && (
+                                                <Menu.Item name='my-calendar'>
+                                                    <StyledLinkHovered onClick={() => navigate('/my-calendar')}>
+                                                        <i className="calendar outline icon" /> My Calendar
+                                                    </StyledLinkHovered>
+                                                </Menu.Item>
+                                            )}
+
                                             {username === 'admin' && (
                                                 <Menu.Item name='new-taskmaster'>
                                                     <StyledLinkHovered onClick={() => navigate('/admin/new-taskmaster')}>
@@ -212,8 +220,8 @@ export default function(props) {
                             <li> Near Me </li>
                             <li>
                                 {username && username !== 'admin'
-                                    ? <Link to="/apply">New TaskMasters</Link>
-                                    : <span>New TaskMasters</span>
+                                    ? <Link to="/apply">Apply for TaskMaster</Link>
+                                    : <span>Apply for TaskMaster</span>
                                 }
                             </li>
                             <li> Best Value </li>

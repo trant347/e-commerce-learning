@@ -17,10 +17,12 @@ import './calendar.css';
 import * as React from 'react';
 
 export interface Event {
-  id: number;
+  id: number | string;
   title: string;
   start: Date;
   end: Date;
+  /** Optional caller-defined payload, surfaced again via onEventClick. */
+  data?: unknown;
 }
 
 export interface BusyRange {
@@ -37,6 +39,8 @@ interface CalendarProps {
   onChange: (start: Date, durationHours: number) => void;
   /** Fires when the user clears their selection (e.g. pressing Delete/Backspace). */
   onClear?: () => void;
+  /** Fires when an event block is clicked. Cell selection is suppressed for that click. */
+  onEventClick?: (event: Event) => void;
 }
 
 const HOUR_HEIGHT = 48; // px per hour
@@ -44,7 +48,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 type Cell = { dayIndex: number; hour: number };
 
-export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange, onClear }) => {
+export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange, onClear, onEventClick }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const weekStart = useMemo(() => startOfWeek(currentDate, { weekStartsOn: 0 }), [currentDate]);
@@ -376,6 +380,8 @@ export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange, onCl
                       className="event"
                       style={getEventStyle(event, day)}
                       title={`${event.title}\n${format(event.start, 'p')} – ${format(event.end, 'p')}`}
+                      onMouseDown={onEventClick ? (e => { e.stopPropagation(); e.preventDefault(); }) : undefined}
+                      onClick={onEventClick ? (e => { e.stopPropagation(); onEventClick(event); }) : undefined}
                     >
                       <div className="event-title">{event.title}</div>
                       <div className="event-time">
