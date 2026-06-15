@@ -12,6 +12,9 @@ public sealed class AiAssistantService : IAiAssistantService
     private readonly ToolRegistry _toolRegistry;
     private readonly ILogger<AiAssistantService> _logger;
 
+    // To keep prompts concise, only include the last 2 messages from history (if any) as context for the model.
+    private const int MaxChatMemorySize = 2;
+
     // Guard against infinite tool-call loops
     private const int MaxToolRounds = 5;
 
@@ -70,7 +73,7 @@ public sealed class AiAssistantService : IAiAssistantService
         if (request.History is { Count: > 0 })
         {
             var recent = request.History.Count > 2
-                ? request.History.Skip(request.History.Count - 2).ToList()
+                ? request.History.Skip(request.History.Count - MaxChatMemorySize).ToList()
                 : request.History;
 
             foreach (var h in recent)
