@@ -66,10 +66,14 @@ public sealed class AiAssistantService : IAiAssistantService
             new() { Role = "system", Content = systemPrompt }
         };
 
-        // Include conversation history for multi-turn context
+        // Include only the last exchange (up to 2 messages) for multi-turn context
         if (request.History is { Count: > 0 })
         {
-            foreach (var h in request.History)
+            var recent = request.History.Count > 2
+                ? request.History.Skip(request.History.Count - 2).ToList()
+                : request.History;
+
+            foreach (var h in recent)
             {
                 if (!string.IsNullOrWhiteSpace(h.Content) 
                     && (h.Role == "user" || h.Role == "assistant"))
@@ -223,7 +227,7 @@ public sealed class AiAssistantService : IAiAssistantService
     /// Scans tool-role messages for JSON arrays of task masters and extracts id+name pairs.
     /// The product-service returns a JSON array of TaskMaster objects, each with "id" and "name".
     /// </summary>
-    private static List<TaskMasterMention> ExtractMentions(IEnumerable<OllamaChatMessage> messages)
+    private List<TaskMasterMention> ExtractMentions(IEnumerable<OllamaChatMessage> messages)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mentions = new List<TaskMasterMention>();
@@ -233,14 +237,41 @@ public sealed class AiAssistantService : IAiAssistantService
             try
             {
                 var trimmed = msg.Content!.Trim();
-                // Tool content may be a JSON array directly or wrapped in an object with a "taskMasters" key
-                var root = JsonDocument.Parse(trimmed).RootElement;
+
+                _logger.LogDebug("[ExtractMentions] Tool message content ({Length} chars): {Content}",
+                    trimmed.Length, trimmed.Length > 500 ? trimmed[..500] + "..." : trimmed);
+
+                // Parse into a cloned root so we can safely dispose the document.
+                JsonElement root;
+                using (var doc = JsonDocument.Parse(trimmed))
+                {
+                    root = doc.RootElement.Clone();
+                }
+
+                // MCP tool results often arrive double-encoded: the JSON array/object
+                // is wrapped in a JSON string (ValueKind=String containing "[{...}]").
+                // Unwrap one level so the switch below sees Array/Object.
+                if (root.ValueKind == JsonValueKind.String)
+                {
+                    var inner = root.GetString();
+                    if (!string.IsNullOrWhiteSpace(inner))
+                    {
+                        _logger.LogDebug("[ExtractMentions] Unwrapping double-encoded JSON string");
+                        using var innerDoc = JsonDocument.Parse(inner);
+                        root = innerDoc.RootElement.Clone();
+                    }
+                }
+
+                _logger.LogDebug("[ExtractMentions] Parsed JSON, ValueKind={ValueKind}", root.ValueKind);
 
                 IEnumerable<JsonElement> items = root.ValueKind switch
                 {
                     JsonValueKind.Array => root.EnumerateArray().Select(e => e),
                     JsonValueKind.Object when root.TryGetProperty("taskMasters", out var arr)
                         => arr.EnumerateArray().Select(e => e),
+                    // Single object with id+name (e.g. get_task_master_by_id result)
+                    JsonValueKind.Object when root.TryGetProperty("id", out _)
+                        => new[] { root },
                     _ => Enumerable.Empty<JsonElement>()
                 };
 
@@ -253,14 +284,15 @@ public sealed class AiAssistantService : IAiAssistantService
                     {
                         var id   = idEl.GetString()   ?? string.Empty;
                         var name = nameEl.GetString() ?? string.Empty;
+                        _logger.LogDebug("[ExtractMentions] Found candidate: id={Id}, name={Name}", id, name);
                         if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name) && seen.Add(id))
                             mentions.Add(new TaskMasterMention { Id = id, Name = name });
                     }
                 }
             }
-            catch (JsonException)
+            catch (JsonException ex)
             {
-                // Tool content was not valid JSON — skip
+                _logger.LogWarning("[ExtractMentions] Tool content was not valid JSON: {Message}", ex.Message);
             }
         }
 

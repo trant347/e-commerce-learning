@@ -209,6 +209,59 @@ public class AiAssistantServiceTests
             Times.Exactly(5));
     }
 
+    [Fact]
+    public async Task ChatAsync_ExtractsMentions_FromDoubleEncodedToolResult()
+    {
+        // MCP tool results arrive double-encoded: the JSON array is wrapped in a
+        // JSON string (e.g. "\"[{\\\"id\\\":\\\"tm-1\\\",…}]\"").
+        // Simulate by having the tool return a JSON-serialized string of the array.
+        var innerJson = "[{\"id\":\"tm-1\",\"name\":\"Alice\"}]";
+        var doubleEncoded = JsonSerializer.Serialize(innerJson); // wraps in quotes + escapes
+
+        var fakeTool = new RecordingTool("search_task_masters", doubleEncoded);
+        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
+
+        using var argDoc = JsonDocument.Parse("{\"category\":\"Pet Care\"}");
+        var args = argDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
+
+        var toolCallMsg = new OllamaChatMessage
+        {
+            Role = "assistant",
+            ToolCalls = new List<OllamaToolCall>
+            {
+                new()
+                {
+                    Function = new OllamaToolCallFunction
+                    {
+                        Name = "search_task_masters",
+                        Arguments = args
+                    }
+                }
+            }
+        };
+        var finalMsg = new OllamaChatMessage { Role = "assistant", Content = "I found Alice." };
+
+        var ollama = new Mock<IOllamaClient>();
+        ollama.SetupSequence(c => c.ChatAsync(
+                It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
+                It.IsAny<IReadOnlyList<object>?>(),
+                It.IsAny<CancellationToken>()))
+              .ReturnsAsync(toolCallMsg)
+              .ReturnsAsync(finalMsg);
+
+        var svc = new AiAssistantService(
+            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
+
+        var resp = await svc.ChatAsync(
+            new ChatRequest { Message = "find a pet sitter" }, CancellationToken.None);
+
+        Assert.Equal("I found Alice.", resp.Answer);
+        Assert.Single(resp.Mentions);
+        Assert.Equal("tm-1", resp.Mentions[0].Id);
+        Assert.Equal("Alice", resp.Mentions[0].Name);
+    }
+
     private sealed class RecordingTool : IToolDefinition
     {
         private readonly string _result;
