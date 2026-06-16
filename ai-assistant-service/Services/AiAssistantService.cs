@@ -11,6 +11,7 @@ public sealed class AiAssistantService : IAiAssistantService
     private readonly IOllamaClient _ollamaClient;
     private readonly ToolRegistry _toolRegistry;
     private readonly ILogger<AiAssistantService> _logger;
+    private readonly Lazy<IReadOnlyList<OllamaChatMessage>> _seededExamples;
 
     // To keep prompts concise, only include the last 2 messages from history (if any) as context for the model.
     private const int MaxChatMemorySize = 2;
@@ -28,6 +29,7 @@ public sealed class AiAssistantService : IAiAssistantService
         _ollamaClient = ollamaClient;
         _toolRegistry = toolRegistry;
         _logger = logger;
+        _seededExamples = new Lazy<IReadOnlyList<OllamaChatMessage>>(LoadFewShotExamples);
     }
 
     public async Task<ChatResponse> ChatAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -68,6 +70,16 @@ public sealed class AiAssistantService : IAiAssistantService
         {
             new() { Role = "system", Content = systemPrompt }
         };
+
+        // Append static few-shot examples (loaded once from PromptOptions:FewShotExamples).
+        // These teach the model the tool-calling channel and final-answer style without
+        // bloating the system prompt or polluting the user-visible chat history.
+        var examples = _seededExamples.Value;
+        if (examples.Count > 0)
+        {
+            messages.AddRange(examples);
+            _logger.LogDebug("Seeded {Count} few-shot example messages into the conversation", examples.Count);
+        }
 
         // Include only the last exchange (up to 2 messages) for multi-turn context
         if (request.History is { Count: > 0 })
@@ -163,6 +175,61 @@ public sealed class AiAssistantService : IAiAssistantService
             Sources  = _toolRegistry.All.Select(t => t.Name).ToList(),
             Mentions = mentions
         };
+    }
+
+    /// <summary>
+    /// Materialises the configured few-shot examples into the message shape the Ollama
+    /// chat endpoint expects. Each turn is mapped to an <see cref="OllamaChatMessage"/>;
+    /// assistant turns with <c>ToolCalls</c> demonstrate proper use of the native
+    /// tool-call channel, which is the format we want the live model to mimic.
+    /// </summary>
+    private IReadOnlyList<OllamaChatMessage> LoadFewShotExamples()
+    {
+        var examples = _configuration
+            .GetSection("PromptOptions:FewShotExamples")
+            .Get<List<FewShotExample>>() ?? new List<FewShotExample>();
+
+        var seeded = new List<OllamaChatMessage>();
+        foreach (var example in examples)
+        {
+            if (example.Turns is not { Count: > 0 }) continue;
+
+            foreach (var turn in example.Turns)
+            {
+                if (string.IsNullOrWhiteSpace(turn.Role)) continue;
+
+                var msg = new OllamaChatMessage
+                {
+                    Role = turn.Role,
+                    Content = turn.Content
+                };
+
+                if (turn.ToolCalls is { Count: > 0 })
+                {
+                    msg.ToolCalls = turn.ToolCalls
+                        .Where(tc => !string.IsNullOrWhiteSpace(tc.Name))
+                        .Select(tc => new OllamaToolCall
+                        {
+                            Function = new OllamaToolCallFunction
+                            {
+                                Name = tc.Name,
+                                Arguments = tc.Arguments.ToDictionary(
+                                    kvp => kvp.Key,
+                                    kvp => JsonSerializer.SerializeToElement(kvp.Value))
+                            }
+                        })
+                        .ToList();
+                }
+
+                seeded.Add(msg);
+            }
+
+            _logger.LogInformation(
+                "Loaded few-shot example '{Description}' with {TurnCount} turns",
+                example.Description ?? "(unnamed)", example.Turns.Count);
+        }
+
+        return seeded;
     }
 
     /// <summary>
