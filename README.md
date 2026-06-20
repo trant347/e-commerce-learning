@@ -14,7 +14,6 @@ A TaskMaster marketplace that uses micro-services architecture. Users can browse
 - **calendar-service**: Booking management
 - **authentication-service**: User authentication
 - **notification-service**: Real-time notifications
-- **worker-service**: Async booking job processor
 - **ai-assistant-service**: AI-powered chat assistant (Ollama)
 
 ---
@@ -72,25 +71,6 @@ Bridges Kafka events to browser clients using Server-Sent Events (SSE).
 The `useNotifications` React hook connects to the SSE stream on login and exposes `lastNotification`. Components can watch `lastNotification.type` to react to specific events — for example, the navigation badge increments instantly when a `TASKMASTER_APPLICATION_SUBMITTED` event arrives while the admin is using the app.
 
 ---
-
-### worker-service (.NET)
-Processes booking jobs asynchronously, decoupling the calendar-service from long-running completion logic.
-
-**Flow**
-1. When a booking is created, `calendar-service` publishes a `BookingJobMessage` to the `bookings` Kafka topic.
-2. `BookingJobConsumerWorker` (a background `IHostedService`) consumes messages from that topic.
-3. For each message, `ProcessBookingService`:
-   - Fetches the booking from the calendar-service.
-   - Validates it hasn't already been completed and that the start time has passed.
-   - Updates the booking status to `Completed`.
-4. After processing, a `BookingJobStatusMessage` (`Status: "Processed"`) is published to the `notification-events` topic, triggering a notification to the user via the notification-service.
-5. Kafka offsets are committed **manually** after successful processing, giving at-least-once delivery semantics — a crash mid-processing will re-deliver the message rather than silently drop it.
-
-**Kafka topics**
-| Topic | Role |
-|---|---|
-| `bookings` | Input — booking jobs to process |
-| `notification-events` | Output — booking completion notifications |
 
 ## Authentication
 

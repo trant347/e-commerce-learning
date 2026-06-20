@@ -53,7 +53,6 @@ services:
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
     - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
     - KafkaProducerConfig__BootstrapServers=kafka:29092
-    - KafkaProducerConfig__Topic=bookings
     - KafkaProducerConfig__NotificationTopic=notification-events
     - JwtSettings__Secret=${JwtSecret}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
@@ -128,7 +127,6 @@ services:
         # Wait for Kafka to be ready
         cub kafka-ready -b kafka:9092 1 20
         # Create the 'bookings' topic
-        kafka-topics --create --if-not-exists --topic bookings --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
         kafka-topics --create --if-not-exists --topic notification-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
         kafka-topics --create --if-not-exists --topic user-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
         echo "Topic created successfully."
@@ -171,31 +169,6 @@ services:
     - mongodb
     - kafka-init
     - kafka
-    # - otel-collector
-    restart: unless-stopped
-
-  worker-service:
-    image: worker-service:latest
-    environment:
-    - ConnectionsString=${ConnectionsString}
-    - MongoBookingDatabaseName=${MongoBookingDatabaseName}
-    - ConsulConfig__ConsulAddress=http://consul:8500
-    - ConsulConfig__ServiceAddress=worker-service
-    - ConsulConfig__ServicePort=8080
-    - ConsulConfig__HealthCheckUrl=http://worker-service:8080/health
-    - Kafka__BootstrapServers=kafka:29092
-    - Kafka__GroupId=worker-service-group
-    - Kafka__Topics_0=bookings
-    - Kafka__OutputTopics_0=notification-events
-    - OTEL_SDK_DISABLED=true
-    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    # - OTEL_SERVICE_NAME=worker-service
-    ports:
-    - "8085:8080"
-    depends_on:
-    - calendar-service
-    - kafka
-    - kafka-init
     # - otel-collector
     restart: unless-stopped
 

@@ -140,9 +140,6 @@ docker-compose ps
 # View notification service logs
 docker logs -f e-commerce-learning-notification-service-1
 
-# View worker service logs (generates notifications)
-docker logs -f e-commerce-learning-worker-service-1
-
 # Check Kafka topics
 docker exec e-commerce-learning-kafka-1 kafka-topics --list --bootstrap-server localhost:9092
 

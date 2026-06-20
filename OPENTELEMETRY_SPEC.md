@@ -34,8 +34,8 @@ Add distributed tracing and metrics collection across all 7 microservices using 
      └─────────────┘              └──────────────────┘
 
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ calendar-service │  │ notification-svc │  │  worker-service  │
-│ (.NET 8)         │  │ (.NET 8)         │  │  (.NET 8)        │
+│ calendar-service │  │ notification-svc │  │ ai-assistant-svc │
+│ (.NET 8)         │  │ (.NET 8)         │  │ (.NET 8)         │
 └───────┬──────────┘  └───────┬──────────┘  └───────┬──────────┘
         │                     │                     │
         └─────────────────────┼─────────────────────┘
@@ -184,7 +184,7 @@ environment:
 
 ---
 
-### .NET Services (calendar-service, notification-service, worker-service, ai-assistant-service)
+### .NET Services (calendar-service, notification-service, ai-assistant-service)
 
 **Approach**: OpenTelemetry .NET SDK with auto-instrumentation for ASP.NET Core and HttpClient.
 
@@ -379,8 +379,6 @@ environment:
 | `calendar-service/Program.cs` | **Modify** | Add OTel setup (~10 lines) |
 | `notification-service/notification-service.csproj` | **Modify** | Add 4 NuGet packages |
 | `notification-service/Program.cs` | **Modify** | Add OTel setup (~10 lines) |
-| `worker-service/worker-service.csproj` | **Modify** | Add 4 NuGet packages |
-| `worker-service/Program.cs` | **Modify** | Add OTel setup (~10 lines) |
 | `ai-assistant-service/ai-assistant-service.csproj` | **Modify** | Add 4 NuGet packages |
 | `ai-assistant-service/Program.cs` | **Modify** | Add OTel setup (~10 lines) |
 | `frontend/tracing.js` | **Create** | OTel auto-instrumentation bootstrap |
