@@ -48,30 +48,61 @@ Per user decision, worker-service was **removed entirely**:
 
 ---
 
-## Phase 2 — Physically separate the MongoDB instances
+## Phase 2 — Physically separate the MongoDB instances — ✅ DONE
 
-Even with logical DB separation, sharing a single mongod means: shared failure domain, shared credentials, no permission boundary.
+Each service now points at its own mongod instance on a private Docker network. No shared failure domain at the data layer.
 
-### Tasks
-1. **Update `docker-compose.yml`**: replace the single `mongodb` service with one per data-owning service:
-   ```yaml
-   mongo-auth:          # for authorization-service
-   mongo-products:      # for product-service
-   mongo-bookings:      # for calendar-service
-   mongo-notifications: # for notification-service
-   ```
-   Each with its own named volume (`mongo-auth-data`, etc.) and **not** exposing a host port in prod.
-2. **Update each service's connection string** to point at its dedicated host:
-   - `authorization-service/src/main/resources/application.yml` → `mongo-auth:27017`
-   - `product-service/src/main/resources/application.yml` → `mongo-products:27017`
-   - `calendar-service` env `ConnectionsString` → `mongodb://mongo-bookings:27017`
-   - `notification-service/appsettings.json` → `mongodb://mongo-notifications:27017/NotificationDB`
-3. **Update `depends_on`** in each service to reference its own mongo container only.
-4. **Migrate existing data** (dev/test only — for learning a fresh start is fine):
-   - Optional: `mongodump` from old `mongodb` per DB, then `mongorestore` into the new instance.
-5. **Bring the stack up**, smoke-test each service end-to-end (login, create product, create booking, receive notification).
+### What was done
+1. **`docker-compose.yml`**: single `mongodb` service replaced with four dedicated containers and volumes:
+   | Container | Volume | Host port (dev) | Used by |
+   |---|---|---|---|
+   | `mongo-auth` | `mongo-auth-data` | 27017 | authorization-service |
+   | `mongo-products` | `mongo-products-data` | 27018 | product-service |
+   | `mongo-bookings` | `mongo-bookings-data` | 27019 | calendar-service |
+   | `mongo-notifications` | `mongo-notifications-data` | 27020 | notification-service |
 
-**Acceptance:** `docker-compose ps` shows N mongo containers; `docker exec mongo-auth mongosh --eval "show dbs"` shows only `user`.
+   Different host ports were chosen so developers can connect each instance from their host without conflicts. **For production these `ports:` mappings should be removed** so the mongods are reachable only on the internal Docker network.
+
+2. **Service connection targets updated** (both in `docker-compose.yml` env and as committed defaults so local dev works too):
+   - `authorization-service`: `SPRING_DATA_MONGODB_HOST=mongo-auth` (default in `application.yml` is now `${MONGO_HOST:mongo-auth}`).
+   - `product-service`: `SPRING_DATA_MONGODB_HOST=mongo-products` (default in `application.yml` is now `${MONGO_HOST:mongo-products}`).
+   - `calendar-service`: `ConnectionsString=mongodb://mongo-bookings:27017` (env literal — no longer reads `${ConnectionsString}` from `.env`).
+   - `notification-service`: `ConnectionStrings__MongoDB=mongodb://mongo-notifications:27017/NotificationDB` (default in `appsettings.json` updated to match).
+
+3. **`depends_on`** updated for each service to reference only its own mongo container.
+
+4. **Cleanup**: dead `ConnectionsString=${ConnectionsString}` and `MongoBookingDatabaseName=${MongoBookingDatabaseName}` env vars (leftover from worker-service) removed from the notification-service block.
+
+### Migration note
+The previous single `mongodb-data` volume is **orphaned but not deleted**. If you need to migrate existing data:
+```powershell
+# from a one-off mongo container mounting the old volume
+docker run --rm -v mongodb-data:/data/db -v ${PWD}/dump:/dump mongo:7 mongodump --out /dump --db user
+docker run --rm -v mongo-auth-data:/data/db -v ${PWD}/dump:/dump mongo:7 mongorestore /dump
+```
+Repeat per DB (`products`, `BookingsDB`, `NotificationDB`). For a learning project, a fresh start is usually fine — just `docker volume rm e-commerce-learning_mongodb-data` once you're sure.
+
+### Local `.env` cleanup (manual)
+`.env` is gitignored. The following entries are no longer used and can be deleted from your local `.env`:
+- `ConnectionsString=mongodb://mongodb:27017`
+- `MongoBookingDatabaseName=BookingsDB`
+
+### Verification
+- `docker compose config` validates clean.
+- calendar-service: 24/24 tests pass.
+- authorization-service: 3/3 tests pass (BUILD SUCCESS).
+- `grep` for `mongodb://mongodb` or `host: mongodb` returns nothing in service code.
+- **End-to-end runtime verified:** `docker exec mongo-auth mongosh --eval "show dbs"` shows only the `user` DB; `mongo-products` shows only `products`; service logs confirm each app connects to its dedicated mongo.
+
+### Gotcha: orphan container on first upgrade
+Because the old `mongodb` service was removed from compose, `docker compose up` will leave the old `e-commerce-learning-mongodb-1` container running and holding port 27017, which prevents `mongo-auth` from starting. The fix is a one-time:
+```
+docker compose down --remove-orphans
+docker compose up -d
+```
+The orphan `mongodb-data` volume can also be removed once you're sure you don't need to migrate old data: `docker volume rm e-commerce-learning_mongodb-data`.
+
+**Acceptance met:** four mongo containers, each service depends on only its own.
 
 ---
 

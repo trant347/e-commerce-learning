@@ -28,6 +28,7 @@ services:
     - spring.cloud.consul.enabled=true
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
     - SECURITY_JWT_SECRET=${JwtSecret}
+    - SPRING_DATA_MONGODB_HOST=mongo-products
     - SPRING_DATA_REDIS_HOST=redis
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
@@ -37,7 +38,7 @@ services:
     - "8080:8080" #need to remove exposed port in production
     - "8000:8000" #debug port
     depends_on:
-    - mongodb
+    - mongo-products
     - consul
     - authentication-service
     - redis
@@ -47,7 +48,7 @@ services:
   calendar-service:
     image: calendar-service
     environment:
-    - ConnectionsString=${ConnectionsString}
+    - ConnectionsString=mongodb://mongo-bookings:27017
     - ConsulConfig__ConsulAddress=http://consul:8500
     - ConsulConfig__ServiceAddress=calendar-service # IMPORTANT: This is the service name *within* the Docker network
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
@@ -62,7 +63,7 @@ services:
     ports:
     - "8082:8080" #need to remove exposed port in production
     depends_on:
-    - mongodb
+    - mongo-bookings
     - consul
     - kafka
     # - otel-collector
@@ -73,6 +74,7 @@ services:
     environment:
     - spring.cloud.consul.enabled=true
     - SECURITY_JWT_SECRET=${JwtSecret}
+    - SPRING_DATA_MONGODB_HOST=mongo-auth
     - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
@@ -82,17 +84,38 @@ services:
     - "8081:8081" #need to remove exposed port in production
     - "8001:8000" #debug
     depends_on:
-    - mongodb
+    - mongo-auth
     - consul
     - kafka
     # - otel-collector
 
-  mongodb:
-    image: mongodb/mongodb-community-server:7.0-ubi8  
+  mongo-auth:
+    image: mongodb/mongodb-community-server:7.0-ubi8
     ports:
     - "27017:27017"
     volumes:
-    - mongodb-data:/data/db
+    - mongo-auth-data:/data/db
+
+  mongo-products:
+    image: mongodb/mongodb-community-server:7.0-ubi8
+    ports:
+    - "27018:27017"
+    volumes:
+    - mongo-products-data:/data/db
+
+  mongo-bookings:
+    image: mongodb/mongodb-community-server:7.0-ubi8
+    ports:
+    - "27019:27017"
+    volumes:
+    - mongo-bookings-data:/data/db
+
+  mongo-notifications:
+    image: mongodb/mongodb-community-server:7.0-ubi8
+    ports:
+    - "27020:27017"
+    volumes:
+    - mongo-notifications-data:/data/db
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -151,8 +174,7 @@ services:
   notification-service:
     image: notification-service:latest
     environment:
-    - ConnectionsString=${ConnectionsString}
-    - MongoBookingDatabaseName=${MongoBookingDatabaseName}
+    - ConnectionStrings__MongoDB=mongodb://mongo-notifications:27017/NotificationDB
     - ConsulConfig__ConsulAddress=http://consul:8500
     - ConsulConfig__ServiceAddress=notification-service
     - ConsulConfig__ServicePort=8080
@@ -166,7 +188,7 @@ services:
     ports:
     - "8084:8080"
     depends_on:
-    - mongodb
+    - mongo-notifications
     - kafka-init
     - kafka
     # - otel-collector
@@ -270,5 +292,8 @@ volumes:
   kafka-data:
   zookeeper-logs:
   ollama-data:
-  mongodb-data:
+  mongo-auth-data:
+  mongo-products-data:
+  mongo-bookings-data:
+  mongo-notifications-data:
   # prometheus-data:
