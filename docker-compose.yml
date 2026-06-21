@@ -29,6 +29,9 @@ services:
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
     - SECURITY_JWT_SECRET=${JwtSecret}
     - SPRING_DATA_MONGODB_HOST=mongo-products
+    - SPRING_DATA_MONGODB_USERNAME=${PRODUCTS_DB_USER}
+    - SPRING_DATA_MONGODB_PASSWORD=${PRODUCTS_DB_PASSWORD}
+    - SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE=products
     - SPRING_DATA_REDIS_HOST=redis
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
@@ -48,7 +51,7 @@ services:
   calendar-service:
     image: calendar-service
     environment:
-    - ConnectionsString=mongodb://mongo-bookings:27017
+    - ConnectionsString=mongodb://${BOOKINGS_DB_USER}:${BOOKINGS_DB_PASSWORD}@mongo-bookings:27017/?authSource=BookingsDB
     - ConsulConfig__ConsulAddress=http://consul:8500
     - ConsulConfig__ServiceAddress=calendar-service # IMPORTANT: This is the service name *within* the Docker network
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
@@ -75,6 +78,9 @@ services:
     - spring.cloud.consul.enabled=true
     - SECURITY_JWT_SECRET=${JwtSecret}
     - SPRING_DATA_MONGODB_HOST=mongo-auth
+    - SPRING_DATA_MONGODB_USERNAME=${AUTH_DB_USER}
+    - SPRING_DATA_MONGODB_PASSWORD=${AUTH_DB_PASSWORD}
+    - SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE=user
     - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
@@ -91,31 +97,55 @@ services:
 
   mongo-auth:
     image: mongodb/mongodb-community-server:7.0-ubi8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      AUTH_DB_USER: ${AUTH_DB_USER}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
     ports:
     - "27017:27017"
     volumes:
     - mongo-auth-data:/data/db
+    - ./mongo-init/auth-init.js:/docker-entrypoint-initdb.d/auth-init.js:ro
 
   mongo-products:
     image: mongodb/mongodb-community-server:7.0-ubi8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      PRODUCTS_DB_USER: ${PRODUCTS_DB_USER}
+      PRODUCTS_DB_PASSWORD: ${PRODUCTS_DB_PASSWORD}
     ports:
     - "27018:27017"
     volumes:
     - mongo-products-data:/data/db
+    - ./mongo-init/products-init.js:/docker-entrypoint-initdb.d/products-init.js:ro
 
   mongo-bookings:
     image: mongodb/mongodb-community-server:7.0-ubi8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      BOOKINGS_DB_USER: ${BOOKINGS_DB_USER}
+      BOOKINGS_DB_PASSWORD: ${BOOKINGS_DB_PASSWORD}
     ports:
     - "27019:27017"
     volumes:
     - mongo-bookings-data:/data/db
+    - ./mongo-init/bookings-init.js:/docker-entrypoint-initdb.d/bookings-init.js:ro
 
   mongo-notifications:
     image: mongodb/mongodb-community-server:7.0-ubi8
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      NOTIFICATIONS_DB_USER: ${NOTIFICATIONS_DB_USER}
+      NOTIFICATIONS_DB_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD}
     ports:
     - "27020:27017"
     volumes:
     - mongo-notifications-data:/data/db
+    - ./mongo-init/notifications-init.js:/docker-entrypoint-initdb.d/notifications-init.js:ro
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -174,7 +204,7 @@ services:
   notification-service:
     image: notification-service:latest
     environment:
-    - ConnectionStrings__MongoDB=mongodb://mongo-notifications:27017/NotificationDB
+    - ConnectionStrings__MongoDB=mongodb://${NOTIFICATIONS_DB_USER}:${NOTIFICATIONS_DB_PASSWORD}@mongo-notifications:27017/NotificationDB?authSource=NotificationDB
     - ConsulConfig__ConsulAddress=http://consul:8500
     - ConsulConfig__ServiceAddress=notification-service
     - ConsulConfig__ServicePort=8080

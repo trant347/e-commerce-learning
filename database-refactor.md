@@ -106,23 +106,88 @@ The orphan `mongodb-data` volume can also be removed once you're sure you don't 
 
 ---
 
-## Phase 3 — Add authentication & least-privilege per service
+## Phase 3 — Add authentication & least-privilege per service — ✅ DONE
 
-### Tasks
-1. For each mongo container, set `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` from `.env`.
-2. Add an init script (`docker-entrypoint-initdb.d/init.js`) that creates a service user with `readWrite` only on its own DB.
-3. Update each service's connection string to use the service user's credentials (loaded from env, not committed).
-4. Confirm `.env` is in `.gitignore` (it should already be).
+Each mongo container now requires authentication, and each service connects as a dedicated user with `readWrite` on **only** its own database.
 
-**Acceptance:** Connecting as `auth_user` and trying `db.getSiblingDB('products').products.find()` is rejected.
+### What was done
+1. **Per-mongo root + service-user bootstrap.** Each mongo container in `docker-compose.yml` now sets `MONGO_INITDB_ROOT_USERNAME`/`MONGO_INITDB_ROOT_PASSWORD`, which:
+   - Enables `--auth` automatically (the official image does this when root creds are set).
+   - Creates a root user in the `admin` DB used only for the one-time init.
+2. **First-start init scripts** in `mongo-init/*.js` create the application user with the minimum role:
+   | Script | Created user | Role |
+   |---|---|---|
+   | `mongo-init/auth-init.js` | `${AUTH_DB_USER}` | `readWrite` on `user` |
+   | `mongo-init/products-init.js` | `${PRODUCTS_DB_USER}` | `readWrite` on `products` |
+   | `mongo-init/bookings-init.js` | `${BOOKINGS_DB_USER}` | `readWrite` on `BookingsDB` |
+   | `mongo-init/notifications-init.js` | `${NOTIFICATIONS_DB_USER}` | `readWrite` on `NotificationDB` |
+   These scripts are mounted read-only at `/docker-entrypoint-initdb.d/`, so they execute exactly once on first start of an empty data volume.
+3. **Service connection strings updated** to authenticate as the service user (creds loaded from `.env`):
+   - **authorization-service** / **product-service** (Spring): added `SPRING_DATA_MONGODB_USERNAME` / `_PASSWORD` / `_AUTHENTICATION_DATABASE` env vars.
+   - **calendar-service** (.NET): `ConnectionsString=mongodb://${BOOKINGS_DB_USER}:${BOOKINGS_DB_PASSWORD}@mongo-bookings:27017/?authSource=BookingsDB`.
+   - **notification-service** (.NET): `ConnectionStrings__MongoDB=mongodb://${NOTIFICATIONS_DB_USER}:${NOTIFICATIONS_DB_PASSWORD}@mongo-notifications:27017/NotificationDB?authSource=NotificationDB`.
+4. **`.env.example`** committed showing the required new variables (real `.env` remains gitignored).
+
+### Verification
+- All four init scripts logged `[init] Created user '<u>' on db '<x>'` on first start.
+- Each service connected to its mongo with no `AuthenticationFailed` / `MongoSecurityException` errors.
+- Least-privilege boundary confirmed live:
+  ```
+  $ mongosh -u auth_user -p ... --authenticationDatabase user
+  db.getSiblingDB('user').runCommand({listCollections:1}).ok   # → 1     (OK)
+  db.getSiblingDB('admin').system.users.find().toArray()       # → REJECTED: Unauthorized
+  ```
+
+### Gotcha: re-applying on existing volumes
+Init scripts only run when `/data/db` is empty. To re-apply auth changes you must drop the mongo volumes:
+```powershell
+docker compose down
+docker volume rm e-commerce-learning_mongo-auth-data `
+                 e-commerce-learning_mongo-products-data `
+                 e-commerce-learning_mongo-bookings-data `
+                 e-commerce-learning_mongo-notifications-data
+docker compose up -d
+```
+This wipes the existing app data — fine for a learning project, but in production you'd `db.createUser` manually instead.
+
+**Acceptance met:** every service authenticates as a scoped user; cross-DB access by a service user is denied.
 
 ---
 
-## Phase 4 — Prevent regressions
+## Phase 4 — Prevent regressions — ✅ DONE
 
-1. **Document** the rule in `README.md`: "Each service owns its database; cross-service data access goes through HTTP APIs or Kafka events."
-2. **Add a CI check** (simple grep) that fails if any service references another service's DB name or a Mongo collection it doesn't own.
-3. **Architecture diagram** in `README.md` showing one DB per service + the event/REST flows.
+### What was done
+1. **README documents the rule and shows the data architecture.** New "Data architecture" section in `README.md` includes a diagram of the per-service mongo topology plus the explicit rule:
+   > Each service owns its own MongoDB instance. Cross-service data access goes through HTTP APIs or Kafka events — never by reading another service's database.
+2. **CI guardrail** in `scripts/check-db-ownership.sh`:
+   - For each service, greps the source tree for references to any *other* service's mongo host (`mongo-auth`, `mongo-products`, `mongo-bookings`, `mongo-notifications`).
+   - Also blocks the legacy shared `mongodb` hostname.
+   - Exits non-zero with a clear `VIOLATION:` message + file/line on failure.
+   - Skips build artifacts (`bin`, `obj`, `target`, `node_modules`, `*.csproj.user`, `*.Backup.tmp`).
+3. **Wired into GitHub Actions** as a new `db-ownership-check` job in `.github/workflows/test.yml`, running on every push to `main` and every PR.
+
+### Verification
+- Script passes clean on the current tree: `Database ownership check passed: each service references only its own mongo host.`
+- Negative test: injecting `# fake-violation: mongo-products` into `authorization-service/.../application.yml` makes the script exit 1 with:
+  ```
+  VIOLATION: 'authorization-service' references 'mongo-products' (owned by another service):
+    authorization-service/src/main/resources/application.yml:42:# fake-violation: mongo-products
+  ```
+
+**Acceptance met:** the database-per-service rule is documented and mechanically enforced.
+
+---
+
+## Summary — refactor complete
+
+| Phase | Goal | Outcome |
+|---|---|---|
+| 1 | Remove the shared `BookingsDB.Booking` collection | worker-service deleted (was stale code) |
+| 2 | Physically separate mongo instances | 4 dedicated mongo containers, one per service |
+| 3 | Per-service auth & least-privilege | Each service authenticates as a user with `readWrite` on one DB only |
+| 4 | Prevent regressions | README rule + diagram + CI guardrail script |
+
+The shared-database anti-pattern is gone and there's a guardrail to keep it gone.
 
 ---
 

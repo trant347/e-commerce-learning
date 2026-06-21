@@ -18,6 +18,40 @@ A TaskMaster marketplace that uses micro-services architecture. Users can browse
 
 ---
 
+## Data architecture
+
+Each service owns its own MongoDB instance. **Cross-service data access goes through HTTP APIs or Kafka events — never by reading another service's database.** This rule is enforced in CI by `scripts/check-db-ownership.sh`.
+
+```
+            ┌──────────────────┐         ┌──────────────────┐
+            │  authentication  │ ──────▶ │   mongo-auth     │  db: user
+            └──────────────────┘         └──────────────────┘
+
+            ┌──────────────────┐         ┌──────────────────┐
+            │     product      │ ──────▶ │  mongo-products  │  db: products
+            └─────────┬────────┘         └──────────────────┘
+                     ▲│ REST
+                     │▼
+            ┌──────────────────┐         ┌──────────────────┐
+            │     calendar     │ ──────▶ │  mongo-bookings  │  db: BookingsDB
+            └─────────┬────────┘         └──────────────────┘
+                      │ Kafka: notification-events
+                      ▼
+            ┌──────────────────┐         ┌──────────────────────┐
+            │   notification   │ ──────▶ │ mongo-notifications  │  db: NotificationDB
+            └──────────────────┘         └──────────────────────┘
+
+            ┌──────────────────┐  HTTP   ┌──────────────────┐
+            │   ai-assistant   │ ──────▶ │ product, calendar│   (no DB of its own)
+            └──────────────────┘         └──────────────────┘
+
+           Cross-service events on Kafka:  notification-events, user-events
+```
+
+Each mongo instance runs with `--auth` and the service connects as a dedicated user with `readWrite` on **only** its own database. See `database-refactor.md` for the full migration history (Phases 1–4) and `mongo-init/` for the per-DB bootstrap scripts.
+
+---
+
 ## How it works
 
 ### product-service (Java 11 / Spring Boot)

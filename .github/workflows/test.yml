@@ -10,6 +10,16 @@ permissions:
   contents: read
 
 jobs:
+  db-ownership-check:
+    name: database ownership check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify each service uses only its own mongo host
+        run: bash scripts/check-db-ownership.sh
+
   authorization-service-tests:
     name: authorization-service tests
     runs-on: ubuntu-latest
