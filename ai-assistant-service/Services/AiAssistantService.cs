@@ -99,6 +99,7 @@ public sealed class AiAssistantService : IAiAssistantService
         }
 
         messages.Add(new OllamaChatMessage { Role = "user", Content = request.Message });
+        var hadToolExecutionFailure = false;
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)
@@ -140,7 +141,18 @@ public sealed class AiAssistantService : IAiAssistantService
                 _logger.LogInformation("Executing tool={ToolName} with args={Args}", 
                     toolName, string.Join(", ", args.Select(a => $"{a.Key}={a.Value}")));
 
-                var result = await _toolRegistry.ExecuteAsync(toolName, args, cancellationToken);
+                string result;
+                try
+                {
+                    result = await _toolRegistry.ExecuteAsync(toolName, args, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    hadToolExecutionFailure = true;
+                    _logger.LogError(ex, "Tool execution failed for tool={ToolName}", toolName);
+                    // Return a safe tool payload so the chat can continue without crashing the request.
+                    result = "{\"error\":\"tool_unavailable\",\"message\":\"Marketplace tool is temporarily unavailable.\"}";
+                }
 
                 _logger.LogInformation("Tool={ToolName} returned result length={ResultLength}", 
                     toolName, result?.Length ?? 0);
@@ -155,12 +167,19 @@ public sealed class AiAssistantService : IAiAssistantService
 
         // The last assistant message with real content is the final answer.
         // If the loop exhausted all rounds without a conclusive answer, say so explicitly.
+        const string defaultFallback = "I wasn't able to find a complete answer — the data may be unavailable or the request needs more detail. Please try rephrasing.";
+
         var finalContent = messages
             .LastOrDefault(m => m.Role == "assistant"
                              && m.ToolCalls is not { Count: > 0 }
                              && !string.IsNullOrWhiteSpace(m.Content))
             ?.Content
-            ?? "I wasn't able to find a complete answer — the data may be unavailable or the request needs more detail. Please try rephrasing.";
+            ?? defaultFallback;
+
+        if (hadToolExecutionFailure && string.Equals(finalContent, defaultFallback, StringComparison.Ordinal))
+        {
+            finalContent = "I could not access marketplace data right now. Please try again in a moment.";
+        }
 
         _logger.LogInformation("Chat request completed with final answer length={AnswerLength}, total messages={MessageCount}", 
             finalContent.Length, messages.Count);

@@ -1,8 +1,11 @@
 package com.bookstore.authentication.configs;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
+
+import java.nio.charset.StandardCharsets;
 
 
 @Configuration
@@ -61,5 +64,17 @@ public class JwtConfig {
 
     public void setSecret(String secret) {
         this.secret = secret;
+    }
+
+    @PostConstruct
+    public void validateSecretStrength() {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("security.jwt.secret is missing. Set SECURITY_JWT_SECRET/JwtSecret to a strong value (>= 32 chars).");
+        }
+
+        int secretBytes = secret.getBytes(StandardCharsets.UTF_8).length;
+        if (secretBytes < 32) {
+            throw new IllegalStateException("security.jwt.secret is too short (" + secretBytes + " bytes). Use at least 32 bytes for HS256.");
+        }
     }
 }

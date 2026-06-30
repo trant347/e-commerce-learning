@@ -27,7 +27,7 @@ services:
     environment:
     - spring.cloud.consul.enabled=true
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
-    - SECURITY_JWT_SECRET=${JwtSecret}
+    - SECURITY_JWT_SECRET=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
     - SPRING_DATA_MONGODB_HOST=mongo-products
     - SPRING_DATA_MONGODB_USERNAME=${PRODUCTS_DB_USER}
     - SPRING_DATA_MONGODB_PASSWORD=${PRODUCTS_DB_PASSWORD}
@@ -58,7 +58,7 @@ services:
     - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
     - KafkaProducerConfig__BootstrapServers=kafka:29092
     - KafkaProducerConfig__NotificationTopic=notification-events
-    - JwtSettings__Secret=${JwtSecret}
+    - JwtSettings__Secret=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -76,7 +76,7 @@ services:
     image: auth-service
     environment:
     - spring.cloud.consul.enabled=true
-    - SECURITY_JWT_SECRET=${JwtSecret}
+    - SECURITY_JWT_SECRET=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
     - SPRING_DATA_MONGODB_HOST=mongo-auth
     - SPRING_DATA_MONGODB_USERNAME=${AUTH_DB_USER}
     - SPRING_DATA_MONGODB_PASSWORD=${AUTH_DB_PASSWORD}
@@ -232,13 +232,13 @@ services:
     - ollama-data:/root/.ollama
     restart: unless-stopped
     # Uncomment below for GPU support (requires nvidia-docker):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   # Init container to pull the model on first startup
   ollama-init:

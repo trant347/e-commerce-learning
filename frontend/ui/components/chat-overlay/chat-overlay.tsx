@@ -9,7 +9,7 @@ import './chat-overlay.css';
  * Splits `text` on task master names and replaces each occurrence with a
  * React <Link> pointing to /product/:id.
  */
-function renderWithLinks(text: string, mentions: TaskMasterMention[]): React.ReactNode {
+function renderWithLinks(text: string, mentions: TaskMasterMention[], keyPrefix = 'mention'): React.ReactNode {
     if (!mentions.length) return text;
 
     // Sort longest name first to avoid partial matches on shorter names
@@ -40,7 +40,7 @@ function renderWithLinks(text: string, mentions: TaskMasterMention[]): React.Rea
             parts.push(remaining.slice(0, earliest.index));
         }
         parts.push(
-            <Link key={earliest.mention.id} to={`/product/${earliest.mention.id}`}>
+            <Link key={`${keyPrefix}-${earliest.mention.id}-${parts.length}`} to={`/product/${earliest.mention.id}`}>
                 {earliest.mention.name}
             </Link>
         );
@@ -48,6 +48,86 @@ function renderWithLinks(text: string, mentions: TaskMasterMention[]): React.Rea
     }
 
     return <>{parts}</>;
+}
+
+function toInternalProductPath(url: string): string | null {
+    if (!url) return null;
+
+    if (url.startsWith('/product/')) {
+        return url;
+    }
+
+    try {
+        const parsed = new URL(url);
+        if (parsed.pathname.startsWith('/product/')) {
+            return parsed.pathname;
+        }
+    } catch {
+        return null;
+    }
+
+    return null;
+}
+
+function stripMarkdownImages(text: string): string {
+    // Remove optional lead-in label plus markdown image token, e.g.
+    // "Here's his profile picture: ![](https://...)"
+    const withoutProfileLine = text.replace(
+        /(?:^|\n)\s*Here(?:'|’)s\s+(?:his|her|their)\s+profile\s+picture:\s*!\[[^\]]*\]\([^\s)]+\)\s*(?=\n|$)/gi,
+        ''
+    );
+
+    // Remove any remaining markdown image tokens.
+    return withoutProfileLine
+        .replace(/!\[[^\]]*\]\([^\s)]+\)/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function renderAssistantContent(text: string, mentions: TaskMasterMention[]): React.ReactNode {
+    const sanitizedText = stripMarkdownImages(text);
+
+    // Supports markdown-style links: [label](url)
+    const linkRegex = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+    const nodes: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let linkIndex = 0;
+
+    while ((match = linkRegex.exec(sanitizedText)) !== null) {
+        const before = sanitizedText.slice(lastIndex, match.index);
+        if (before) {
+            nodes.push(renderWithLinks(before, mentions, `plain-${linkIndex}`));
+        }
+
+        const label = match[1];
+        const href = match[2];
+        const internalPath = toInternalProductPath(href);
+
+        if (internalPath) {
+            nodes.push(
+                <Link key={`md-internal-${linkIndex}`} to={internalPath}>
+                    {label}
+                </Link>
+            );
+        } else {
+            nodes.push(
+                <a key={`md-external-${linkIndex}`} href={href} target="_blank" rel="noreferrer noopener">
+                    {label}
+                </a>
+            );
+        }
+
+        lastIndex = match.index + match[0].length;
+        linkIndex += 1;
+    }
+
+    const tail = sanitizedText.slice(lastIndex);
+    if (tail) {
+        nodes.push(renderWithLinks(tail, mentions, `tail-${linkIndex}`));
+    }
+
+    return <>{nodes}</>;
 }
 
 interface IChatMessage {
@@ -163,10 +243,9 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
                                 className={`chat-message-row ${message.role === 'user' ? 'from-user' : 'from-assistant'}`}
                             >
                                 <div className="chat-message-bubble">
-                                    {message.role === 'assistant' && message.mentions && message.mentions.length > 0
-                                        ? renderWithLinks(message.content, message.mentions)
-                                        : message.content
-                                    }
+                                    {message.role === 'assistant'
+                                        ? renderAssistantContent(message.content, message.mentions || [])
+                                        : message.content}
                                 </div>
                             </div>
                         ))}
