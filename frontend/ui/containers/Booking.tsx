@@ -12,6 +12,7 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
     let [duration, setDuration] = React.useState<number>(1);
     let [taskMasterName, setTaskMasterName] = React.useState<string | null>(null);
     let [description, setDescription] = React.useState<string>("");
+    let [hourlyRate, setHourlyRate] = React.useState<string>("");
     // Tracks an in-flight POST so a fast double-click on Submit cannot fire two requests.
     // Without this guard, two near-simultaneous bookings race the backend's overlap check
     // and one of them (whichever loses the race) comes back as 409. The backend has a DB-level
@@ -56,22 +57,31 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
 
     const onSubmit = () => {
         if (!selectedDate || !taskMasterId || submitting) return;
+        const rate = parseFloat(hourlyRate);
+        if (!hourlyRate.trim() || isNaN(rate) || rate <= 0) {
+            setErrorMessage("Please enter the hourly rate you want to pay (must be greater than 0).");
+            return;
+        }
         // Hour-align in UTC: backend rejects non-hour-aligned or past slots.
         const slot = new Date(Date.UTC(
             selectedDate.getUTCFullYear(), selectedDate.getUTCMonth(), selectedDate.getUTCDate(),
             selectedDate.getUTCHours(), 0, 0, 0));
         setSubmitting(true);
         const trimmed = description.trim();
-        BookingService.create(taskMasterId, slot, duration, trimmed.length > 0 ? trimmed : undefined)
+        BookingService.create(taskMasterId, slot, duration, trimmed.length > 0 ? trimmed : undefined, rate)
             .then(() => {
                 setSuccessOpen(true);
                 setDescription("");
+                setHourlyRate("");
                 setSelected(null);
                 loadTimetable();
             })
             .catch(err => setErrorMessage(err?.response?.data?.error ?? "Failed to send booking request"))
             .finally(() => setSubmitting(false));
     };
+
+    const parsedRate = parseFloat(hourlyRate);
+    const totalAmount = !isNaN(parsedRate) && parsedRate > 0 ? parsedRate * duration : null;
 
     return (
         <div style={{ padding: '20px' }}>
@@ -119,6 +129,35 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
                                 Click a time slot, then click another to set the end — or click and drag to select a range.
                             </span>
                         )}
+                    </div>
+                    <div>
+                        <label htmlFor="booking-hourly-rate" style={{ display: 'block', fontWeight: 600, marginBottom: '6px', fontSize: '0.95rem' }}>
+                            Your offered rate ($ / hour)
+                        </label>
+                        <input
+                            id="booking-hourly-rate"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={hourlyRate}
+                            onChange={e => setHourlyRate(e.target.value)}
+                            placeholder="e.g. 25.00"
+                            style={{
+                                width: '100%',
+                                padding: '8px',
+                                border: '1px solid #d2d0ce',
+                                borderRadius: '4px',
+                                fontFamily: 'inherit',
+                                fontSize: '0.9rem',
+                                boxSizing: 'border-box'
+                            }}
+                        />
+                        <div style={{ marginTop: '6px', fontSize: '0.9rem', color: '#252423' }}>
+                            Total: <strong>{totalAmount !== null ? `$${totalAmount.toFixed(2)}` : '—'}</strong>
+                            {totalAmount !== null && (
+                                <span style={{ color: '#605e5c' }}> ({duration} {duration === 1 ? 'hour' : 'hours'})</span>
+                            )}
+                        </div>
                     </div>
                     <Button color={!taskMasterId || !selectedDate ? undefined : 'green'} onClick={onSubmit} disabled={!taskMasterId || !selectedDate || submitting} loading={submitting}>Submit</Button>
                 </div>

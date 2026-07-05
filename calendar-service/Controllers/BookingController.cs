@@ -33,6 +33,7 @@ namespace calendar_service.Controllers
             public DateTime SlotStart { get; set; }
             public int DurationHours { get; set; } = 1;
             public string? Message { get; set; }
+            public decimal? OfferedRatePerHour { get; set; }
         }
 
         public class RespondDto
@@ -96,7 +97,8 @@ namespace calendar_service.Controllers
             try
             {
                 var created = await _service.CreateAsync(
-                    dto.TaskMasterId, tm.OwnerUsername!, caller, dto.SlotStart, dto.DurationHours, dto.Message);
+                    dto.TaskMasterId, tm.OwnerUsername!, caller, dto.SlotStart, dto.DurationHours, dto.Message,
+                    dto.OfferedRatePerHour);
 
                 await _notifications.PublishAsync(new
                 {

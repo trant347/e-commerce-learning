@@ -35,6 +35,17 @@ namespace calendar_service.Model
         [BsonIgnore]
         public DateTime SlotEnd => SlotStart.AddHours(DurationHours);
 
+        /// <summary>
+        /// Hourly rate the requester is offering to pay, set by the requester at booking
+        /// time. Visible to the TaskMaster reviewing the request. Null for legacy bookings
+        /// created before this field existed.
+        /// </summary>
+        public decimal? OfferedRatePerHour { get; set; }
+
+        /// <summary>Total amount offered for the whole slot (OfferedRatePerHour * DurationHours).</summary>
+        [BsonIgnore]
+        public decimal? OfferedTotalAmount => OfferedRatePerHour.HasValue ? OfferedRatePerHour.Value * DurationHours : null;
+
         public string Status { get; set; } = StatusPending;
 
         public string? RequestMessage { get; set; }

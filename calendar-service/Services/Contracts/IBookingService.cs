@@ -10,7 +10,8 @@ namespace calendar_service.Services.Contracts
             string requesterUsername,
             DateTime slotStartUtc,
             int durationHours,
-            string? message);
+            string? message,
+            decimal? offeredRatePerHour = null);
 
         /// <summary>
         /// Returns slots visible on the TaskMaster's timetable: all ACCEPTED slots, and

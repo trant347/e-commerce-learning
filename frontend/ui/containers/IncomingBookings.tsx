@@ -152,6 +152,14 @@ export default function IncomingBookings() {
                                 <div style={{ fontSize: '0.85rem', color: '#605e5c', marginBottom: '8px' }}>
                                     Sent {new Date(b.createdAt).toLocaleString()} ·
                                     {' '}<strong>{b.durationHours}</strong> {b.durationHours === 1 ? 'hour' : 'hours'}
+                                    {b.offeredRatePerHour != null && (
+                                        <>
+                                            {' · '}Offered <strong>${b.offeredRatePerHour.toFixed(2)}/hr</strong>
+                                            {b.offeredTotalAmount != null && (
+                                                <> (total <strong>${b.offeredTotalAmount.toFixed(2)}</strong>)</>
+                                            )}
+                                        </>
+                                    )}
                                 </div>
 
                                 <div style={{

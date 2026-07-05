@@ -20,6 +20,8 @@ export default function ApplyForTaskMaster() {
     const { username } = useContext(UserContext);
     const navigate = useNavigate();
 
+    const [alreadyTaskMaster, setAlreadyTaskMaster] = useState<boolean | null>(null);
+
     const [form, setForm] = useState<FormState>({
         name: '',
         age: '',
@@ -39,6 +41,12 @@ export default function ApplyForTaskMaster() {
     if (!username) {
         return <Navigate to="/signin" replace />;
     }
+
+    React.useEffect(() => {
+        TaskMasterServices.getMyTaskMaster()
+            .then(tm => setAlreadyTaskMaster(tm != null))
+            .catch(() => setAlreadyTaskMaster(false));
+    }, [username]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -94,6 +102,27 @@ export default function ApplyForTaskMaster() {
             setSubmitting(false);
         }
     };
+
+    if (alreadyTaskMaster === null) {
+        return <div className="new-taskmaster-page"><p>Loading...</p></div>;
+    }
+
+    if (alreadyTaskMaster) {
+        return (
+            <div className="new-taskmaster-page">
+                <div className="form-feedback error" style={{ fontSize: '1.1rem', padding: '2rem' }}>
+                    <i className="ban icon" />
+                    <strong> You're already a TaskMaster.</strong>
+                    <p style={{ marginTop: '0.75rem' }}>
+                        You cannot submit a new application because you already have an active TaskMaster profile.
+                    </p>
+                    <button className="submit-btn" style={{ marginTop: '1rem' }} onClick={() => navigate('/')}>
+                        Back to Home
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     if (submitted) {
         return (

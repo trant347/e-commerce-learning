@@ -93,7 +93,8 @@ namespace calendar_service.Services.Implementation
             string requesterUsername,
             DateTime slotStartUtc,
             int durationHours,
-            string? message)
+            string? message,
+            decimal? offeredRatePerHour = null)
         {
             taskMasterUsername = NormalizeUsername(taskMasterUsername);
             requesterUsername = NormalizeUsername(requesterUsername);
@@ -111,6 +112,10 @@ namespace calendar_service.Services.Implementation
             if (taskMasterUsername == requesterUsername)
             {
                 throw new InvalidOperationException("You cannot book yourself");
+            }
+            if (offeredRatePerHour.HasValue && offeredRatePerHour.Value <= 0)
+            {
+                throw new InvalidOperationException("Offered rate per hour must be greater than 0");
             }
 
             var newEnd = slotStartUtc.AddHours(durationHours);
@@ -140,6 +145,7 @@ namespace calendar_service.Services.Implementation
                 DurationHours = durationHours,
                 Status = Booking.StatusPending,
                 RequestMessage = message,
+                OfferedRatePerHour = offeredRatePerHour,
                 CreatedAt = DateTime.UtcNow
             };
             try

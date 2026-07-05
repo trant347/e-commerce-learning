@@ -93,7 +93,7 @@ namespace calendar_service.Tests
                 DurationHours = 2,
                 Status = Booking.StatusPending
             };
-            service.Setup(s => s.CreateAsync(TaskMasterId, OwnerUsername, Caller, slot, 2, "hi"))
+            service.Setup(s => s.CreateAsync(TaskMasterId, OwnerUsername, Caller, slot, 2, "hi", null))
                    .ReturnsAsync(created);
 
             var ctrl = BuildController(service, tmClient, notifications);
@@ -121,7 +121,7 @@ namespace calendar_service.Tests
                     .ReturnsAsync(new TaskMasterLookup { Id = TaskMasterId, OwnerUsername = OwnerUsername });
             service.Setup(s => s.CreateAsync(
                         It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                        It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<string?>()))
+                        It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<decimal?>()))
                    .ThrowsAsync(new InvalidOperationException("This range overlaps an already-booked slot"));
 
             var ctrl = BuildController(service, tmClient, notifications);

@@ -12,6 +12,8 @@ export interface Booking {
     status: BookingStatus;
     requestMessage?: string;
     responseMessage?: string;
+    offeredRatePerHour?: number;
+    offeredTotalAmount?: number;
     createdAt: string;
     respondedAt?: string;
 }
@@ -32,10 +34,10 @@ export const BookingService = {
     },
 
     /** slotStart MUST be hour-aligned UTC (minutes/seconds/ms = 0). durationHours is the number of consecutive 1-hour slots (>=1). */
-    create(taskMasterId: string, slotStart: Date, durationHours: number = 1, message?: string): Promise<Booking> {
+    create(taskMasterId: string, slotStart: Date, durationHours: number = 1, message?: string, offeredRatePerHour?: number): Promise<Booking> {
         return axios.post(
             BASE,
-            { taskMasterId, slotStart: slotStart.toISOString(), durationHours, message },
+            { taskMasterId, slotStart: slotStart.toISOString(), durationHours, message, offeredRatePerHour },
             { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },

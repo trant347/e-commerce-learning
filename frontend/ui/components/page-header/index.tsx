@@ -219,9 +219,9 @@ export default function(props) {
                             <li> Top Rated </li>
                             <li> Near Me </li>
                             <li>
-                                {username && username !== 'admin'
+                                {username && username !== 'admin' && !isTaskMaster
                                     ? <Link to="/apply">Apply for TaskMaster</Link>
-                                    : <span>Apply for TaskMaster</span>
+                                    : <span title={isTaskMaster ? "You're already a TaskMaster" : undefined} style={isTaskMaster ? { color: '#a19f9d', cursor: 'not-allowed' } : undefined}>Apply for TaskMaster</span>
                                 }
                             </li>
                             <li> Best Value </li>

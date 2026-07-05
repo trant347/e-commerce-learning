@@ -94,6 +94,18 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                     </Value>
                 </Field>
 
+                {booking.offeredRatePerHour != null && (
+                    <Field>
+                        <Label>Offered rate</Label>
+                        <Value>
+                            <strong>${booking.offeredRatePerHour.toFixed(2)}/hr</strong>
+                            {booking.offeredTotalAmount != null && (
+                                <> {' · '}total <strong>${booking.offeredTotalAmount.toFixed(2)}</strong></>
+                            )}
+                        </Value>
+                    </Field>
+                )}
+
                 <Field>
                     <Label>Description / comments</Label>
                     <Message $empty={!booking.requestMessage}>
