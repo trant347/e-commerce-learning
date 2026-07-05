@@ -28,7 +28,7 @@ services:
     - spring.cloud.consul.enabled=true
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
     - SECURITY_JWT_SECRET=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
-    - SPRING_DATA_MONGODB_HOST=mongo-products
+    - SPRING_DATA_MONGODB_HOST=mongo
     - SPRING_DATA_MONGODB_USERNAME=${PRODUCTS_DB_USER}
     - SPRING_DATA_MONGODB_PASSWORD=${PRODUCTS_DB_PASSWORD}
     - SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE=products
@@ -41,7 +41,7 @@ services:
     - "8080:8080" #need to remove exposed port in production
     - "8000:8000" #debug port
     depends_on:
-    - mongo-products
+    - mongo
     - consul
     - authentication-service
     - redis
@@ -51,7 +51,7 @@ services:
   calendar-service:
     image: calendar-service
     environment:
-    - ConnectionsString=mongodb://${BOOKINGS_DB_USER}:${BOOKINGS_DB_PASSWORD}@mongo-bookings:27017/?authSource=BookingsDB
+    - ConnectionsString=mongodb://${BOOKINGS_DB_USER}:${BOOKINGS_DB_PASSWORD}@mongo:27017/?authSource=BookingsDB
     - ConsulConfig__ConsulAddress=http://consul:8500
     - ConsulConfig__ServiceAddress=calendar-service # IMPORTANT: This is the service name *within* the Docker network
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
@@ -66,7 +66,7 @@ services:
     ports:
     - "8082:8080" #need to remove exposed port in production
     depends_on:
-    - mongo-bookings
+    - mongo
     - consul
     - kafka
     # - otel-collector
@@ -77,7 +77,7 @@ services:
     environment:
     - spring.cloud.consul.enabled=true
     - SECURITY_JWT_SECRET=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
-    - SPRING_DATA_MONGODB_HOST=mongo-auth
+    - SPRING_DATA_MONGODB_HOST=mongo
     - SPRING_DATA_MONGODB_USERNAME=${AUTH_DB_USER}
     - SPRING_DATA_MONGODB_PASSWORD=${AUTH_DB_PASSWORD}
     - SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE=user
@@ -90,62 +90,45 @@ services:
     - "8081:8081" #need to remove exposed port in production
     - "8001:8000" #debug
     depends_on:
-    - mongo-auth
+    - mongo
     - consul
     - kafka
     # - otel-collector
 
-  mongo-auth:
+  mongo:
     image: mongodb/mongodb-community-server:7.0-ubi8
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       AUTH_DB_USER: ${AUTH_DB_USER}
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
-    ports:
-    - "27017:27017"
-    volumes:
-    - mongo-auth-data:/data/db
-    - ./mongo-init/auth-init.js:/docker-entrypoint-initdb.d/auth-init.js:ro
-
-  mongo-products:
-    image: mongodb/mongodb-community-server:7.0-ubi8
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       PRODUCTS_DB_USER: ${PRODUCTS_DB_USER}
       PRODUCTS_DB_PASSWORD: ${PRODUCTS_DB_PASSWORD}
-    ports:
-    - "27018:27017"
-    volumes:
-    - mongo-products-data:/data/db
-    - ./mongo-init/products-init.js:/docker-entrypoint-initdb.d/products-init.js:ro
-
-  mongo-bookings:
-    image: mongodb/mongodb-community-server:7.0-ubi8
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       BOOKINGS_DB_USER: ${BOOKINGS_DB_USER}
       BOOKINGS_DB_PASSWORD: ${BOOKINGS_DB_PASSWORD}
-    ports:
-    - "27019:27017"
-    volumes:
-    - mongo-bookings-data:/data/db
-    - ./mongo-init/bookings-init.js:/docker-entrypoint-initdb.d/bookings-init.js:ro
-
-  mongo-notifications:
-    image: mongodb/mongodb-community-server:7.0-ubi8
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       NOTIFICATIONS_DB_USER: ${NOTIFICATIONS_DB_USER}
       NOTIFICATIONS_DB_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD}
     ports:
-    - "27020:27017"
+    - "27017:27017"
     volumes:
-    - mongo-notifications-data:/data/db
+    - mongo-data:/data/db
+    - ./mongo-init/auth-init.js:/docker-entrypoint-initdb.d/auth-init.js:ro
+    - ./mongo-init/products-init.js:/docker-entrypoint-initdb.d/products-init.js:ro
+    - ./mongo-init/bookings-init.js:/docker-entrypoint-initdb.d/bookings-init.js:ro
     - ./mongo-init/notifications-init.js:/docker-entrypoint-initdb.d/notifications-init.js:ro
+    restart: unless-stopped
+
+  postgres-payments:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${PAYMENTS_DB_USER}
+      POSTGRES_PASSWORD: ${PAYMENTS_DB_PASSWORD}
+      POSTGRES_DB: paymentdb
+    ports:
+    - "5432:5432"
+    volumes:
+    - postgres-payments-data:/var/lib/postgresql/data
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0
@@ -204,7 +187,7 @@ services:
   notification-service:
     image: notification-service:latest
     environment:
-    - ConnectionStrings__MongoDB=mongodb://${NOTIFICATIONS_DB_USER}:${NOTIFICATIONS_DB_PASSWORD}@mongo-notifications:27017/NotificationDB?authSource=NotificationDB
+    - ConnectionStrings__MongoDB=mongodb://${NOTIFICATIONS_DB_USER}:${NOTIFICATIONS_DB_PASSWORD}@mongo:27017/NotificationDB?authSource=NotificationDB
     - ConsulConfig__ConsulAddress=http://consul:8500
     - ConsulConfig__ServiceAddress=notification-service
     - ConsulConfig__ServicePort=8080
@@ -218,9 +201,31 @@ services:
     ports:
     - "8084:8080"
     depends_on:
-    - mongo-notifications
+    - mongo
     - kafka-init
     - kafka
+    # - otel-collector
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    image: payment-service:latest
+    environment:
+    - ConnectionStrings__Postgres=Host=postgres-payments;Port=5432;Database=paymentdb;Username=${PAYMENTS_DB_USER};Password=${PAYMENTS_DB_PASSWORD}
+    - ConsulConfig__ConsulAddress=http://consul:8500
+    - ConsulConfig__ServiceAddress=payment-service # IMPORTANT: This is the service name *within* the Docker network
+    - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
+    - ConsulConfig__HealthCheckUrl=http://payment-service:8080/health
+    - OTEL_SDK_DISABLED=true
+    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # - OTEL_SERVICE_NAME=payment-service
+    ports:
+    - "8085:8080" #need to remove exposed port in production
+    depends_on:
+    - postgres-payments
+    - consul
     # - otel-collector
     restart: unless-stopped
 
@@ -322,8 +327,6 @@ volumes:
   kafka-data:
   zookeeper-logs:
   ollama-data:
-  mongo-auth-data:
-  mongo-products-data:
-  mongo-bookings-data:
-  mongo-notifications-data:
+  mongo-data:
+  postgres-payments-data:
   # prometheus-data:
