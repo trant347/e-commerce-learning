@@ -14,9 +14,9 @@ namespace calendar_service.Services.Contracts
             decimal? offeredRatePerHour = null);
 
         /// <summary>
-        /// Returns slots visible on the TaskMaster's timetable: all ACCEPTED slots, and
-        /// PENDING slots if the caller is the TaskMaster, an admin, or the requester.
-        /// Past slots are hidden unless the caller is admin or the TaskMaster owner.
+        /// Returns slots visible on the TaskMaster's timetable: all ACCEPTED/IMPLEMENTED/COMPLETED
+        /// (occupied) slots, and PENDING slots if the caller is the TaskMaster, an admin, or the
+        /// requester. Past slots are hidden unless the caller is admin or the TaskMaster owner.
         /// </summary>
         Task<List<Booking>> GetTimetableAsync(
             string taskMasterId,

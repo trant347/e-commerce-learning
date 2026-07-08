@@ -147,6 +147,74 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public async Task CreateAsync_OverlapsExistingImplementedBooking_Throws()
+        {
+            var slot = FutureSlot(48);
+            // An IMPLEMENTED booking (job done, invoice pending) still occupies the slot —
+            // the TaskMaster can't be double-booked for time they already worked.
+            var existingImplemented = new Booking
+            {
+                Id = "existing-implemented",
+                TaskMasterId = TaskMasterId,
+                TaskMasterUsername = TaskMasterUsername,
+                RequesterUsername = "bob",
+                SlotStart = slot,
+                DurationHours = 2,
+                Status = Booking.StatusImplemented,
+                CreatedAt = DateTime.UtcNow.AddDays(-1)
+            };
+
+            var queue = new Queue<List<Booking>>();
+            queue.Enqueue(new List<Booking> { existingImplemented }); // occupied-slot overlap query hits
+            var (svc, col, inserted) = BuildService(queue);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                svc.CreateAsync(
+                    TaskMasterId, TaskMasterUsername, RequesterUsername,
+                    slot.AddHours(1), durationHours: 2, message: null));
+
+            Assert.Contains("overlap", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(inserted);
+            col.Verify(c => c.InsertOneAsync(
+                It.IsAny<Booking>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task CreateAsync_OverlapsExistingCompletedBooking_Throws()
+        {
+            var slot = FutureSlot(48);
+            // A COMPLETED booking (paid, terminal state) still represents time the TaskMaster
+            // was actually busy — must still block new requests for the same range.
+            var existingCompleted = new Booking
+            {
+                Id = "existing-completed",
+                TaskMasterId = TaskMasterId,
+                TaskMasterUsername = TaskMasterUsername,
+                RequesterUsername = "bob",
+                SlotStart = slot,
+                DurationHours = 2,
+                Status = Booking.StatusCompleted,
+                CreatedAt = DateTime.UtcNow.AddDays(-1)
+            };
+
+            var queue = new Queue<List<Booking>>();
+            queue.Enqueue(new List<Booking> { existingCompleted }); // occupied-slot overlap query hits
+            var (svc, col, inserted) = BuildService(queue);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                svc.CreateAsync(
+                    TaskMasterId, TaskMasterUsername, RequesterUsername,
+                    slot.AddHours(1), durationHours: 2, message: null));
+
+            Assert.Contains("overlap", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(inserted);
+            col.Verify(c => c.InsertOneAsync(
+                It.IsAny<Booking>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
         public async Task CreateAsync_RejectsBookingYourself()
         {
             var (svc, _, inserted) = BuildService(new Queue<List<Booking>>());

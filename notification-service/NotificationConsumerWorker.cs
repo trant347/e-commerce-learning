@@ -82,10 +82,14 @@ namespace notification_service
                             {
                                 Id = Guid.NewGuid().ToString(),
                                 // RecipientUsername takes precedence — the notification system uses
-                                // username as the lookup key (stored in RecipientEmail for backward compat)
-                                RecipientEmail = !string.IsNullOrEmpty(notificationMessage.RecipientUsername)
-                                    ? notificationMessage.RecipientUsername
-                                    : notificationMessage.RecipientEmail,
+                                // username as the lookup key (stored in RecipientEmail for backward compat).
+                                // Normalized to lowercase so it matches regardless of the casing the
+                                // producing service or the original login used (see NotificationController,
+                                // which normalizes the same way on the read side).
+                                RecipientEmail = NormalizeRecipient(
+                                    !string.IsNullOrEmpty(notificationMessage.RecipientUsername)
+                                        ? notificationMessage.RecipientUsername
+                                        : notificationMessage.RecipientEmail),
                                 NotificationStatus = "Pending",
                                 Timestamp = notificationMessage.Timestamp,
                                 Message = notificationMessage.Message,
@@ -122,6 +126,15 @@ namespace notification_service
                 _logger.LogInformation("NotificationConsumerWorker closed");
             }
         }
+
+        /// <summary>
+        /// Lowercases and trims a recipient identifier so lookups match regardless of the
+        /// casing used at login or by the producing service. calendar-service (and others)
+        /// already normalize usernames to lowercase before publishing; this keeps the
+        /// notification-service side of the match consistent (see NotificationController,
+        /// which normalizes the same way when reading).
+        /// </summary>
+        internal static string NormalizeRecipient(string recipient) => recipient.Trim().ToLowerInvariant();
 
         private static Activity? StartConsumerActivity(ConsumeResult<string, string> result)
         {

@@ -29,7 +29,11 @@ namespace notification_service.Services
             Response.Headers.Append("Connection", "keep-alive");
             var writer = Response.BodyWriter;
 
-            await _notificationStreamer.StreamToClientAsync(userId, writer, cancellationToken);
+            // Notifications are stored/streamed under a lowercased recipient key (see
+            // NotificationConsumerWorker.NormalizeRecipient), but the frontend passes the
+            // username however the user typed it at login. Normalize here so the lookup
+            // matches regardless of casing.
+            await _notificationStreamer.StreamToClientAsync(NormalizeUserId(userId), writer, cancellationToken);
         }
 
         [HttpGet("{userId}")]
@@ -37,7 +41,7 @@ namespace notification_service.Services
         {
             try
             {
-                var notifications = await _mongoDbService.GetNotificationsByUserEmailAsync(userId, limit);
+                var notifications = await _mongoDbService.GetNotificationsByUserEmailAsync(NormalizeUserId(userId), limit);
                 return Ok(notifications);
             }
             catch (Exception ex)
@@ -45,6 +49,9 @@ namespace notification_service.Services
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
+        /// <summary>See <see cref="NotificationConsumerWorker.NormalizeRecipient"/> — must match exactly.</summary>
+        internal static string NormalizeUserId(string userId) => userId.Trim().ToLowerInvariant();
 
         [HttpGet("health")]
         public IActionResult Health()

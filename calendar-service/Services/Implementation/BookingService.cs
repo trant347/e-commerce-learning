@@ -120,9 +120,12 @@ namespace calendar_service.Services.Implementation
 
             var newEnd = slotStartUtc.AddHours(durationHours);
 
-            // Reject if the requested range overlaps any ACCEPTED booking.
+            // Reject if the requested range overlaps any slot that's still "occupying" the
+            // TaskMaster's time: ACCEPTED (confirmed, not yet done), or IMPLEMENTED/COMPLETED
+            // (job done, but the TaskMaster was there and busy for that slot).
             var acceptedOverlap = await FindOverlappingAsync(
-                taskMasterId, slotStartUtc, newEnd, Booking.StatusAccepted);
+                taskMasterId, slotStartUtc, newEnd,
+                Booking.StatusAccepted, Booking.StatusImplemented, Booking.StatusCompleted);
             if (acceptedOverlap.Any())
             {
                 throw new InvalidOperationException("This range overlaps an already-booked slot");
@@ -167,8 +170,9 @@ namespace calendar_service.Services.Implementation
 
         /// <summary>
         /// Returns the bookings to display on a TaskMaster's timetable, filtered for the caller's role.
-        /// Admins and the owning TaskMaster see ACCEPTED + PENDING + DECLINED (including past slots);
-        /// other callers see ACCEPTED slots plus their own PENDING bookings, and past slots are hidden.
+        /// Admins and the owning TaskMaster see ACCEPTED + IMPLEMENTED + COMPLETED + PENDING + DECLINED
+        /// (including past slots); other callers see ACCEPTED/IMPLEMENTED/COMPLETED (busy) slots plus
+        /// their own PENDING bookings, and past slots are hidden.
         /// </summary>
         public async Task<List<Booking>> GetTimetableAsync(
             string taskMasterId,
@@ -196,14 +200,23 @@ namespace calendar_service.Services.Implementation
                 filter &= fb.In(b => b.Status, new[]
                 {
                     Booking.StatusAccepted,
+                    Booking.StatusImplemented,
+                    Booking.StatusCompleted,
                     Booking.StatusPending,
                     Booking.StatusDeclined
                 });
             }
             else
             {
-                // Other users only see ACCEPTED (busy) slots and their own PENDING bookings.
-                var statusFilter = fb.Eq(b => b.Status, Booking.StatusAccepted);
+                // Other users only see occupied (busy) slots and their own PENDING bookings.
+                // "Occupied" includes ACCEPTED (confirmed, upcoming) as well as IMPLEMENTED/
+                // COMPLETED (job already done, but the TaskMaster was busy for that slot).
+                var statusFilter = fb.In(b => b.Status, new[]
+                {
+                    Booking.StatusAccepted,
+                    Booking.StatusImplemented,
+                    Booking.StatusCompleted
+                });
                 if (!string.IsNullOrEmpty(callerUsername))
                 {
                     statusFilter |= (fb.Eq(b => b.Status, Booking.StatusPending) &
@@ -280,9 +293,12 @@ namespace calendar_service.Services.Implementation
                 throw new InvalidOperationException($"Booking is {existing.Status} and cannot be accepted");
             }
 
-            // Reject if any ACCEPTED booking already overlaps this range.
+            // Reject if any occupied slot (ACCEPTED, IMPLEMENTED or COMPLETED) already
+            // overlaps this range — the TaskMaster can't be double-booked for a slot
+            // they've already committed to or already worked.
             var acceptedOverlap = await FindOverlappingAsync(
-                existing.TaskMasterId, existing.SlotStart, existing.SlotEnd, Booking.StatusAccepted);
+                existing.TaskMasterId, existing.SlotStart, existing.SlotEnd,
+                Booking.StatusAccepted, Booking.StatusImplemented, Booking.StatusCompleted);
             if (acceptedOverlap.Any(b => b.Id != bookingId))
             {
                 throw new InvalidOperationException("This range overlaps an already-accepted booking");

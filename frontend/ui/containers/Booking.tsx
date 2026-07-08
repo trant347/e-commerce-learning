@@ -37,7 +37,7 @@ export default function CalendarPage(props: {events: Event[], taskMasterId?: str
         BookingService.getTimetable(taskMasterId)
             .then((bookings: Booking[]) => {
                 const ranges: BusyRange[] = bookings
-                    .filter(b => b.status === 'ACCEPTED')
+                    .filter(b => b.status === 'ACCEPTED' || b.status === 'IMPLEMENTED' || b.status === 'COMPLETED')
                     .map(b => {
                         const start = new Date(b.slotStart);
                         const end = new Date(start.getTime() + b.durationHours * 60 * 60 * 1000);
