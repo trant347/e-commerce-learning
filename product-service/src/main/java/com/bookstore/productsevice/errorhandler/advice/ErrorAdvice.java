@@ -6,6 +6,7 @@ import com.bookstore.productsevice.errorhandler.ErrorStatus;
 import com.bookstore.productsevice.errorhandler.Error;
 import com.bookstore.productsevice.errorhandler.LocalizedMessage;
 import com.bookstore.productsevice.errorhandler.MessageLocalizer;
+import com.bookstore.productsevice.storage.InvalidFileUploadException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,7 @@ import org.springframework.util.ReflectionUtils;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.Method;
@@ -67,6 +69,18 @@ public class ErrorAdvice {
         Map<String, Object> body = Map.of(
                 "error", "Validation failed",
                 "fieldErrors", fieldErrors);
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(InvalidFileUploadException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidFileUpload(InvalidFileUploadException ex) {
+        Map<String, Object> body = Map.of("error", ex.getMessage());
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        Map<String, Object> body = Map.of("error", "Uploaded file exceeds the maximum allowed size of 2MB");
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 

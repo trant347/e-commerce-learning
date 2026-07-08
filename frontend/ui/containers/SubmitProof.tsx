@@ -14,6 +14,9 @@ export default function SubmitProof() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
 
+    // Keep this in sync with product-service's spring.servlet.multipart.max-file-size.
+    const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
     const [booking, setBooking] = useState<Booking | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -81,7 +84,11 @@ export default function SubmitProof() {
         setFeedback(null);
 
         if (!file) {
-            setFeedback({ type: 'error', message: 'Please select a proof file (image or document) to upload.' });
+            setFeedback({ type: 'error', message: 'Please select a proof file (png, jpg or pdf) to upload.' });
+            return;
+        }
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+            setFeedback({ type: 'error', message: 'File exceeds the maximum allowed size of 2MB.' });
             return;
         }
         const amount = parseFloat(invoiceAmount);
@@ -125,8 +132,8 @@ export default function SubmitProof() {
 
             <form onSubmit={handleSubmit}>
                 <div className="user-input-row">
-                    <label>Proof (image or file) *</label>
-                    <input type="file" accept="image/*,.pdf,.doc,.docx" onChange={handleFileChange} required />
+                    <label>Proof (png, jpg or pdf, max 2MB) *</label>
+                    <input type="file" accept=".png,.jpg,.jpeg,.pdf" onChange={handleFileChange} required />
                 </div>
 
                 <div className="user-input-row">

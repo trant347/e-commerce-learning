@@ -28,6 +28,34 @@ function authHeader() {
     return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Proof/product images are served behind product-service's JWT auth. A plain <a href>
+ * navigation (or window.open to the URL directly) won't carry the Authorization header
+ * that axios calls attach from localStorage, so it 401s. Instead, open a blank tab
+ * synchronously (to avoid popup-blocker issues with the async fetch that follows), fetch
+ * the file as an authenticated blob, then redirect that tab to a local object URL.
+ */
+export function openAuthenticatedFile(url: string): void {
+    // Note: we deliberately don't pass 'noopener' here — that flag makes window.open()
+    // return null (no reference), which is exactly what we need below to redirect the
+    // tab once the authenticated blob is ready.
+    const newTab = window.open('', '_blank');
+    axios
+        .get(url, { headers: authHeader(), responseType: 'blob' })
+        .then(res => {
+            const blobUrl = window.URL.createObjectURL(res.data);
+            if (newTab) {
+                newTab.location.href = blobUrl;
+            }
+        })
+        .catch(() => {
+            if (newTab) {
+                newTab.close();
+            }
+            window.alert('Unable to load the proof file. Please try again.');
+        });
+}
+
 const BASE = '/calendar-service/api/booking';
 
 export const BookingService = {

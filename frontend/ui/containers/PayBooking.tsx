@@ -3,7 +3,7 @@ import { useContext, useEffect, useState } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../context/userContext';
-import { Booking, BookingService } from '../api/bookingServices';
+import { Booking, BookingService, openAuthenticatedFile } from '../api/bookingServices';
 import Dialog from '../components/dialog/dialog';
 
 import '../components/new-task-master/new-task-master.css';
@@ -124,7 +124,13 @@ export default function PayBooking() {
 
             {booking.proofFileUrl && (
                 <div style={{ marginBottom: '1.5rem' }}>
-                    <a href={booking.proofFileUrl} target="_blank" rel="noopener noreferrer">
+                    <a
+                        href={booking.proofFileUrl}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            openAuthenticatedFile(booking.proofFileUrl!);
+                        }}
+                    >
                         <i className="paperclip icon" /> View proof of job
                     </a>
                 </div>

@@ -24,6 +24,8 @@ services:
       # - otel-collector
   product-service:
     image: product-service
+    volumes:
+    - product-static:/app/static
     environment:
     - spring.cloud.consul.enabled=true
     - LOGGING_LEVEL_COM_BOOKSTORE_PRODUCTSEVICE=DEBUG
@@ -329,4 +331,5 @@ volumes:
   ollama-data:
   mongo-data:
   postgres-payments-data:
+  product-static:
   # prometheus-data:

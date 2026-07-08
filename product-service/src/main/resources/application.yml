@@ -26,8 +26,8 @@ spring:
     name: product-service
   servlet:
     multipart:
-      max-file-size: ${MULTIPART_MAX_FILE_SIZE:20MB}
-      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:20MB}
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:2MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:2MB}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:29092}
     producer:

@@ -4,7 +4,7 @@ import styled from 'styled-components';
 
 import UserContext from '../context/userContext';
 import { Calendar, Event } from '../components/calendar/calendar';
-import { Booking, BookingService } from '../api/bookingServices';
+import { Booking, BookingService, openAuthenticatedFile } from '../api/bookingServices';
 import { TaskMasterServices } from '../api/taskMasterServices';
 
 function bookingToEvent(b: Booking): Event {
@@ -138,7 +138,13 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                             {booking.invoiceAmount != null && <>Amount: <strong>${booking.invoiceAmount.toFixed(2)}</strong></>}
                             {booking.proofFileUrl && (
                                 <div style={{ marginTop: '6px' }}>
-                                    <a href={booking.proofFileUrl} target="_blank" rel="noopener noreferrer">
+                                    <a
+                                        href={booking.proofFileUrl}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            openAuthenticatedFile(booking.proofFileUrl!);
+                                        }}
+                                    >
                                         <i className="paperclip icon" /> View proof of job
                                     </a>
                                 </div>
