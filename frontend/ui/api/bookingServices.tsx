@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-export type BookingStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED';
+export type BookingStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED' | 'IMPLEMENTED' | 'COMPLETED';
 
 export interface Booking {
     id: string;
@@ -14,8 +14,13 @@ export interface Booking {
     responseMessage?: string;
     offeredRatePerHour?: number;
     offeredTotalAmount?: number;
+    proofFileUrl?: string;
+    invoiceAmount?: number;
+    paymentTransactionId?: string;
     createdAt: string;
     respondedAt?: string;
+    implementedAt?: string;
+    completedAt?: string;
 }
 
 function authHeader() {
@@ -69,6 +74,25 @@ export const BookingService = {
         return axios.post(
             `${BASE}/${encodeURIComponent(id)}/decline`,
             { message },
+            { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
+    },
+
+    /** TaskMaster submits proof of the completed job (a file/image URL) plus the invoice amount. */
+    submitProof(id: string, proofFileUrl: string, invoiceAmount: number): Promise<Booking> {
+        return axios.post(
+            `${BASE}/${encodeURIComponent(id)}/submit-proof`,
+            { proofFileUrl, invoiceAmount },
+            { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
+    },
+
+    /** Requester pays the invoice by submitting card details; calendar-service forwards them
+     * to payment-service server-to-server and verifies the result before completing the booking. */
+    pay(id: string, card: { cardNumber: string; expiryDate: string; cvv: string; ownerName: string }): Promise<Booking> {
+        return axios.post(
+            `${BASE}/${encodeURIComponent(id)}/pay`,
+            card,
             { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },

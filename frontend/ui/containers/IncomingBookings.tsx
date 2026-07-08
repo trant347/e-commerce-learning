@@ -14,6 +14,8 @@ const statusColor: Record<string, string> = {
     ACCEPTED: '#21ba45',
     DECLINED: '#db2828',
     CANCELLED: '#767676',
+    IMPLEMENTED: '#2185d0',
+    COMPLETED: '#00b5ad',
 };
 
 function formatSlot(iso: string, durationHours: number): string {
@@ -90,7 +92,7 @@ export default function IncomingBookings() {
             <h1><i className="calendar alternate icon" /> Booking Requests</h1>
 
             <div className="filter-tabs">
-                {(['PENDING', 'ALL', 'ACCEPTED', 'DECLINED', 'CANCELLED'] as FilterStatus[]).map(s => (
+                {(['PENDING', 'ALL', 'ACCEPTED', 'IMPLEMENTED', 'COMPLETED', 'DECLINED', 'CANCELLED'] as FilterStatus[]).map(s => (
                     <button
                         key={s}
                         className={`filter-tab${filter === s ? ' active' : ''}`}

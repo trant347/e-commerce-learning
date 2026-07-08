@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using calendar_service.MessageQueue;
+using calendar_service.Model;
 using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
 using Microsoft.AspNetCore.Mvc;
@@ -12,17 +13,20 @@ namespace calendar_service.Controllers
     {
         private readonly IBookingService _service;
         private readonly ITaskMasterApiClient _taskMasterClient;
+        private readonly IPaymentApiClient _paymentClient;
         private readonly INotificationProducer _notifications;
         private readonly ILogger<BookingController> _logger;
 
         public BookingController(
             IBookingService service,
             ITaskMasterApiClient taskMasterClient,
+            IPaymentApiClient paymentClient,
             INotificationProducer notifications,
             ILogger<BookingController> logger)
         {
             _service = service;
             _taskMasterClient = taskMasterClient;
+            _paymentClient = paymentClient;
             _notifications = notifications;
             _logger = logger;
         }
@@ -39,6 +43,20 @@ namespace calendar_service.Controllers
         public class RespondDto
         {
             public string? Message { get; set; }
+        }
+
+        public class SubmitProofDto
+        {
+            public string ProofFileUrl { get; set; } = string.Empty;
+            public decimal InvoiceAmount { get; set; }
+        }
+
+        public class PayDto
+        {
+            public string CardNumber { get; set; } = string.Empty;
+            public string ExpiryDate { get; set; } = string.Empty;
+            public string CVV { get; set; } = string.Empty;
+            public string OwnerName { get; set; } = string.Empty;
         }
 
         /// <summary>
@@ -257,6 +275,136 @@ namespace calendar_service.Controllers
                 return Ok(updated);
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// POST <c>/api/booking/{id}/submit-proof</c> — TaskMaster owner submits proof of the
+        /// completed job (a file/image URL already uploaded elsewhere) plus the invoice amount.
+        /// Moves the booking from ACCEPTED to IMPLEMENTED and notifies the requester that
+        /// payment is due.
+        /// </summary>
+        /// <response code="200">The updated booking.</response>
+        /// <response code="400">Missing proof file URL or invoice amount &lt;= 0.</response>
+        /// <response code="401">No authenticated caller.</response>
+        /// <response code="403">Caller is not the TaskMaster owner.</response>
+        /// <response code="404">No booking with that id.</response>
+        /// <response code="409">Booking is not ACCEPTED.</response>
+        [HttpPost("{id}/submit-proof")]
+        public async Task<IActionResult> SubmitProof(string id, [FromBody] SubmitProofDto body)
+        {
+            var caller = CurrentUsername();
+            if (string.IsNullOrEmpty(caller)) return Unauthorized();
+            if (body == null || string.IsNullOrWhiteSpace(body.ProofFileUrl))
+            {
+                return BadRequest("proofFileUrl is required");
+            }
+
+            try
+            {
+                var updated = await _service.SubmitProofAsync(id, caller, body.ProofFileUrl, body.InvoiceAmount);
+
+                await _notifications.PublishAsync(new
+                {
+                    type = "BOOKING_PAYMENT_REQUIRED",
+                    recipientUsername = updated.RequesterUsername,
+                    message = $"{updated.TaskMasterUsername} submitted proof of the completed job. " +
+                              $"Please pay ${updated.InvoiceAmount:0.00} to complete this booking.",
+                    actionType = "VIEW_PAYMENT_REQUEST",
+                    actionPayload = new Dictionary<string, string>
+                    {
+                        { "bookingId", updated.Id ?? string.Empty },
+                        { "taskMasterId", updated.TaskMasterId }
+                    }
+                });
+                return Ok(updated);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// POST <c>/api/booking/{id}/pay</c> — requester pays the invoice. The card details are
+        /// forwarded server-to-server to payment-service's <c>/api/payment/process</c> endpoint
+        /// (the frontend never calls payment-service directly), and the resulting transaction is
+        /// verified (APPROVED status, amount matches the invoice) before the booking is moved
+        /// from IMPLEMENTED to COMPLETED. Notifies the TaskMaster that payment was received.
+        /// </summary>
+        /// <response code="200">The updated booking.</response>
+        /// <response code="400">Missing card details, or booking has no invoice amount.</response>
+        /// <response code="401">No authenticated caller.</response>
+        /// <response code="402">Payment was declined or payment-service could not be reached.</response>
+        /// <response code="403">Caller is not the requester.</response>
+        /// <response code="404">No booking with that id.</response>
+        /// <response code="409">Booking is not IMPLEMENTED.</response>
+        [HttpPost("{id}/pay")]
+        public async Task<IActionResult> Pay(string id, [FromBody] PayDto body)
+        {
+            var caller = CurrentUsername();
+            if (string.IsNullOrEmpty(caller)) return Unauthorized();
+            if (body == null || string.IsNullOrWhiteSpace(body.CardNumber) || string.IsNullOrWhiteSpace(body.CVV)
+                || string.IsNullOrWhiteSpace(body.ExpiryDate) || string.IsNullOrWhiteSpace(body.OwnerName))
+            {
+                return BadRequest("cardNumber, expiryDate, cvv and ownerName are required");
+            }
+
+            var booking = await _service.GetByIdAsync(id);
+            if (booking == null) return NotFound();
+            if (!string.Equals(booking.RequesterUsername, caller, StringComparison.OrdinalIgnoreCase)) return Forbid();
+            if (booking.Status != Booking.StatusImplemented)
+            {
+                return Conflict(new { error = $"Booking is {booking.Status} and cannot be paid" });
+            }
+            if (booking.InvoiceAmount == null || booking.InvoiceAmount <= 0)
+            {
+                return BadRequest("Booking has no invoice amount to pay");
+            }
+
+            var card = new CreditCardInfo
+            {
+                CardNumber = body.CardNumber,
+                ExpiryDate = body.ExpiryDate,
+                CVV = body.CVV,
+                OwnerName = body.OwnerName
+            };
+            var transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted);
+            if (transaction == null)
+            {
+                return StatusCode(StatusCodes.Status502BadGateway, new { error = "Could not reach payment service" });
+            }
+            if (!string.Equals(transaction.Status, PaymentTransactionResult.StatusApproved, StringComparison.OrdinalIgnoreCase))
+            {
+                return StatusCode(402, new { error = "Payment was declined" });
+            }
+            if (transaction.Amount != booking.InvoiceAmount.Value)
+            {
+                _logger.LogWarning("Payment amount {PaymentAmount} did not match invoice amount {InvoiceAmount} for booking {BookingId}",
+                    transaction.Amount, booking.InvoiceAmount.Value, id);
+                return StatusCode(402, new { error = "Payment amount does not match invoice amount" });
+            }
+
+            try
+            {
+                var updated = await _service.CompletePaymentAsync(id, caller, transaction.Id);
+
+                await _notifications.PublishAsync(new
+                {
+                    type = "BOOKING_PAYMENT_RECEIVED",
+                    recipientUsername = updated.TaskMasterUsername,
+                    message = $"{updated.RequesterUsername} paid ${updated.InvoiceAmount:0.00} for the booking from " +
+                              $"{updated.SlotStart:yyyy-MM-dd HH:mm} to {updated.SlotEnd:HH:mm} UTC.",
+                    actionType = "VIEW_INCOMING_BOOKING_REQUEST",
+                    actionPayload = new Dictionary<string, string>
+                    {
+                        { "bookingId", updated.Id ?? string.Empty },
+                        { "taskMasterId", updated.TaskMasterId }
+                    }
+                });
+                return Ok(updated);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException) { return NotFound(); }
             catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
         }
 

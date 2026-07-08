@@ -24,6 +24,10 @@ spring:
       port: ${SPRING_DATA_REDIS_PORT:6379}
   application:
     name: product-service
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:20MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:20MB}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:29092}
     producer:
@@ -55,11 +59,14 @@ management:
   tracing:
     sampling:
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
-#  otlp:
-#    tracing:
-#      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318}/v1/traces
-#    metrics:
-#      export:
-#        enabled: true
-#        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318}/v1/metrics
-#        step: 30s
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318}/v1/traces
+    metrics:
+      export:
+        # No otel-collector runs by default (see docker-compose.yml), so the OTLP metrics
+        # exporter is disabled to avoid "Connection refused" warnings. Set this to true
+        # (and provide OTEL_EXPORTER_OTLP_ENDPOINT) when an otel-collector is available.
+        enabled: ${OTEL_METRICS_EXPORT_ENABLED:false}
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318}/v1/metrics
+        step: 30s

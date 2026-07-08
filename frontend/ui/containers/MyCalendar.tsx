@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 
 import UserContext from '../context/userContext';
@@ -36,8 +36,12 @@ export default function MyCalendar() {
 
     React.useEffect(() => {
         if (allowed !== true) return;
-        BookingService.listIncoming('ACCEPTED')
-            .then(bookings => setEvents(bookings.map(bookingToEvent)))
+        BookingService.listIncoming()
+            .then(bookings => {
+                const visible = bookings.filter(b =>
+                    b.status === 'ACCEPTED' || b.status === 'IMPLEMENTED' || b.status === 'COMPLETED');
+                setEvents(visible.map(bookingToEvent));
+            })
             .catch(() => setError('Failed to load your calendar.'));
     }, [allowed]);
 
@@ -75,6 +79,8 @@ function formatSlot(b: Booking): string {
 }
 
 function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: () => void }) {
+    const navigate = useNavigate();
+
     return (
         <Overlay onClick={onClose}>
             <Box onClick={(e) => e.stopPropagation()}>
@@ -83,6 +89,11 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                 <Field>
                     <Label>Requested by</Label>
                     <Value><strong>{booking.requesterUsername}</strong></Value>
+                </Field>
+
+                <Field>
+                    <Label>Status</Label>
+                    <Value><strong>{booking.status}</strong></Value>
                 </Field>
 
                 <Field>
@@ -120,7 +131,33 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                     </Field>
                 )}
 
+                {(booking.status === 'IMPLEMENTED' || booking.status === 'COMPLETED') && (
+                    <Field>
+                        <Label>Invoice</Label>
+                        <Value>
+                            {booking.invoiceAmount != null && <>Amount: <strong>${booking.invoiceAmount.toFixed(2)}</strong></>}
+                            {booking.proofFileUrl && (
+                                <div style={{ marginTop: '6px' }}>
+                                    <a href={booking.proofFileUrl} target="_blank" rel="noopener noreferrer">
+                                        <i className="paperclip icon" /> View proof of job
+                                    </a>
+                                </div>
+                            )}
+                            <div style={{ marginTop: '6px' }}>
+                                {booking.status === 'COMPLETED'
+                                    ? 'Payment received. This booking is complete.'
+                                    : 'Awaiting payment from the requester.'}
+                            </div>
+                        </Value>
+                    </Field>
+                )}
+
                 <Actions>
+                    {booking.status === 'ACCEPTED' && (
+                        <SecondaryButton onClick={() => navigate(`/booking/${booking.id}/submit-proof`)}>
+                            <i className="file alternate icon" /> Submit Proof &amp; Send Invoice
+                        </SecondaryButton>
+                    )}
                     <PrimaryButton onClick={onClose}>Close</PrimaryButton>
                 </Actions>
             </Box>
@@ -182,6 +219,7 @@ const Message = styled.div<{ $empty?: boolean }>`
 const Actions = styled.div`
     display: flex;
     justify-content: flex-end;
+    gap: 0.6em;
     margin-top: 1.4em;
 `;
 
@@ -196,5 +234,19 @@ const PrimaryButton = styled.button`
 
     &:hover {
         background-color: #025aa5;
+    }
+`;
+
+const SecondaryButton = styled.button`
+    padding: 0.5em 1.2em;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.95em;
+    background-color: #f0f0f0;
+    color: #333;
+    border: 1px solid #ccc;
+
+    &:hover {
+        background-color: #e0e0e0;
     }
 `;

@@ -45,6 +45,13 @@ builder.Services.AddHttpClient<ITaskMasterApiClient, TaskMasterApiClient>((sp, c
     client.BaseAddress = new Uri(baseUrl);
 });
 
+builder.Services.AddHttpClient<IPaymentApiClient, PaymentApiClient>((sp, client) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = cfg["ExternalServices:PaymentServiceBaseUrl"] ?? "http://payment-service:8080";
+    client.BaseAddress = new Uri(baseUrl);
+});
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();

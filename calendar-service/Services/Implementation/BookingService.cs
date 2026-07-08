@@ -361,6 +361,77 @@ namespace calendar_service.Services.Implementation
         }
 
         /// <summary>
+        /// TaskMaster owner submits proof of the completed job (a file/image URL) plus the
+        /// invoice amount. Moves the booking from ACCEPTED to IMPLEMENTED.
+        /// </summary>
+        public async Task<Booking> SubmitProofAsync(string bookingId, string callerUsername, string proofFileUrl, decimal invoiceAmount)
+        {
+            callerUsername = NormalizeUsername(callerUsername);
+
+            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Booking not found");
+
+            if (existing.TaskMasterUsername != callerUsername)
+            {
+                throw new UnauthorizedAccessException("Only the TaskMaster can submit proof for this booking");
+            }
+            if (existing.Status != Booking.StatusAccepted)
+            {
+                throw new InvalidOperationException($"Booking is {existing.Status} and cannot be marked implemented");
+            }
+            if (string.IsNullOrWhiteSpace(proofFileUrl))
+            {
+                throw new InvalidOperationException("Proof file is required");
+            }
+            if (invoiceAmount <= 0)
+            {
+                throw new InvalidOperationException("Invoice amount must be greater than 0");
+            }
+
+            var update = Builders<Booking>.Update
+                .Set(b => b.Status, Booking.StatusImplemented)
+                .Set(b => b.ProofFileUrl, proofFileUrl)
+                .Set(b => b.InvoiceAmount, invoiceAmount)
+                .Set(b => b.ImplementedAt, DateTime.UtcNow);
+            await _collection.UpdateOneAsync(
+                b => b.Id == bookingId && b.Status == Booking.StatusAccepted, update);
+            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+        }
+
+        /// <summary>
+        /// Requester confirms payment (already processed by payment-service) with the resulting
+        /// transaction id. Moves the booking from IMPLEMENTED to COMPLETED.
+        /// </summary>
+        public async Task<Booking> CompletePaymentAsync(string bookingId, string callerUsername, string paymentTransactionId)
+        {
+            callerUsername = NormalizeUsername(callerUsername);
+
+            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Booking not found");
+
+            if (existing.RequesterUsername != callerUsername)
+            {
+                throw new UnauthorizedAccessException("Only the requester can pay for this booking");
+            }
+            if (existing.Status != Booking.StatusImplemented)
+            {
+                throw new InvalidOperationException($"Booking is {existing.Status} and cannot be paid");
+            }
+            if (string.IsNullOrWhiteSpace(paymentTransactionId))
+            {
+                throw new InvalidOperationException("paymentTransactionId is required");
+            }
+
+            var update = Builders<Booking>.Update
+                .Set(b => b.Status, Booking.StatusCompleted)
+                .Set(b => b.PaymentTransactionId, paymentTransactionId)
+                .Set(b => b.CompletedAt, DateTime.UtcNow);
+            await _collection.UpdateOneAsync(
+                b => b.Id == bookingId && b.Status == Booking.StatusImplemented, update);
+            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+        }
+
+        /// <summary>
         /// Cascade-cleanup hook invoked after a user is deleted upstream. Removes every
         /// booking where the user is either requester or TaskMaster owner. Idempotent
         /// (safe on Kafka redelivery) and logs the counts for traceability.

@@ -31,11 +31,13 @@ namespace calendar_service.Tests
             Mock<INotificationProducer> notifications,
             string? username = Caller,
             bool isAdmin = false,
-            string? bearer = "test-token")
+            string? bearer = "test-token",
+            Mock<IPaymentApiClient>? paymentClient = null)
         {
             var controller = new BookingController(
                 service.Object,
                 taskMasterClient.Object,
+                (paymentClient ?? new Mock<IPaymentApiClient>()).Object,
                 notifications.Object,
                 NullLogger<BookingController>.Instance);
 

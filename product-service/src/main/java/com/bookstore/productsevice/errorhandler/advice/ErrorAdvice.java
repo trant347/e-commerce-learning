@@ -6,6 +6,8 @@ import com.bookstore.productsevice.errorhandler.ErrorStatus;
 import com.bookstore.productsevice.errorhandler.Error;
 import com.bookstore.productsevice.errorhandler.LocalizedMessage;
 import com.bookstore.productsevice.errorhandler.MessageLocalizer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,7 @@ import java.util.stream.Collectors;
 @ControllerAdvice
 public class ErrorAdvice {
 
+    private static final Logger log = LoggerFactory.getLogger(ErrorAdvice.class);
 
     @Autowired
     private MessageLocalizer messageLocalizer;
@@ -69,6 +72,7 @@ public class ErrorAdvice {
 
     @ExceptionHandler
     public ResponseEntity<Error> handleError(HttpServletRequest request, Throwable exception) {
+        log.error("Unhandled exception while processing {} {}", request.getMethod(), request.getRequestURI(), exception);
         Error errorDetail = buildErrorMessage(request,exception);
         return new ResponseEntity<>(errorDetail, Optional.of(errorDetail.getStatus()).orElse(HttpStatus.INTERNAL_SERVER_ERROR));
     }

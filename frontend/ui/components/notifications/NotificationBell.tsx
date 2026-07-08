@@ -27,6 +27,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
             case 'VIEW_TASKMASTER':        return `/product/${p.taskMasterId}`;
             case 'VIEW_INCOMING_BOOKING_REQUEST': return '/bookings/incoming';
             case 'VIEW_OUTGOING_BOOKING_REQUEST': return p.taskMasterId ? `/booking/${p.taskMasterId}` : '/';
+            case 'VIEW_PAYMENT_REQUEST': return p.bookingId ? `/booking/${p.bookingId}/pay` : '/';
             default: return null;
         }
     };
@@ -38,6 +39,10 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                 return 'times circle';
             case 'booking_updated':
                 return 'edit';
+            case 'booking_payment_required':
+                return 'credit card';
+            case 'booking_payment_received':
+                return 'dollar sign';
             case 'reminder':
                 return 'clock';
             default:
@@ -53,6 +58,10 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                 return 'red';
             case 'booking_updated':
                 return 'blue';
+            case 'booking_payment_required':
+                return 'orange';
+            case 'booking_payment_received':
+                return 'green';
             case 'reminder':
                 return 'orange';
             default:
