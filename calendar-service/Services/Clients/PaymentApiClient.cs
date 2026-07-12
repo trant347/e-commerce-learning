@@ -39,6 +39,30 @@ namespace calendar_service.Services.Clients
         /// payment-service dedupes retried requests with the same id instead of double-charging.
         /// </param>
         Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null);
+
+        /// <summary>
+        /// Calls payment-service's <c>GET /api/payment/transaction/{sagaId}</c> so the saga
+        /// reconciliation job can check "did this charge actually happen?" for a sagaId whose
+        /// SagaState is stuck in STARTED.
+        /// </summary>
+        /// <returns>The transaction, or null if payment-service has no record of this sagaId (404) —
+        /// meaning the charge genuinely never happened and it's safe to mark the saga FAILED.</returns>
+        /// <exception cref="PaymentServiceUnavailableException">
+        /// payment-service could not be reached or returned an unexpected error. Distinct from a
+        /// confirmed "not found" so the caller does NOT mark the saga FAILED here — a charge may
+        /// still have happened and this transient failure should be retried instead.
+        /// </exception>
+        Task<PaymentTransactionResult?> GetTransactionBySagaIdAsync(Guid sagaId, CancellationToken ct);
+    }
+
+    /// <summary>
+    /// Thrown when payment-service can't be reached or errors on a lookup call, as opposed to a
+    /// confirmed "no such transaction" (404). Callers (e.g. saga reconciliation) must not treat
+    /// this the same as "not found", since a charge may still have gone through.
+    /// </summary>
+    public class PaymentServiceUnavailableException : Exception
+    {
+        public PaymentServiceUnavailableException(string message, Exception? inner = null) : base(message, inner) { }
     }
 
     public class PaymentApiClient : IPaymentApiClient
@@ -88,6 +112,35 @@ namespace calendar_service.Services.Clients
                 _logger.LogError(ex, "Failed to reach payment-service to process payment");
                 return null;
             }
+        }
+
+        public async Task<PaymentTransactionResult?> GetTransactionBySagaIdAsync(Guid sagaId, CancellationToken ct)
+        {
+            HttpResponseMessage resp;
+            try
+            {
+                resp = await _http.GetAsync($"/api/payment/transaction/{sagaId}", ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new PaymentServiceUnavailableException($"Failed to reach payment-service to look up sagaId={sagaId}", ex);
+            }
+
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new PaymentServiceUnavailableException(
+                    $"payment-service returned {resp.StatusCode} looking up sagaId={sagaId}");
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<PaymentTransactionResult>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
         }
     }
 }

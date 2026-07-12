@@ -72,6 +72,18 @@ This is almost exactly today's flow, plus step 2 (write saga state **before** ca
 3. Doesn't solve availability decoupling — if payment-service is down, the caller still gets an immediate failure rather than a durably queued retry.
 4. Requires a new payment-service endpoint (`GET /transaction/{sagaId}`) that doesn't exist today.
 5. If calendar-service's own saga store (Mongo) is unavailable when writing the initial `STARTED` row, `/pay` fails closed with `503` before any charge is attempted (see `BookingController.Pay`) — correct behavior, but it is itself a dependency the flow can't operate without.
+6. `SagaState` currently has no TTL/archival, so the collection grows unbounded (terminal `COMPLETED`/`FAILED` rows are never pruned) — deferred hardening, tracked as a follow-up (TTL index on `updatedAt`, partial filter on terminal statuses). **Implemented**: see below.
+
+### Reconciliation job hardening: claim-based lock + Mongo topology sanity check
+
+Once calendar-service is horizontally scaled, every replica runs its own `SagaReconciliationWorker` on the same timer. Without coordination, N replicas would all pick up the same stuck saga on the same pass — each redundantly calling payment-service and (worse) each attempting `CompletePaymentAsync`/`FailAsync` against the same booking. Two changes address this:
+
+- **Claim-based lock** (`ISagaStateService.TryClaimAsync`): before doing any work on a stuck saga, a worker atomically claims it via a single-document `FindOneAndUpdate` that only matches if the saga is still `STARTED` and `ReconciliationClaimedAt` is either unset or older than the claim TTL (default 45s, configurable via `SagaReconciliation:ClaimTtlSeconds` — kept shorter than the 60s poll interval so a replica that crashes mid-claim doesn't block reconciliation past the next pass). If the claim fails (another replica already holds it), the worker skips that saga for the current pass and logs at debug level. This relies on MongoDB's single-document atomicity, which holds as long as every replica points at the *same* logical Mongo deployment (today: one `mongo` container per `docker-compose.yml`; in a replica set/sharded cluster, still safe as long as all replicas share one connection string/cluster). Nothing explicitly clears `ReconciliationClaimedAt` back to null — for sagas left `STARTED` (retryable outcomes) the claim simply becomes stale and reclaimable by the time the next poll runs (claim TTL < poll interval), and for terminal outcomes (`FAILED`/`COMPLETED`) the claim field is moot since `TryClaimAsync`'s filter requires `Status == STARTED`.
+- **Mongo topology sanity check**: `MongoDBService` now logs the resolved server list, replica set name (or "standalone"), and database name at startup (`MongoDBService.DescribeTopology`, unit-tested independent of a live Mongo connection). This can't *prevent* a misconfigured deployment where replicas accidentally point at different, unsynced Mongo instances (that's a deployment bug, not something app code can detect for certain) — but it makes such a misconfiguration visible in logs instead of silently causing duplicate/racy reconciliation work.
+
+### SagaState retention (TTL index)
+
+To keep the `SagaState` collection from growing unboundedly, `SagaStateService` creates a partial TTL index on `updatedAt` that only matches terminal rows (`Status` in `COMPLETED`/`FAILED`); MongoDB's background TTL monitor removes matching documents once they're older than the configured retention window (`SagaState:RetentionDays`, default 90). `STARTED` rows are explicitly excluded from the filter — they're either actively in-flight or the reconciliation job's responsibility, never something we want Mongo to delete out from under it. If a prior deploy already created this index with different options, Mongo rejects the conflicting `CreateOne` call; `SagaStateService` catches and logs that (`MongoCommandException`) rather than crashing calendar-service's startup, so an operator can resolve the index-options mismatch manually without an outage.
 
 ---
 
@@ -131,11 +143,11 @@ Raw card details (`cardNumber`, `cvv`) currently pass over plain HTTP calendar-s
 
 ---
 
-## Open questions
+## Open questions (resolved during implementation)
 
-1. Is the `GET /api/payment/transaction/{sagaId}` lookup endpoint acceptable to add to payment-service now, ahead of full Kafka adoption, purely to support reconciliation?
-2. What's an acceptable "stuck saga" threshold for the reconciliation job to treat a `STARTED` row as needing recovery (proposed: 30s, given payment-service has no external dependency itself today)?
-3. Should reconciliation run only at calendar-service startup, or also on a periodic timer to catch sagas stuck without a restart?
+1. ~~Is the `GET /api/payment/transaction/{sagaId}` lookup endpoint acceptable to add to payment-service now, ahead of full Kafka adoption, purely to support reconciliation?~~ **Resolved: yes** — added in migration step 3 (`PaymentController.GetTransactionBySagaId`).
+2. ~~What's an acceptable "stuck saga" threshold...?~~ **Resolved: 30s** (configurable via `SagaReconciliation:StuckThresholdSeconds`), as proposed.
+3. ~~Should reconciliation run only at calendar-service startup, or also on a periodic timer...?~~ **Resolved: both** — `SagaReconciliationWorker` runs an immediate pass on startup, then repeats every 60s (configurable via `SagaReconciliation:PollIntervalSeconds`), so sagas stuck without a restart are still caught.
 
 ## Migration plan
 

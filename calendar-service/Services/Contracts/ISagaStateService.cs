@@ -26,5 +26,17 @@ namespace calendar_service.Services.Contracts
         /// for the reconciliation job to resolve.
         /// </summary>
         Task<List<SagaState>> FindStuckAsync(TimeSpan stuckThreshold);
+
+        /// <summary>
+        /// Atomically claims a stuck saga for reconciliation: succeeds only if it's still
+        /// STARTED and either unclaimed or its previous claim is older than
+        /// <paramref name="claimTtl"/> (so a replica that crashed mid-reconciliation doesn't
+        /// block it forever). Returns null if another instance currently holds a live claim —
+        /// the caller should skip this saga for the current pass. This is what lets multiple
+        /// calendar-service replicas each run an independent reconciliation timer without
+        /// duplicating work (or redundant payment-service lookups) for the same saga. Relies on
+        /// all replicas sharing one consistent MongoDB deployment — see PAYMENT_SAGA_SPEC.md.
+        /// </summary>
+        Task<SagaState?> TryClaimAsync(Guid sagaId, TimeSpan claimTtl);
     }
 }

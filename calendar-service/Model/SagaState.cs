@@ -38,6 +38,16 @@ namespace calendar_service.Model
         /// <summary>Id of the resulting payment-service transaction, once known.</summary>
         public string? PaymentTransactionId { get; set; }
 
+        /// <summary>
+        /// Set (and refreshed) when a reconciliation worker instance claims this saga to work
+        /// on, so that multiple calendar-service replicas each running their own reconciliation
+        /// timer don't duplicate work (or redundantly hit payment-service) for the same stuck
+        /// saga. A claim older than the worker's claim TTL is treated as stale/abandoned (e.g.
+        /// the claiming replica crashed) and can be re-claimed. See
+        /// <see cref="ISagaStateService.TryClaimAsync"/> and PAYMENT_SAGA_SPEC.md.
+        /// </summary>
+        public DateTime? ReconciliationClaimedAt { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
