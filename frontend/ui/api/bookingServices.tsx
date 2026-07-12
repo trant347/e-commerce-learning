@@ -17,6 +17,13 @@ export interface Booking {
     proofFileUrl?: string;
     invoiceAmount?: number;
     paymentTransactionId?: string;
+    /**
+     * True when a payment attempt for this booking is currently ambiguous/in-flight (server is
+     * still resolving whether a prior charge succeeded — see PAYMENT_SAGA_SPEC.md). While true,
+     * the requester must not submit another payment; this is derived server-side so it persists
+     * across page reloads, unlike a purely client-side "already paid" message.
+     */
+    paymentPending?: boolean;
     createdAt: string;
     respondedAt?: string;
     implementedAt?: string;

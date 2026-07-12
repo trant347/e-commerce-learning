@@ -83,6 +83,23 @@ export default function PayBooking() {
         );
     }
 
+    if (booking.paymentPending) {
+        return (
+            <div className="new-taskmaster-page">
+                <h1><i className="credit card icon" /> Pay Invoice</h1>
+                <div className="form-feedback error" style={{ padding: '1.5rem' }}>
+                    Your payment is being processed. We could not immediately confirm the outcome of a
+                    previous payment attempt for this booking, so please do not submit another payment.
+                    This is usually resolved automatically within about a minute — refresh this page
+                    shortly to see the final status.
+                </div>
+                <button className="submit-btn" style={{ marginTop: '1rem' }} onClick={() => navigate('/')}>
+                    Back to Home
+                </button>
+            </div>
+        );
+    }
+
     const amountDue = booking.invoiceAmount ?? 0;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

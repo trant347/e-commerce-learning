@@ -21,7 +21,9 @@ namespace calendar_service.Services.Implementation
         /// <summary>
         /// SagaId is the idempotency key shared with payment-service, so it must be unique.
         /// The (Status, CreatedAt) index supports the reconciliation job's sweep for stuck
-        /// STARTED rows without a collection scan. The TTL index prunes terminal
+        /// STARTED rows without a collection scan. The (BookingId, CreatedAt desc) index
+        /// supports GetLatestByBookingIdAsync's "is a payment for this booking currently
+        /// pending?" check. The TTL index prunes terminal
         /// (COMPLETED/FAILED) rows after <paramref name="retentionDays"/> so the collection
         /// doesn't grow unboundedly forever — STARTED rows are exempt (partial filter) since
         /// they're either actively in-flight or the reconciliation job's responsibility, never
@@ -38,6 +40,10 @@ namespace calendar_service.Services.Implementation
             _collection.Indexes.CreateOne(new CreateIndexModel<SagaState>(
                 keys.Ascending(s => s.Status).Ascending(s => s.CreatedAt),
                 new CreateIndexOptions<SagaState> { Name = "status_createdat" }));
+
+            _collection.Indexes.CreateOne(new CreateIndexModel<SagaState>(
+                keys.Ascending(s => s.BookingId).Descending(s => s.CreatedAt),
+                new CreateIndexOptions<SagaState> { Name = "bookingid_createdat_desc" }));
 
             try
             {
@@ -120,6 +126,12 @@ namespace calendar_service.Services.Implementation
 
         public async Task<SagaState?> GetBySagaIdAsync(Guid sagaId) =>
             await _collection.Find(s => s.SagaId == sagaId).FirstOrDefaultAsync();
+
+        public async Task<SagaState?> GetLatestByBookingIdAsync(string bookingId) =>
+            await _collection.Find(s => s.BookingId == bookingId)
+                .SortByDescending(s => s.CreatedAt)
+                .Limit(1)
+                .FirstOrDefaultAsync();
 
         public Task<List<SagaState>> FindStuckAsync(TimeSpan stuckThreshold)
         {

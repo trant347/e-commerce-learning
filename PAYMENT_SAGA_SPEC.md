@@ -107,6 +107,16 @@ This was inconsistent with `GetTransactionBySagaIdAsync` (used by reconciliation
 
 **Client guidance (also reflected in the 502 response body)**: if you see this error, **do not retry the payment**. Each `/pay` call mints a brand-new `sagaId`, so an immediate retry is a genuinely distinct charge attempt — payment-service's dedupe only protects against the *same* sagaId being replayed, not against two different sagaIds for the same booking. If the original ambiguous attempt actually succeeded, retrying would cause a real double charge. Instead, wait ~30–60s and refresh the booking: it will resolve automatically to either `COMPLETED` (the reconciliation job confirmed the charge went through) or back to `IMPLEMENTED`/payable-again (confirmed no charge was ever recorded) — only then is it safe to pay again if still unpaid.
 
+### Frontend: persistent "payment pending" guard (survives page reload)
+
+The 502 response above tells the user not to retry, but that guidance previously lived only in transient React state — if the user closed and reopened the browser (or the tab), the warning was gone and the Pay button was enabled again, with nothing stopping a second (genuinely risky) charge attempt.
+
+**Fix — server-derived signal instead of client-only state:**
+- `ISagaStateService.GetLatestByBookingIdAsync(bookingId)` (backed by a new `(BookingId, CreatedAt desc)` Mongo index) returns the most recently created saga for a booking, if any.
+- `BookingController.Get(id)` now populates a transient `Booking.PaymentPending` field (`[BsonIgnore]`, not persisted) — `true` only when the booking is `IMPLEMENTED` **and** its latest saga is still `STARTED` (i.e. genuinely ambiguous/in-flight, not resolved). This costs one extra Mongo lookup only for `IMPLEMENTED` bookings, not every booking read.
+- The frontend (`PayBooking.tsx`) checks `booking.paymentPending` on every load — including a fresh mount after closing/reopening the browser — and if true, hides the payment form entirely and shows a persistent "Your payment is being processed... do not submit another payment" message instead, with a link back home. Because this is derived from server state on every `GET`, it survives reloads and multiple devices/tabs, unlike the old submit-time-only message.
+- **Server-side backstop**: `BookingController.Pay` also now checks `GetLatestByBookingIdAsync` itself, *before* starting a new saga, and returns `409 Conflict` ("A payment for this booking is already being processed...") if the latest saga is still `STARTED`. This protects against a genuine double-charge attempt even if the frontend check is stale, bypassed, or the user has two tabs/devices open — the check that gates the UI is the same one enforced server-side, so there's no way to race past it from the client.
+
 ---
 
 ## Appendix: full Kafka-mediated saga (future scaling path)

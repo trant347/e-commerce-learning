@@ -185,6 +185,7 @@ namespace calendar_service.Controllers
         {
             var item = await _service.GetByIdAsync(id);
             if (item == null) return NotFound();
+            await PopulatePaymentPendingAsync(item);
             return Ok(item);
         }
 
@@ -367,6 +368,21 @@ namespace calendar_service.Controllers
                 return BadRequest("Booking has no invoice amount to pay");
             }
 
+            // Defense-in-depth: reject a new payment attempt if one is already ambiguously
+            // in-flight for this booking (most recent saga still STARTED). This is the
+            // server-side backstop for the frontend's "payment is being processed" block — it
+            // protects against double-submission even if the UI check is stale, bypassed, or the
+            // user has two tabs open, so we never mint a second concurrent charge attempt for
+            // the same booking. See PAYMENT_SAGA_SPEC.md.
+            var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(id);
+            if (latestSaga != null && latestSaga.Status == SagaState.StatusStarted)
+            {
+                return Conflict(new
+                {
+                    error = "A payment for this booking is already being processed. Please wait for it to complete before trying again."
+                });
+            }
+
             var card = new CreditCardInfo
             {
                 CardNumber = body.CardNumber.Trim(),
@@ -490,6 +506,20 @@ namespace calendar_service.Controllers
         private void LogChargeSucceededButCompletionFailed(Exception ex, string bookingId, Guid sagaId) =>
             _logger.LogError(ex, "Payment for booking {BookingId} succeeded (sagaId={SagaId}) but completing the " +
                 "booking failed; leaving saga STARTED for reconciliation", bookingId, sagaId);
+
+        /// <summary>
+        /// Sets <see cref="Booking.PaymentPending"/> so the frontend can block a duplicate /pay
+        /// attempt and show "payment is being processed" even after a page reload (see
+        /// PAYMENT_SAGA_SPEC.md). Only bookings currently awaiting payment can have a meaningful
+        /// pending saga, so the lookup is skipped otherwise to avoid an extra Mongo round-trip on
+        /// every booking read.
+        /// </summary>
+        private async Task PopulatePaymentPendingAsync(Booking booking)
+        {
+            if (booking.Status != Booking.StatusImplemented || booking.Id == null) return;
+            var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(booking.Id);
+            booking.PaymentPending = latestSaga != null && latestSaga.Status == SagaState.StatusStarted;
+        }
 
         /// <summary>
         /// Thrown only when <c>Faults:SimulatePostChargeCrash</c> is explicitly enabled, to

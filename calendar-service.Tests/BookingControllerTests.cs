@@ -447,6 +447,55 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public async Task Pay_WhenPaymentAlreadyStartedForBooking_Returns409_AndNeverStartsNewSaga()
+        {
+            // Server-side backstop for the frontend's "payment is being processed" block: even
+            // if the UI check is stale/bypassed (e.g. two tabs open), a new /pay attempt must be
+            // rejected while a previous saga for the same booking is still ambiguously STARTED,
+            // so we never mint a second concurrent charge attempt for the same booking.
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = new Mock<ISagaStateService>(MockBehavior.Strict);
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
+                .ReturnsAsync(new SagaState { BookingId = "bk-1", Status = SagaState.StatusStarted });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            Assert.Contains("already being processed", conflict.Value!.ToString());
+            paymentClient.Verify(c => c.ProcessPaymentAsync(
+                It.IsAny<CreditCardInfo>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+            sagaState.Verify(s => s.StartAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<decimal>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_WhenPreviousSagaForBookingIsResolved_ProceedsNormally()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
+                .ReturnsAsync(new SagaState { BookingId = "bk-1", Status = SagaState.StatusFailed });
+
+            var booking = ImplementedBooking();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
+            service.Setup(s => s.CompletePaymentAsync("bk-1", Caller, "txn-1")).ReturnsAsync(new Booking { Id = "bk-1", Status = Booking.StatusCompleted });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            Assert.IsType<OkObjectResult>(result);
+        }
+
+        [Fact]
         public async Task Pay_WhenSagaStateStoreUnavailable_Returns503_AndNeverAttemptsPayment()
         {
             var service = new Mock<IBookingService>();
@@ -659,5 +708,63 @@ namespace calendar_service.Tests
             var ok = Assert.IsType<OkObjectResult>(result);
             Assert.Same(booking, ok.Value);
         }
+
+        [Fact]
+        public async Task Get_BookingImplementedWithStartedSaga_SetsPaymentPendingTrue()
+        {
+            // Reproduces the scenario the frontend needs to survive a page reload for: a saga
+            // is ambiguously STARTED (e.g. payment-service was unreachable mid-charge) so the
+            // booking is still IMPLEMENTED; GET must flag PaymentPending so the frontend can
+            // block a duplicate /pay attempt even after the user closes and reopens the browser.
+            var service = new Mock<IBookingService>();
+            var booking = new Booking { Id = "bk-1", Status = Booking.StatusImplemented, InvoiceAmount = 50m };
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+            var sagaState = new Mock<ISagaStateService>();
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
+                .ReturnsAsync(new SagaState { BookingId = "bk-1", Status = SagaState.StatusStarted });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
+            var result = await ctrl.Get("bk-1");
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var returned = Assert.IsType<Booking>(ok.Value);
+            Assert.True(returned.PaymentPending);
+        }
+
+        [Fact]
+        public async Task Get_BookingImplementedWithResolvedSaga_LeavesPaymentPendingFalse()
+        {
+            var service = new Mock<IBookingService>();
+            var booking = new Booking { Id = "bk-1", Status = Booking.StatusImplemented, InvoiceAmount = 50m };
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+            var sagaState = new Mock<ISagaStateService>();
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
+                .ReturnsAsync(new SagaState { BookingId = "bk-1", Status = SagaState.StatusFailed });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
+            var result = await ctrl.Get("bk-1");
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var returned = Assert.IsType<Booking>(ok.Value);
+            Assert.False(returned.PaymentPending);
+        }
+
+        [Fact]
+        public async Task Get_BookingNotImplemented_DoesNotQuerySagaState()
+        {
+            // Avoid an extra Mongo round-trip for bookings that can't possibly have a
+            // meaningful pending payment (e.g. still PENDING, or already COMPLETED).
+            var service = new Mock<IBookingService>();
+            var booking = new Booking { Id = "bk-1", Status = Booking.StatusCompleted };
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+            var sagaState = new Mock<ISagaStateService>(MockBehavior.Strict);
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
+            var result = await ctrl.Get("bk-1");
+
+            Assert.IsType<OkObjectResult>(result);
+            sagaState.Verify(s => s.GetLatestByBookingIdAsync(It.IsAny<string>()), Times.Never);
+        }
     }
 }
+

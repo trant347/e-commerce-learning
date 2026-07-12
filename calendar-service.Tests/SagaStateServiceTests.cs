@@ -104,6 +104,25 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public void Constructor_CreatesBookingIdCreatedAtIndex()
+        {
+            var col = new Mock<IMongoCollection<SagaState>>(MockBehavior.Loose);
+            var indexes = new Mock<IMongoIndexManager<SagaState>>(MockBehavior.Loose);
+            col.SetupGet(c => c.Indexes).Returns(indexes.Object);
+            var db = new Mock<IMongoDBService>();
+            db.Setup(d => d.GetCollection<SagaState>("SagaState")).Returns(col.Object);
+            var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+
+            _ = new SagaStateService(db.Object, NullLogger<SagaStateService>.Instance, config);
+
+            indexes.Verify(i => i.CreateOne(
+                It.Is<CreateIndexModel<SagaState>>(m => m.Options != null && m.Options.Name == "bookingid_createdat_desc"),
+                It.IsAny<CreateOneIndexOptions>(),
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+
+        [Fact]
         public async Task StartAsync_InsertsStartedSagaWithGivenFields()
         {
             var (svc, col) = BuildService();
@@ -244,6 +263,37 @@ namespace calendar_service.Tests
                 .ReturnsAsync(() => BuildCursor(new List<SagaState>()));
 
             var result = await svc.GetBySagaIdAsync(Guid.NewGuid());
+
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task GetLatestByBookingIdAsync_ReturnsWhateverCollectionYields()
+        {
+            var (svc, col) = BuildService();
+            var latest = new SagaState { Id = "1", SagaId = Guid.NewGuid(), BookingId = "booking-1", Status = SagaState.StatusStarted, RequestedAmount = 10m };
+            col.Setup(c => c.FindAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<FindOptions<SagaState, SagaState>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => BuildCursor(new List<SagaState> { latest }));
+
+            var result = await svc.GetLatestByBookingIdAsync("booking-1");
+
+            Assert.Same(latest, result);
+        }
+
+        [Fact]
+        public async Task GetLatestByBookingIdAsync_NoSagaForBooking_ReturnsNull()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.FindAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<FindOptions<SagaState, SagaState>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => BuildCursor(new List<SagaState>()));
+
+            var result = await svc.GetLatestByBookingIdAsync("booking-none");
 
             Assert.Null(result);
         }
