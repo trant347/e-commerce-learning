@@ -71,6 +71,7 @@ This is almost exactly today's flow, plus step 2 (write saga state **before** ca
 2. Reconciliation job adds a bit of operational surface (needs monitoring, but far less than a full message bus).
 3. Doesn't solve availability decoupling — if payment-service is down, the caller still gets an immediate failure rather than a durably queued retry.
 4. Requires a new payment-service endpoint (`GET /transaction/{sagaId}`) that doesn't exist today.
+5. If calendar-service's own saga store (Mongo) is unavailable when writing the initial `STARTED` row, `/pay` fails closed with `503` before any charge is attempted (see `BookingController.Pay`) — correct behavior, but it is itself a dependency the flow can't operate without.
 
 ---
 

@@ -88,5 +88,8 @@ namespace payment_service.Services
 
             return new string('*', cardNumber.Length - 4) + cardNumber[^4..];
         }
+
+        public Task<PaymentTransaction?> GetTransactionBySagaIdAsync(Guid sagaId) =>
+            _dbContext.Transactions.FirstOrDefaultAsync(t => t.SagaId == sagaId);
     }
 }

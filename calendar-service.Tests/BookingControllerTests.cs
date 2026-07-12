@@ -32,12 +32,14 @@ namespace calendar_service.Tests
             string? username = Caller,
             bool isAdmin = false,
             string? bearer = "test-token",
-            Mock<IPaymentApiClient>? paymentClient = null)
+            Mock<IPaymentApiClient>? paymentClient = null,
+            Mock<ISagaStateService>? sagaStateService = null)
         {
             var controller = new BookingController(
                 service.Object,
                 taskMasterClient.Object,
                 (paymentClient ?? new Mock<IPaymentApiClient>()).Object,
+                (sagaStateService ?? DefaultSagaStateServiceMock()).Object,
                 notifications.Object,
                 NullLogger<BookingController>.Instance);
 
@@ -64,6 +66,23 @@ namespace calendar_service.Tests
             }
             controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
             return controller;
+        }
+
+        /// <summary>
+        /// Default saga-state mock for tests that don't care about saga behavior: StartAsync
+        /// returns a real SagaState (as the controller reads its SagaId back out immediately).
+        /// </summary>
+        private static Mock<ISagaStateService> DefaultSagaStateServiceMock()
+        {
+            var mock = new Mock<ISagaStateService>();
+            mock.Setup(s => s.StartAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<decimal>()))
+                .ReturnsAsync((string bookingId, Guid sagaId, decimal amount) => new SagaState
+                {
+                    SagaId = sagaId,
+                    BookingId = bookingId,
+                    RequestedAmount = amount
+                });
+            return mock;
         }
 
         private static DateTime FutureSlot(int hoursFromNowFloor = 48)
@@ -320,6 +339,188 @@ namespace calendar_service.Tests
             var result = await ctrl.Decline("bk-1", null);
 
             Assert.IsType<NotFoundResult>(result);
+        }
+
+        // ---- Pay ----
+
+        private static Booking ImplementedBooking(decimal invoiceAmount = 100m) => new()
+        {
+            Id = "bk-1",
+            TaskMasterId = TaskMasterId,
+            TaskMasterUsername = OwnerUsername,
+            RequesterUsername = Caller,
+            SlotStart = FutureSlot(),
+            DurationHours = 1,
+            Status = Booking.StatusImplemented,
+            InvoiceAmount = invoiceAmount
+        };
+
+        private static BookingController.PayDto ValidPayDto() => new()
+        {
+            CardNumber = "4111111111111111",
+            ExpiryDate = "12/30",
+            CVV = "123",
+            OwnerName = Caller
+        };
+
+        [Fact]
+        public async Task Pay_HappyPath_StartsAndCompletesSaga_Returns200()
+        {
+            var service = new Mock<IBookingService>();
+            var notifications = new Mock<INotificationProducer>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            var booking = ImplementedBooking();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var sagaId = Guid.Empty;
+            sagaState.Setup(s => s.StartAsync("bk-1", It.IsAny<Guid>(), 100m))
+                .ReturnsAsync((string bookingId, Guid id, decimal amount) =>
+                {
+                    sagaId = id;
+                    return new SagaState { SagaId = id, BookingId = bookingId, RequestedAmount = amount };
+                });
+
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
+
+            var completed = new Booking
+            {
+                Id = "bk-1",
+                TaskMasterId = TaskMasterId,
+                TaskMasterUsername = OwnerUsername,
+                RequesterUsername = Caller,
+                SlotStart = booking.SlotStart,
+                DurationHours = 1,
+                Status = Booking.StatusCompleted,
+                InvoiceAmount = 100m,
+                PaymentTransactionId = "txn-1"
+            };
+            service.Setup(s => s.CompletePaymentAsync("bk-1", Caller, "txn-1")).ReturnsAsync(completed);
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), notifications,
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            Assert.Same(completed, ok.Value);
+            // The sagaId started before the payment call must be the same one completed afterwards.
+            paymentClient.Verify(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), sagaId), Times.Once);
+            sagaState.Verify(s => s.CompleteAsync(sagaId, "txn-1"), Times.Once);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_WhenSagaStateStoreUnavailable_Returns503_AndNeverAttemptsPayment()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = new Mock<ISagaStateService>();
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            sagaState.Setup(s => s.StartAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<decimal>()))
+                .ThrowsAsync(new TimeoutException("Mongo unreachable"));
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var objResult = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, objResult.StatusCode);
+            // No card should ever be charged if the saga row couldn't be durably recorded first.
+            paymentClient.Verify(c => c.ProcessPaymentAsync(
+                It.IsAny<CreditCardInfo>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_WhenPaymentServiceUnreachable_FailsSaga_Returns502()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync((PaymentTransactionResult?)null);
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var objResult = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status502BadGateway, objResult.StatusCode);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.Is<string>(r => r.Contains("reach", StringComparison.OrdinalIgnoreCase))), Times.Once);
+            sagaState.Verify(s => s.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_WhenPaymentDeclined_FailsSaga_Returns402()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = "DECLINED" });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var objResult = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(402, objResult.StatusCode);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.Is<string>(r => r.Contains("declined", StringComparison.OrdinalIgnoreCase))), Times.Once);
+        }
+
+        [Fact]
+        public async Task Pay_WhenAmountMismatch_FailsSaga_Returns402()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 999m, Status = PaymentTransactionResult.StatusApproved });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var objResult = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(402, objResult.StatusCode);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.Is<string>(r => r.Contains("match", StringComparison.OrdinalIgnoreCase))), Times.Once);
+        }
+
+        [Fact]
+        public async Task Pay_WhenCompletePaymentThrowsAfterChargeSucceeded_LeavesSagaStarted_Returns409()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
+            service.Setup(s => s.CompletePaymentAsync("bk-1", Caller, "txn-1"))
+                .ThrowsAsync(new InvalidOperationException("Booking is COMPLETED and cannot be paid"));
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+            // The charge already succeeded, so the saga must NOT be marked FAILED — it's left
+            // STARTED for the reconciliation job to pick up and finish (see PAYMENT_SAGA_SPEC.md).
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+            sagaState.Verify(s => s.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
         }
 
         // ---- Listing & lookup ----

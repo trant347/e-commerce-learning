@@ -14,6 +14,7 @@ namespace calendar_service.Controllers
         private readonly IBookingService _service;
         private readonly ITaskMasterApiClient _taskMasterClient;
         private readonly IPaymentApiClient _paymentClient;
+        private readonly ISagaStateService _sagaStateService;
         private readonly INotificationProducer _notifications;
         private readonly ILogger<BookingController> _logger;
 
@@ -21,12 +22,14 @@ namespace calendar_service.Controllers
             IBookingService service,
             ITaskMasterApiClient taskMasterClient,
             IPaymentApiClient paymentClient,
+            ISagaStateService sagaStateService,
             INotificationProducer notifications,
             ILogger<BookingController> logger)
         {
             _service = service;
             _taskMasterClient = taskMasterClient;
             _paymentClient = paymentClient;
+            _sagaStateService = sagaStateService;
             _notifications = notifications;
             _logger = logger;
         }
@@ -368,25 +371,48 @@ namespace calendar_service.Controllers
                 CVV = body.CVV,
                 OwnerName = body.OwnerName
             };
-            var transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted);
+
+            // Write a durable STARTED saga row BEFORE calling out to payment-service, so a
+            // crash between the charge succeeding and the booking being marked COMPLETED
+            // leaves a recoverable trail instead of a silent inconsistency (see
+            // PAYMENT_SAGA_SPEC.md). The sagaId doubles as the idempotency key sent to
+            // payment-service, so a retried call can't double-charge.
+            // If the saga store itself is unavailable, fail closed here — before any card is
+            // charged — rather than let payment-service be called with no durable record of it.
+            SagaState saga;
+            try
+            {
+                saga = await _sagaStateService.StartAsync(id, Guid.NewGuid(), booking.InvoiceAmount.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write saga STARTED state for booking {BookingId}; not attempting payment", id);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Payment cannot be processed right now, please try again" });
+            }
+
+            var transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted, saga.SagaId);
             if (transaction == null)
             {
+                await _sagaStateService.FailAsync(saga.SagaId, "Could not reach payment service");
                 return StatusCode(StatusCodes.Status502BadGateway, new { error = "Could not reach payment service" });
             }
             if (!string.Equals(transaction.Status, PaymentTransactionResult.StatusApproved, StringComparison.OrdinalIgnoreCase))
             {
+                await _sagaStateService.FailAsync(saga.SagaId, "Payment was declined");
                 return StatusCode(402, new { error = "Payment was declined" });
             }
             if (transaction.Amount != booking.InvoiceAmount.Value)
             {
                 _logger.LogWarning("Payment amount {PaymentAmount} did not match invoice amount {InvoiceAmount} for booking {BookingId}",
                     transaction.Amount, booking.InvoiceAmount.Value, id);
+                await _sagaStateService.FailAsync(saga.SagaId, "Payment amount does not match invoice amount");
                 return StatusCode(402, new { error = "Payment amount does not match invoice amount" });
             }
 
             try
             {
                 var updated = await _service.CompletePaymentAsync(id, caller, transaction.Id);
+                await _sagaStateService.CompleteAsync(saga.SagaId, transaction.Id);
 
                 await _notifications.PublishAsync(new
                 {
@@ -403,10 +429,32 @@ namespace calendar_service.Controllers
                 });
                 return Ok(updated);
             }
-            catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (KeyNotFoundException) { return NotFound(); }
-            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+            catch (UnauthorizedAccessException ex)
+            {
+                LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
+                return Forbid();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
+                return NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
+                return Conflict(new { error = ex.Message });
+            }
         }
+
+        /// <summary>
+        /// The charge already succeeded at this point, so the saga is deliberately left STARTED
+        /// (not FAILED) rather than swallowing money already taken: the reconciliation job (see
+        /// PAYMENT_SAGA_SPEC.md) will find it via GET /api/payment/transaction/{sagaId} and
+        /// finish the booking transition.
+        /// </summary>
+        private void LogChargeSucceededButCompletionFailed(Exception ex, string bookingId, Guid sagaId) =>
+            _logger.LogError(ex, "Payment for booking {BookingId} succeeded (sagaId={SagaId}) but completing the " +
+                "booking failed; leaving saga STARTED for reconciliation", bookingId, sagaId);
 
         private string? CurrentUsername() =>
             User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.Identity?.Name;
