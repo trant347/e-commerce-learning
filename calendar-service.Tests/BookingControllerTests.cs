@@ -6,6 +6,7 @@ using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -33,7 +34,8 @@ namespace calendar_service.Tests
             bool isAdmin = false,
             string? bearer = "test-token",
             Mock<IPaymentApiClient>? paymentClient = null,
-            Mock<ISagaStateService>? sagaStateService = null)
+            Mock<ISagaStateService>? sagaStateService = null,
+            IConfiguration? configuration = null)
         {
             var controller = new BookingController(
                 service.Object,
@@ -41,7 +43,8 @@ namespace calendar_service.Tests
                 (paymentClient ?? new Mock<IPaymentApiClient>()).Object,
                 (sagaStateService ?? DefaultSagaStateServiceMock()).Object,
                 notifications.Object,
-                NullLogger<BookingController>.Instance);
+                NullLogger<BookingController>.Instance,
+                configuration ?? new ConfigurationBuilder().AddInMemoryCollection().Build());
 
             var claims = new List<Claim>();
             if (!string.IsNullOrEmpty(username))
@@ -413,6 +416,37 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public async Task Pay_WhenSimulatePostChargeCrashEnabled_ThrowsAndLeavesSagaStarted()
+        {
+            // Verifies the Faults:SimulatePostChargeCrash test hook: after the charge succeeds,
+            // the request throws instead of ever calling CompletePaymentAsync/CompleteAsync —
+            // simulating a real process crash for exercising the reconciliation job manually.
+            var service = new Mock<IBookingService>();
+            var notifications = new Mock<INotificationProducer>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            var booking = ImplementedBooking();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
+
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Faults:SimulatePostChargeCrash"] = "true" })
+                .Build();
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), notifications,
+                paymentClient: paymentClient, sagaStateService: sagaState, configuration: configuration);
+
+            await Assert.ThrowsAsync<BookingController.SimulatedPostChargeCrashException>(() => ctrl.Pay("bk-1", ValidPayDto()));
+
+            service.Verify(s => s.CompletePaymentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            sagaState.Verify(s => s.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        }
+
+        [Fact]
         public async Task Pay_WhenSagaStateStoreUnavailable_Returns503_AndNeverAttemptsPayment()
         {
             var service = new Mock<IBookingService>();
@@ -435,8 +469,14 @@ namespace calendar_service.Tests
         }
 
         [Fact]
-        public async Task Pay_WhenPaymentServiceUnreachable_FailsSaga_Returns502()
+        public async Task Pay_WhenPaymentServiceUnreachable_LeavesSagaStarted_Returns502WithClearMessage()
         {
+            // Regression coverage: previously this path called FailAsync immediately, which (a)
+            // meant the reconciliation job never saw the saga (it was never left STARTED), and
+            // (b) risked mislabeling a charge that actually succeeded server-side (response just
+            // never arrived) as "not charged". Neither is safe — the saga must stay STARTED so
+            // SagaReconciliationWorker can resolve it authoritatively once payment-service is
+            // reachable again.
             var service = new Mock<IBookingService>();
             var paymentClient = new Mock<IPaymentApiClient>();
             var sagaState = DefaultSagaStateServiceMock();
@@ -444,7 +484,7 @@ namespace calendar_service.Tests
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
             paymentClient
                 .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-                .ReturnsAsync((PaymentTransactionResult?)null);
+                .ThrowsAsync(new PaymentServiceUnavailableException("payment-service unreachable"));
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
                 paymentClient: paymentClient, sagaStateService: sagaState);
@@ -452,7 +492,9 @@ namespace calendar_service.Tests
 
             var objResult = Assert.IsType<ObjectResult>(result);
             Assert.Equal(StatusCodes.Status502BadGateway, objResult.StatusCode);
-            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.Is<string>(r => r.Contains("reach", StringComparison.OrdinalIgnoreCase))), Times.Once);
+            var error = Assert.IsAssignableFrom<string>(objResult.Value!.GetType().GetProperty("error")!.GetValue(objResult.Value));
+            Assert.Contains("do not retry", error, StringComparison.OrdinalIgnoreCase);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
             sagaState.Verify(s => s.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
         }
 

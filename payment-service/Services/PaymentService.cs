@@ -34,7 +34,11 @@ namespace payment_service.Services
             }
 
             // NOTE: This is a placeholder for real payment processing (e.g. calling out to a
-            // payment gateway). It always approves the payment and persists a record.
+            // payment gateway). It always approves the payment and persists a record, EXCEPT
+            // for a reserved "magic" test card number (see IsSimulatedDeclineCard) that lets
+            // developers deterministically trigger a DECLINED response — e.g. to exercise
+            // BookingController.Pay's decline handling or the reconciliation job's
+            // declined/mismatch branch — without a debugger or real payment gateway.
             // Round explicitly (banker's rounding, matching the numeric(18,2) column) so the
             // value returned to the caller always matches exactly what was persisted.
             var transaction = new PaymentTransaction
@@ -43,7 +47,9 @@ namespace payment_service.Services
                 Currency = request.Currency,
                 MaskedCardNumber = MaskCardNumber(request.CreditCard.CardNumber),
                 OwnerName = request.CreditCard.OwnerName,
-                Status = PaymentTransaction.StatusApproved,
+                Status = IsSimulatedDeclineCard(request.CreditCard.CardNumber)
+                    ? PaymentTransaction.StatusDeclined
+                    : PaymentTransaction.StatusApproved,
                 SagaId = request.SagaId
             };
 
@@ -74,10 +80,23 @@ namespace payment_service.Services
                 throw;
             }
 
-            _logger.LogInformation("Recorded payment transaction {Id} for {Amount} {Currency}", transaction.Id, transaction.Amount, transaction.Currency);
+            _logger.LogInformation("Recorded payment transaction {Id} for {Amount} {Currency} with status {Status}",
+                transaction.Id, transaction.Amount, transaction.Currency, transaction.Status);
 
             return transaction;
         }
+
+        /// <summary>
+        /// Dev/testing-only "magic" card number (mirrors the convention used by real payment
+        /// gateways' sandbox test cards) that deterministically simulates a declined charge, so
+        /// the booking-payment saga's decline handling (see BookingController.Pay,
+        /// SagaReconciliationWorker) can be exercised via a normal HTTP request instead of a
+        /// debugger. Not a secret — documented here and in PAYMENT_SAGA_SPEC.md.
+        /// </summary>
+        public const string SimulatedDeclineCardNumber = "4000000000000002";
+
+        private static bool IsSimulatedDeclineCard(string cardNumber) =>
+            cardNumber == SimulatedDeclineCardNumber;
 
         private static string MaskCardNumber(string cardNumber)
         {

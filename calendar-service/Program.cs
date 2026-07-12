@@ -14,6 +14,9 @@ using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Must run before any Mongo document is (de)serialized — see MongoDbGuidSupport for why.
+calendar_service.MongoDbGuidSupport.Register();
+
 var otelServiceName = builder.Configuration["OTEL_SERVICE_NAME"] ?? "calendar-service";
 var otelEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http://otel-collector:4317";
 

@@ -22,6 +22,8 @@ namespace calendar_service.Model
         /// <summary>
         /// Idempotency key shared with payment-service on the process-payment call, so a
         /// retried request (from the reconciliation job or a client retry) can't double-charge.
+        /// See <see cref="calendar_service.MongoDbGuidSupport"/> (registered at startup) for why
+        /// Guid serialization needs an explicit representation with MongoDB.Driver 3.x.
         /// </summary>
         public Guid SagaId { get; set; } = Guid.NewGuid();
 

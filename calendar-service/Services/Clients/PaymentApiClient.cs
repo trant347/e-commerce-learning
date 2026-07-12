@@ -38,7 +38,15 @@ namespace calendar_service.Services.Clients
         /// Idempotency key from the caller's SagaState (see PAYMENT_SAGA_SPEC.md). When supplied,
         /// payment-service dedupes retried requests with the same id instead of double-charging.
         /// </param>
-        Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null);
+        /// <exception cref="PaymentServiceUnavailableException">
+        /// payment-service could not be reached, or returned an unexpected non-success status.
+        /// Distinct from "the charge was actually declined" (that's reflected in the returned
+        /// transaction's Status instead): if the connection dropped or timed out, the charge may
+        /// still have gone through on payment-service's side — the caller must NOT treat this as
+        /// a confirmed failure. See BookingController.Pay, which leaves the saga STARTED for the
+        /// reconciliation job to resolve authoritatively via <see cref="GetTransactionBySagaIdAsync"/>.
+        /// </exception>
+        Task<PaymentTransactionResult> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null);
 
         /// <summary>
         /// Calls payment-service's <c>GET /api/payment/transaction/{sagaId}</c> so the saga
@@ -76,8 +84,9 @@ namespace calendar_service.Services.Clients
             _logger = logger;
         }
 
-        public async Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null)
+        public async Task<PaymentTransactionResult> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null)
         {
+            HttpResponseMessage resp;
             try
             {
                 var payload = new
@@ -94,24 +103,34 @@ namespace calendar_service.Services.Clients
                     sagaId
                 };
 
-                var resp = await _http.PostAsJsonAsync("/api/payment/process", payload, ct);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("payment-service returned {Status} processing payment", resp.StatusCode);
-                    return null;
-                }
-
-                var json = await resp.Content.ReadAsStringAsync(ct);
-                return JsonSerializer.Deserialize<PaymentTransactionResult>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                resp = await _http.PostAsJsonAsync("/api/payment/process", payload, ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Failed to reach payment-service to process payment");
-                return null;
+                // Could not even complete the request — the charge may or may not have reached
+                // payment-service (e.g. it processed it but the response was lost). This is
+                // deliberately NOT treated as "payment failed"; the caller must leave the saga
+                // STARTED and let reconciliation resolve it authoritatively via sagaId lookup.
+                throw new PaymentServiceUnavailableException(
+                    sagaId.HasValue
+                        ? $"Failed to reach payment-service to process payment for sagaId={sagaId}"
+                        : "Failed to reach payment-service to process payment", ex);
             }
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("payment-service returned {Status} processing payment for sagaId={SagaId}", resp.StatusCode, sagaId);
+                throw new PaymentServiceUnavailableException(
+                    $"payment-service returned {resp.StatusCode} processing payment" + (sagaId.HasValue ? $" for sagaId={sagaId}" : ""));
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            var result = JsonSerializer.Deserialize<PaymentTransactionResult>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            return result ?? throw new PaymentServiceUnavailableException(
+                $"payment-service returned an empty/unparseable response processing payment" + (sagaId.HasValue ? $" for sagaId={sagaId}" : ""));
         }
 
         public async Task<PaymentTransactionResult?> GetTransactionBySagaIdAsync(Guid sagaId, CancellationToken ct)

@@ -17,6 +17,7 @@ namespace calendar_service.Controllers
         private readonly ISagaStateService _sagaStateService;
         private readonly INotificationProducer _notifications;
         private readonly ILogger<BookingController> _logger;
+        private readonly IConfiguration _configuration;
 
         public BookingController(
             IBookingService service,
@@ -24,7 +25,8 @@ namespace calendar_service.Controllers
             IPaymentApiClient paymentClient,
             ISagaStateService sagaStateService,
             INotificationProducer notifications,
-            ILogger<BookingController> logger)
+            ILogger<BookingController> logger,
+            IConfiguration configuration)
         {
             _service = service;
             _taskMasterClient = taskMasterClient;
@@ -32,6 +34,7 @@ namespace calendar_service.Controllers
             _sagaStateService = sagaStateService;
             _notifications = notifications;
             _logger = logger;
+            _configuration = configuration;
         }
 
         public class CreateBookingDto
@@ -366,10 +369,10 @@ namespace calendar_service.Controllers
 
             var card = new CreditCardInfo
             {
-                CardNumber = body.CardNumber,
-                ExpiryDate = body.ExpiryDate,
-                CVV = body.CVV,
-                OwnerName = body.OwnerName
+                CardNumber = body.CardNumber.Trim(),
+                ExpiryDate = body.ExpiryDate.Trim(),
+                CVV = body.CVV.Trim(),
+                OwnerName = body.OwnerName.Trim()
             };
 
             // Write a durable STARTED saga row BEFORE calling out to payment-service, so a
@@ -390,11 +393,28 @@ namespace calendar_service.Controllers
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Payment cannot be processed right now, please try again" });
             }
 
-            var transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted, saga.SagaId);
-            if (transaction == null)
+            PaymentTransactionResult transaction;
+            try
             {
-                await _sagaStateService.FailAsync(saga.SagaId, "Could not reach payment service");
-                return StatusCode(StatusCodes.Status502BadGateway, new { error = "Could not reach payment service" });
+                transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted, saga.SagaId);
+            }
+            catch (PaymentServiceUnavailableException ex)
+            {
+                // We genuinely don't know whether the charge went through (e.g. payment-service
+                // processed it but the connection dropped before the response arrived), so the
+                // saga is deliberately left STARTED rather than marked FAILED — marking it FAILED
+                // here could wrongly tell the caller "you weren't charged" when money may already
+                // have been taken. SagaReconciliationWorker will resolve it authoritatively via
+                // GET /api/payment/transaction/{sagaId} within StuckThresholdSeconds (default 30s)
+                // of payment-service becoming reachable again. See PAYMENT_SAGA_SPEC.md.
+                _logger.LogWarning(ex, "Could not confirm payment outcome for booking {BookingId} (sagaId={SagaId}); leaving saga STARTED for reconciliation",
+                    id, saga.SagaId);
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    error = "We could not confirm whether your payment succeeded because payment-service could not be reached. " +
+                        "Do not retry or resubmit the payment — this will be verified and resolved automatically within about a minute. " +
+                        "Refresh this booking shortly to see its final status."
+                });
             }
             if (!string.Equals(transaction.Status, PaymentTransactionResult.StatusApproved, StringComparison.OrdinalIgnoreCase))
             {
@@ -407,6 +427,21 @@ namespace calendar_service.Controllers
                     transaction.Amount, booking.InvoiceAmount.Value, id);
                 await _sagaStateService.FailAsync(saga.SagaId, "Payment amount does not match invoice amount");
                 return StatusCode(402, new { error = "Payment amount does not match invoice amount" });
+            }
+
+            // Dev/testing-only fault injection: simulates a crash between the charge
+            // succeeding and the saga/booking being marked COMPLETED (the specific gap
+            // reconciliation exists to recover from — see PAYMENT_SAGA_SPEC.md). Gated behind
+            // config so it can be toggled on for a manual test run (e.g. via the
+            // Faults__SimulatePostChargeCrash=true env var) without a debugger, and MUST remain
+            // false in production. Left uncaught deliberately, so it surfaces the same way a
+            // real crash would (no response ever reaches the caller) instead of being absorbed
+            // by the catch blocks below.
+            if (_configuration.GetValue("Faults:SimulatePostChargeCrash", false))
+            {
+                _logger.LogWarning("Faults:SimulatePostChargeCrash is enabled; simulating a crash for booking {BookingId} " +
+                    "(sagaId={SagaId}) after the charge succeeded but before completing the saga", id, saga.SagaId);
+                throw new SimulatedPostChargeCrashException(id, saga.SagaId);
             }
 
             try
@@ -455,6 +490,20 @@ namespace calendar_service.Controllers
         private void LogChargeSucceededButCompletionFailed(Exception ex, string bookingId, Guid sagaId) =>
             _logger.LogError(ex, "Payment for booking {BookingId} succeeded (sagaId={SagaId}) but completing the " +
                 "booking failed; leaving saga STARTED for reconciliation", bookingId, sagaId);
+
+        /// <summary>
+        /// Thrown only when <c>Faults:SimulatePostChargeCrash</c> is explicitly enabled, to
+        /// simulate a process crash after a charge succeeds but before the saga/booking are
+        /// completed — the exact recovery scenario the reconciliation job exists for. See
+        /// PAYMENT_SAGA_SPEC.md.
+        /// </summary>
+        public class SimulatedPostChargeCrashException : Exception
+        {
+            public SimulatedPostChargeCrashException(string bookingId, Guid sagaId)
+                : base($"Simulated crash for booking {bookingId} (sagaId={sagaId}) after charge succeeded, before saga completion")
+            {
+            }
+        }
 
         private string? CurrentUsername() =>
             User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.Identity?.Name;
