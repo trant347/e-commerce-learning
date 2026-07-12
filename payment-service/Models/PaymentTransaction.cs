@@ -34,6 +34,13 @@ namespace payment_service.Models
         [MaxLength(20)]
         public string Status { get; set; } = StatusApproved;
 
+        /// <summary>
+        /// Idempotency key from the caller's saga, if supplied. Unique when present so a
+        /// retried request with the same SagaId can be detected and deduped instead of
+        /// double-charging (see PAYMENT_SAGA_SPEC.md, migration step 2).
+        /// </summary>
+        public Guid? SagaId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

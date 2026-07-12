@@ -34,6 +34,7 @@ builder.Services.AddOptions<KafkaProducerConfig>().Bind(builder.Configuration.Ge
 
 builder.Services.AddSingleton<IMongoDBService, MongoDBService>();
 builder.Services.AddSingleton<IBookingService, BookingService>();
+builder.Services.AddSingleton<ISagaStateService, SagaStateService>();
 builder.Services.AddSingleton<INotificationProducer, NotificationProducer>();
 
 builder.Services.AddOptions<JwtSettings>().Bind(builder.Configuration.GetSection("JwtSettings"));

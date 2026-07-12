@@ -21,6 +21,9 @@ namespace calendar_service.Services.Clients
         public string MaskedCardNumber { get; set; } = string.Empty;
         public string OwnerName { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
+
+        /// <summary>Idempotency key echoed back by payment-service, if one was sent.</summary>
+        public Guid? SagaId { get; set; }
     }
 
     public interface IPaymentApiClient
@@ -31,7 +34,11 @@ namespace calendar_service.Services.Clients
         /// is marked as paid — the frontend never talks to payment-service directly, and never
         /// asserts its own "payment succeeded" outcome to calendar-service.
         /// </summary>
-        Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct);
+        /// <param name="sagaId">
+        /// Idempotency key from the caller's SagaState (see PAYMENT_SAGA_SPEC.md). When supplied,
+        /// payment-service dedupes retried requests with the same id instead of double-charging.
+        /// </param>
+        Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null);
     }
 
     public class PaymentApiClient : IPaymentApiClient
@@ -45,7 +52,7 @@ namespace calendar_service.Services.Clients
             _logger = logger;
         }
 
-        public async Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct)
+        public async Task<PaymentTransactionResult?> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null)
         {
             try
             {
@@ -59,7 +66,8 @@ namespace calendar_service.Services.Clients
                         ownerName = card.OwnerName
                     },
                     amount,
-                    currency = "USD"
+                    currency = "USD",
+                    sagaId
                 };
 
                 var resp = await _http.PostAsJsonAsync("/api/payment/process", payload, ct);
