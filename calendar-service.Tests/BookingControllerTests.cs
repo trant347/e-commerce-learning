@@ -386,7 +386,7 @@ namespace calendar_service.Tests
                 });
 
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
 
             var completed = new Booking
@@ -410,7 +410,7 @@ namespace calendar_service.Tests
             var ok = Assert.IsType<OkObjectResult>(result);
             Assert.Same(completed, ok.Value);
             // The sagaId started before the payment call must be the same one completed afterwards.
-            paymentClient.Verify(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), sagaId), Times.Once);
+            paymentClient.Verify(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), sagaId, It.IsAny<string>(), It.IsAny<string>()), Times.Once);
             sagaState.Verify(s => s.CompleteAsync(sagaId, "txn-1"), Times.Once);
             sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
         }
@@ -429,7 +429,7 @@ namespace calendar_service.Tests
             var booking = ImplementedBooking();
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
 
             var configuration = new ConfigurationBuilder()
@@ -468,7 +468,7 @@ namespace calendar_service.Tests
             var conflict = Assert.IsType<ConflictObjectResult>(result);
             Assert.Contains("already being processed", conflict.Value!.ToString());
             paymentClient.Verify(c => c.ProcessPaymentAsync(
-                It.IsAny<CreditCardInfo>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+                It.IsAny<CreditCardInfo>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
             sagaState.Verify(s => s.StartAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<decimal>()), Times.Never);
         }
 
@@ -484,7 +484,7 @@ namespace calendar_service.Tests
             var booking = ImplementedBooking();
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
             service.Setup(s => s.CompletePaymentAsync("bk-1", Caller, "txn-1")).ReturnsAsync(new Booking { Id = "bk-1", Status = Booking.StatusCompleted });
 
@@ -514,7 +514,7 @@ namespace calendar_service.Tests
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, objResult.StatusCode);
             // No card should ever be charged if the saga row couldn't be durably recorded first.
             paymentClient.Verify(c => c.ProcessPaymentAsync(
-                It.IsAny<CreditCardInfo>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+                It.IsAny<CreditCardInfo>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
@@ -532,7 +532,7 @@ namespace calendar_service.Tests
 
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ThrowsAsync(new PaymentServiceUnavailableException("payment-service unreachable"));
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
@@ -556,7 +556,7 @@ namespace calendar_service.Tests
 
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = "DECLINED" });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
@@ -577,7 +577,7 @@ namespace calendar_service.Tests
 
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 999m, Status = PaymentTransactionResult.StatusApproved });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
@@ -598,7 +598,7 @@ namespace calendar_service.Tests
 
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
             paymentClient
-                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = PaymentTransactionResult.StatusApproved });
             service.Setup(s => s.CompletePaymentAsync("bk-1", Caller, "txn-1"))
                 .ThrowsAsync(new InvalidOperationException("Booking is COMPLETED and cannot be paid"));

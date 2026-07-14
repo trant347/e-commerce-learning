@@ -412,7 +412,8 @@ namespace calendar_service.Controllers
             PaymentTransactionResult transaction;
             try
             {
-                transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted, saga.SagaId);
+                transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted, saga.SagaId,
+                    payerUserId: caller, payeeUserId: booking.TaskMasterUsername);
             }
             catch (PaymentServiceUnavailableException ex)
             {

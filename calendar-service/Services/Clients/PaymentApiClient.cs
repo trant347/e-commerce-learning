@@ -38,6 +38,16 @@ namespace calendar_service.Services.Clients
         /// Idempotency key from the caller's SagaState (see PAYMENT_SAGA_SPEC.md). When supplied,
         /// payment-service dedupes retried requests with the same id instead of double-charging.
         /// </param>
+        /// <param name="payerUserId">
+        /// Username of the user being charged, used by payment-service's wallet-balance payment
+        /// simulation to decide whether the charge can be approved (see PAYMENT_SAGA_SPEC.md /
+        /// payment-service's WalletSimulationPaymentGateway). Optional; omitting it skips the
+        /// wallet-balance check on payment-service's side.
+        /// </param>
+        /// <param name="payeeUserId">
+        /// Username of the user receiving the funds (e.g. the TaskMaster being paid). Optional;
+        /// when supplied and the charge is approved, payment-service credits this user's wallet.
+        /// </param>
         /// <exception cref="PaymentServiceUnavailableException">
         /// payment-service could not be reached, or returned an unexpected non-success status.
         /// Distinct from "the charge was actually declined" (that's reflected in the returned
@@ -46,7 +56,7 @@ namespace calendar_service.Services.Clients
         /// a confirmed failure. See BookingController.Pay, which leaves the saga STARTED for the
         /// reconciliation job to resolve authoritatively via <see cref="GetTransactionBySagaIdAsync"/>.
         /// </exception>
-        Task<PaymentTransactionResult> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null);
+        Task<PaymentTransactionResult> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null, string? payerUserId = null, string? payeeUserId = null);
 
         /// <summary>
         /// Calls payment-service's <c>GET /api/payment/transaction/{sagaId}</c> so the saga
@@ -84,7 +94,7 @@ namespace calendar_service.Services.Clients
             _logger = logger;
         }
 
-        public async Task<PaymentTransactionResult> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null)
+        public async Task<PaymentTransactionResult> ProcessPaymentAsync(CreditCardInfo card, decimal amount, CancellationToken ct, Guid? sagaId = null, string? payerUserId = null, string? payeeUserId = null)
         {
             HttpResponseMessage resp;
             try
@@ -100,7 +110,9 @@ namespace calendar_service.Services.Clients
                     },
                     amount,
                     currency = "USD",
-                    sagaId
+                    sagaId,
+                    payerUserId,
+                    payeeUserId
                 };
 
                 resp = await _http.PostAsJsonAsync("/api/payment/process", payload, ct);
