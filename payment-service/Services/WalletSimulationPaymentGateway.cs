@@ -83,7 +83,30 @@ namespace payment_service.Services
 
         private async Task<UserWallet> GetOrCreateWalletAsync(string userId, CancellationToken ct)
         {
-            var wallet = await _dbContext.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, ct);
+            UserWallet? wallet;
+            if (_dbContext.Database.IsRelational())
+            {
+                // Pessimistic row lock: SELECT ... FOR UPDATE blocks any other transaction from
+                // reading-for-update or writing this same wallet row until PaymentService's
+                // surrounding transaction commits or rolls back. Without this, two concurrent
+                // charges against the same wallet could both read the same balance, both pass
+                // the "can afford it" check below, and both deduct — driving the balance
+                // negative (or worse, racing each other's writes). Requires an ambient
+                // transaction to actually hold the lock across statements; see
+                // PaymentService.ProcessPaymentAsync, which begins one before calling the
+                // gateway.
+                wallet = await _dbContext.Wallets
+                    .FromSqlInterpolated($"SELECT * FROM user_wallets WHERE \"UserId\" = {userId} FOR UPDATE")
+                    .SingleOrDefaultAsync(ct);
+            }
+            else
+            {
+                // The in-memory provider (used by unit tests) doesn't support raw SQL/row
+                // locking; tests don't exercise concurrent requests against the same DbContext
+                // anyway, so a plain read is sufficient there.
+                wallet = await _dbContext.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, ct);
+            }
+
             if (wallet != null)
             {
                 return wallet;

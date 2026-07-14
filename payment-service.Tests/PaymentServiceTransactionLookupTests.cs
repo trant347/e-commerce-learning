@@ -37,11 +37,14 @@ namespace payment_service.Tests
             SagaId = sagaId
         };
 
+        private static PaymentService NewService(PaymentDbContext dbContext) =>
+            new(dbContext, new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance), NullLogger<PaymentService>.Instance);
+
         [Fact]
         public async Task GetTransactionBySagaIdAsync_KnownSagaId_ReturnsTransaction()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
             var sagaId = Guid.NewGuid();
             var processed = await service.ProcessPaymentAsync(NewRequest(30m, sagaId));
 
@@ -55,7 +58,7 @@ namespace payment_service.Tests
         public async Task GetTransactionBySagaIdAsync_UnknownSagaId_ReturnsNull()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
 
             var found = await service.GetTransactionBySagaIdAsync(Guid.NewGuid());
 

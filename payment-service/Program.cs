@@ -21,6 +21,8 @@ builder.Services.AddDbContext<PaymentDbContext>(options =>
     options.UseNpgsql(connectionString);
 });
 builder.Services.AddScoped<IPaymentService, payment_service.Services.PaymentService>();
+builder.Services.AddScoped<payment_service.Services.IPaymentGateway, payment_service.Services.WalletSimulationPaymentGateway>();
+builder.Services.AddScoped<payment_service.Services.IWalletService, payment_service.Services.WalletService>();
 
 // Consul service discovery
 builder.Services.Configure<payment_service.ConsulConfig.ConsulConfig>(builder.Configuration.GetSection("ConsulConfig"));

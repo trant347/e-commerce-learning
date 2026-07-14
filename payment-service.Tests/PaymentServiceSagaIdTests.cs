@@ -40,11 +40,14 @@ namespace payment_service.Tests
             SagaId = sagaId
         };
 
+        private static PaymentService NewService(PaymentDbContext dbContext) =>
+            new(dbContext, new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance), NullLogger<PaymentService>.Instance);
+
         [Fact]
         public async Task ProcessPaymentAsync_WithNewSagaId_CreatesTransactionAndPersistsSagaId()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
             var sagaId = Guid.NewGuid();
 
             var transaction = await service.ProcessPaymentAsync(NewRequest(50m, sagaId));
@@ -57,7 +60,7 @@ namespace payment_service.Tests
         public async Task ProcessPaymentAsync_RetriedWithSameSagaId_DedupesInsteadOfDoubleCharging()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
             var sagaId = Guid.NewGuid();
 
             var first = await service.ProcessPaymentAsync(NewRequest(75m, sagaId));
@@ -71,7 +74,7 @@ namespace payment_service.Tests
         public async Task ProcessPaymentAsync_WithoutSagaId_AlwaysCreatesNewTransaction()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
 
             var first = await service.ProcessPaymentAsync(NewRequest(20m, null));
             var second = await service.ProcessPaymentAsync(NewRequest(20m, null));

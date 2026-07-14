@@ -8,11 +8,13 @@ namespace payment_service.Services
     public class PaymentService : IPaymentService
     {
         private readonly PaymentDbContext _dbContext;
+        private readonly IPaymentGateway _gateway;
         private readonly ILogger<PaymentService> _logger;
 
-        public PaymentService(PaymentDbContext dbContext, ILogger<PaymentService> logger)
+        public PaymentService(PaymentDbContext dbContext, IPaymentGateway gateway, ILogger<PaymentService> logger)
         {
             _dbContext = dbContext;
+            _gateway = gateway;
             _logger = logger;
         }
 
@@ -33,30 +35,31 @@ namespace payment_service.Services
                 }
             }
 
-            // NOTE: This is a placeholder for real payment processing (e.g. calling out to a
-            // payment gateway). It always approves the payment and persists a record, EXCEPT
-            // for a reserved "magic" test card number (see IsSimulatedDeclineCard) that lets
-            // developers deterministically trigger a DECLINED response — e.g. to exercise
-            // BookingController.Pay's decline handling or the reconciliation job's
-            // declined/mismatch branch — without a debugger or real payment gateway.
-            // Round explicitly (banker's rounding, matching the numeric(18,2) column) so the
-            // value returned to the caller always matches exactly what was persisted.
+            // Wrap the whole charge (wallet check/debit/credit) + record write in one explicit
+            // transaction, so the payment record and wallet movement are committed atomically
+            // and consistently (ACID). This also gives the gateway's row lock (see
+            // WalletSimulationPaymentGateway) an actual transaction to hold the lock within —
+            // without one, two concurrent charges against the same wallet could both read the
+            // same balance, both pass the "can afford it" check, and both deduct.
+            await using var dbTransaction = await _dbContext.Database.BeginTransactionAsync();
+
+            // The actual "will this charge succeed" decision (and any money movement it implies)
+            // is delegated to the gateway (see IPaymentGateway/WalletSimulationPaymentGateway),
+            // so a real payment processor could be swapped in later without touching this
+            // orchestration/persistence logic. Round explicitly (banker's rounding, matching the
+            // numeric(18,2) column) so the value returned to the caller always matches exactly
+            // what was persisted.
+            var gatewayResult = await _gateway.ChargeAsync(request);
             var transaction = new PaymentTransaction
             {
                 Amount = Math.Round(request.Amount, 2, MidpointRounding.ToEven),
                 Currency = request.Currency,
                 MaskedCardNumber = MaskCardNumber(request.CreditCard.CardNumber),
                 OwnerName = request.CreditCard.OwnerName,
-                Status = IsSimulatedDeclineCard(request.CreditCard.CardNumber)
-                    ? PaymentTransaction.StatusDeclined
-                    : PaymentTransaction.StatusApproved,
+                Status = gatewayResult.Status,
                 SagaId = request.SagaId
             };
 
-            // Wrap the write in an explicit transaction so the payment record is committed
-            // atomically and consistently (ACID), even once additional writes (e.g. ledger
-            // entries) are added alongside it in the future.
-            await using var dbTransaction = await _dbContext.Database.BeginTransactionAsync();
             _dbContext.Transactions.Add(transaction);
             try
             {
@@ -87,16 +90,12 @@ namespace payment_service.Services
         }
 
         /// <summary>
-        /// Dev/testing-only "magic" card number (mirrors the convention used by real payment
-        /// gateways' sandbox test cards) that deterministically simulates a declined charge, so
-        /// the booking-payment saga's decline handling (see BookingController.Pay,
-        /// SagaReconciliationWorker) can be exercised via a normal HTTP request instead of a
-        /// debugger. Not a secret — documented here and in PAYMENT_SAGA_SPEC.md.
+        /// Dev/testing-only "magic" test card number that deterministically simulates a
+        /// declined charge. Kept here as a forwarding alias to
+        /// <see cref="WalletSimulationPaymentGateway.SimulatedDeclineCardNumber"/> for existing
+        /// callers/tests; the actual decline decision now lives in the gateway.
         /// </summary>
-        public const string SimulatedDeclineCardNumber = "4000000000000002";
-
-        private static bool IsSimulatedDeclineCard(string cardNumber) =>
-            cardNumber == SimulatedDeclineCardNumber;
+        public const string SimulatedDeclineCardNumber = WalletSimulationPaymentGateway.SimulatedDeclineCardNumber;
 
         private static string MaskCardNumber(string cardNumber)
         {

@@ -39,11 +39,14 @@ namespace payment_service.Tests
             SagaId = sagaId
         };
 
+        private static PaymentService NewService(PaymentDbContext dbContext) =>
+            new(dbContext, new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance), NullLogger<PaymentService>.Instance);
+
         [Fact]
         public async Task ProcessPaymentAsync_WithSimulatedDeclineCard_ReturnsDeclinedTransaction()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
 
             var transaction = await service.ProcessPaymentAsync(NewRequest(PaymentService.SimulatedDeclineCardNumber));
 
@@ -56,7 +59,7 @@ namespace payment_service.Tests
         public async Task ProcessPaymentAsync_WithOrdinaryCard_ReturnsApprovedTransaction()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new PaymentService(dbContext, NullLogger<PaymentService>.Instance);
+            var service = NewService(dbContext);
 
             var transaction = await service.ProcessPaymentAsync(NewRequest("4111111111111111"));
 
