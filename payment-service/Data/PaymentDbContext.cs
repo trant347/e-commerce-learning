@@ -10,6 +10,7 @@ namespace payment_service.Data
         }
 
         public DbSet<PaymentTransaction> Transactions => Set<PaymentTransaction>();
+        public DbSet<UserWallet> Wallets => Set<UserWallet>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -26,6 +27,16 @@ namespace payment_service.Data
                     .IsUnique()
                     .HasFilter("\"SagaId\" IS NOT NULL")
                     .HasDatabaseName("IX_payment_transactions_saga_id");
+            });
+
+            modelBuilder.Entity<UserWallet>(entity =>
+            {
+                entity.ToTable("user_wallets");
+                entity.HasKey(w => w.UserId);
+                entity.Property(w => w.Balance).HasColumnType("numeric(18,2)");
+                // Enforce non-negative balances at the database level as well as in app code —
+                // a wallet must never be driven below zero by a race between concurrent charges.
+                entity.ToTable(t => t.HasCheckConstraint("CK_user_wallets_balance_non_negative", "\"Balance\" >= 0"));
             });
         }
     }
