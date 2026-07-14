@@ -17,6 +17,7 @@ public class UserEventPublisher {
 
     public static final String TOPIC = "user-events";
     public static final String USER_DELETED = "USER_DELETED";
+    public static final String USER_REGISTERED = "USER_REGISTERED";
 
     private static final Logger logger = LoggerFactory.getLogger(UserEventPublisher.class);
 
@@ -51,6 +52,35 @@ public class UserEventPublisher {
             logger.info("Published USER_DELETED for username='{}'", username);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish USER_DELETED event for " + username, e);
+        }
+    }
+
+    /**
+     * Publish synchronously: blocks until the broker ack. Unlike publishUserDeleted, callers
+     * (see UserController.createUser) treat a failure here as best-effort — a lost/undelivered
+     * USER_REGISTERED event only means payment-service's wallet-creation consumer misses this
+     * user, and payment-service's own lazy wallet-creation safety net (see
+     * WalletSimulationPaymentGateway) covers that gap on the user's first charge, so it should
+     * not block registration itself.
+     */
+    public void publishUserRegistered(String username) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", USER_REGISTERED);
+        payload.put("username", username);
+        payload.put("registeredAt", Instant.now().toString());
+
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialise user-event", e);
+        }
+
+        try {
+            kafkaTemplate.send(TOPIC, username, json).get();
+            logger.info("Published USER_REGISTERED for username='{}'", username);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to publish USER_REGISTERED event for " + username, e);
         }
     }
 }

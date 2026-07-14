@@ -87,6 +87,17 @@ public class UserController {
         }
 
         User createdUser = userRepository.save(user);
+
+        // Best-effort: publish so payment-service can create this user's wallet (see
+        // UserRegisteredConsumerWorker). Not fatal if it fails — payment-service lazily
+        // creates a wallet on first charge as a safety net (see
+        // WalletSimulationPaymentGateway), so we don't want a Kafka outage to block registration.
+        try {
+            userEventPublisher.publishUserRegistered(createdUser.getUsername());
+        } catch (Exception e) {
+            logger.error("Failed to publish USER_REGISTERED event for '{}'", createdUser.getUsername(), e);
+        }
+
         return new ResponseEntity<>(createdUser, HttpStatus.OK);
     }
 
