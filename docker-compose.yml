@@ -220,6 +220,7 @@ services:
     - ConsulConfig__ServiceAddress=payment-service # IMPORTANT: This is the service name *within* the Docker network
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
     - ConsulConfig__HealthCheckUrl=http://payment-service:8080/health
+    - KafkaConsumerConfig__BootstrapServers=kafka:29092
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # - OTEL_SERVICE_NAME=payment-service
@@ -228,6 +229,8 @@ services:
     depends_on:
     - postgres-payments
     - consul
+    - kafka-init
+    - kafka
     # - otel-collector
     restart: unless-stopped
 
