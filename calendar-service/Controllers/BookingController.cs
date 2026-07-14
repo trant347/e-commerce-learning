@@ -435,8 +435,11 @@ namespace calendar_service.Controllers
             }
             if (!string.Equals(transaction.Status, PaymentTransactionResult.StatusApproved, StringComparison.OrdinalIgnoreCase))
             {
-                await _sagaStateService.FailAsync(saga.SagaId, "Payment was declined");
-                return StatusCode(402, new { error = "Payment was declined" });
+                var declineMessage = string.IsNullOrWhiteSpace(transaction.DeclineReason)
+                    ? "Payment was declined"
+                    : $"Payment was declined: {transaction.DeclineReason}";
+                await _sagaStateService.FailAsync(saga.SagaId, declineMessage);
+                return StatusCode(402, new { error = declineMessage });
             }
             if (transaction.Amount != booking.InvoiceAmount.Value)
             {

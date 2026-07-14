@@ -35,6 +35,14 @@ namespace payment_service.Models
         public string Status { get; set; } = StatusApproved;
 
         /// <summary>
+        /// Human-readable reason for a decline (e.g. "Insufficient balance"), surfaced to the
+        /// caller so it can show a clearer error than a generic "Payment was declined". Null
+        /// for approved transactions.
+        /// </summary>
+        [MaxLength(200)]
+        public string? DeclineReason { get; set; }
+
+        /// <summary>
         /// Idempotency key from the caller's saga, if supplied. Unique when present so a
         /// retried request with the same SagaId can be detected and deduped instead of
         /// double-charging (see PAYMENT_SAGA_SPEC.md, migration step 2).

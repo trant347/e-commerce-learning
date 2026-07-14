@@ -72,6 +72,9 @@ namespace payment_service.Tests
             Assert.Equal(PaymentTransaction.StatusDeclined, result.Status);
             Assert.Equal(100m, (await dbContext.Wallets.SingleAsync(w => w.UserId == "alice")).Balance);
             Assert.Equal(1000m, (await dbContext.Wallets.SingleAsync(w => w.UserId == "bob")).Balance);
+            Assert.NotNull(result.DeclineReason);
+            Assert.Contains("100.00", result.DeclineReason);
+            Assert.Contains("300.00", result.DeclineReason);
         }
 
         [Fact]

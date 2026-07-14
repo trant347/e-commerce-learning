@@ -64,7 +64,8 @@ namespace payment_service.Services
                 return new PaymentGatewayResult
                 {
                     Status = PaymentTransaction.StatusDeclined,
-                    DeclineReason = "Insufficient balance"
+                    DeclineReason = $"Insufficient balance (your balance is {payerWallet.Balance:F2} {request.Currency}, " +
+                        $"but the charge is {request.Amount:F2} {request.Currency})"
                 };
             }
 

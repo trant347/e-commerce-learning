@@ -57,6 +57,7 @@ namespace payment_service.Services
                 MaskedCardNumber = MaskCardNumber(request.CreditCard.CardNumber),
                 OwnerName = request.CreditCard.OwnerName,
                 Status = gatewayResult.Status,
+                DeclineReason = gatewayResult.DeclineReason,
                 SagaId = request.SagaId
             };
 

@@ -98,19 +98,46 @@ describe('PageHeader — wallet balance', () => {
         getBalanceMock.mockReset();
     });
 
-    test('shows the wallet balance fetched from WalletServices', async () => {
+    test('fetches and shows the wallet balance when the dropdown is opened', async () => {
         getBalanceMock.mockResolvedValue({ userId: 'carol', balance: 875.5, createdAt: '', updatedAt: '' });
 
         renderHeader('carol');
+
+        expect(getBalanceMock).not.toHaveBeenCalled();
+
+        fireEvent.mouseOver(screen.getByText('carol'));
 
         await waitFor(() => {
             expect(getBalanceMock).toHaveBeenCalledWith('carol');
         });
 
+        await waitFor(() => {
+            expect(screen.getByText(/Balance: \$875\.50/)).toBeInTheDocument();
+        });
+    });
+
+    test('re-fetches the balance on every dropdown open, reflecting recent payments', async () => {
+        getBalanceMock.mockResolvedValueOnce({ userId: 'carol', balance: 1000, createdAt: '', updatedAt: '' });
+
+        renderHeader('carol');
+
         fireEvent.mouseOver(screen.getByText('carol'));
 
         await waitFor(() => {
-            expect(screen.getByText(/Balance: \$875\.50/)).toBeInTheDocument();
+            expect(screen.getByText(/Balance: \$1000\.00/)).toBeInTheDocument();
+        });
+
+        getBalanceMock.mockResolvedValueOnce({ userId: 'carol', balance: 850, createdAt: '', updatedAt: '' });
+
+        fireEvent.mouseLeave(screen.getByText('carol'));
+        fireEvent.mouseOver(screen.getByText('carol'));
+
+        await waitFor(() => {
+            expect(getBalanceMock).toHaveBeenCalledTimes(2);
+        });
+
+        await waitFor(() => {
+            expect(screen.getByText(/Balance: \$850\.00/)).toBeInTheDocument();
         });
     });
 
@@ -119,11 +146,11 @@ describe('PageHeader — wallet balance', () => {
 
         renderHeader('dave');
 
+        fireEvent.mouseOver(screen.getByText('dave'));
+
         await waitFor(() => {
             expect(getBalanceMock).toHaveBeenCalledWith('dave');
         });
-
-        fireEvent.mouseOver(screen.getByText('dave'));
 
         await waitFor(() => {
             expect(screen.getByText('My Profile')).toBeInTheDocument();

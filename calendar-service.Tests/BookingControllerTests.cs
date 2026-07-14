@@ -569,6 +569,30 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public async Task Pay_WhenPaymentDeclinedWithReason_IncludesReasonInErrorMessage()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = DefaultSagaStateServiceMock();
+
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(ImplementedBooking());
+            paymentClient
+                .Setup(c => c.ProcessPaymentAsync(It.IsAny<CreditCardInfo>(), 100m, It.IsAny<CancellationToken>(), It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync(new PaymentTransactionResult { Id = "txn-1", Amount = 100m, Status = "DECLINED", DeclineReason = "Insufficient balance (your balance is 50.00 USD, but the charge is 100.00 USD)" });
+
+            var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(),
+                paymentClient: paymentClient, sagaStateService: sagaState);
+            var result = await ctrl.Pay("bk-1", ValidPayDto());
+
+            var objResult = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(402, objResult.StatusCode);
+            var error = objResult.Value?.GetType().GetProperty("error")?.GetValue(objResult.Value) as string;
+            Assert.Contains("Insufficient balance", error);
+            Assert.Contains("50.00", error);
+            sagaState.Verify(s => s.FailAsync(It.IsAny<Guid>(), It.Is<string>(r => r.Contains("Insufficient balance"))), Times.Once);
+        }
+
+        [Fact]
         public async Task Pay_WhenAmountMismatch_FailsSaga_Returns402()
         {
             var service = new Mock<IBookingService>();

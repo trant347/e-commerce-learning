@@ -71,13 +71,19 @@ export default function(props) {
 
         // Simulated wallet balance (see PAYMENT_SAGA_SPEC.md / WalletSimulationPaymentGateway),
         // shown in the account dropdown so the user knows how much they have available to spend.
+        // Fetched on every dropdown open (rather than once on mount) so the balance reflects
+        // payments made since the header was first rendered, without requiring a page refresh.
         const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
-        useEffect(() => {
+        const refreshWalletBalance = () => {
             if (!username) { setWalletBalance(null); return; }
             WalletServices.getBalance(username)
                 .then(wallet => setWalletBalance(wallet ? wallet.balance : null))
                 .catch(() => setWalletBalance(null));
+        };
+
+        useEffect(() => {
+            setWalletBalance(null);
         }, [username]);
 
         // Increment badge in real-time when a new application arrives via SSE
@@ -127,7 +133,7 @@ export default function(props) {
                                     ?
                                         <SignInOrJoinPopUp showLoginPopup={showLoginPopup}/>
                                     :
-                                    <Popup trigger={<a> <i className="user icon"></i> {username} </a>} hoverable>                                        
+                                    <Popup trigger={<a> <i className="user icon"></i> {username} </a>} hoverable onOpen={refreshWalletBalance}>                                        
                                          <Menu vertical className="borderless" 
                                                 style={{
                                                     border: "none",

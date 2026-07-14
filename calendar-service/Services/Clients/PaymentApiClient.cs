@@ -22,6 +22,9 @@ namespace calendar_service.Services.Clients
         public string OwnerName { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
 
+        /// <summary>Human-readable reason for a decline (e.g. "Insufficient balance"), if any.</summary>
+        public string? DeclineReason { get; set; }
+
         /// <summary>Idempotency key echoed back by payment-service, if one was sent.</summary>
         public Guid? SagaId { get; set; }
     }
