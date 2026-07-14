@@ -23,6 +23,7 @@ builder.Services.AddDbContext<PaymentDbContext>(options =>
 builder.Services.AddScoped<IPaymentService, payment_service.Services.PaymentService>();
 builder.Services.AddScoped<payment_service.Services.IPaymentGateway, payment_service.Services.WalletSimulationPaymentGateway>();
 builder.Services.AddScoped<payment_service.Services.IWalletService, payment_service.Services.WalletService>();
+builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
 
 // Consul service discovery
 builder.Services.Configure<payment_service.ConsulConfig.ConsulConfig>(builder.Configuration.GetSection("ConsulConfig"));
