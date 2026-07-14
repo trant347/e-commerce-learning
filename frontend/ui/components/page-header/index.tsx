@@ -21,6 +21,7 @@ import styled from 'styled-components';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { useNotifications } from '../../hooks/useNotifications';
 import { TaskMasterServices } from '../../api/taskMasterServices';
+import { WalletServices } from '../../api/walletServices';
 
 const StyledNav = styled.nav`
     padding-left: 10%;
@@ -66,6 +67,17 @@ export default function(props) {
             TaskMasterServices.getMyTaskMaster()
                 .then(tm => setIsTaskMaster(tm != null))
                 .catch(() => setIsTaskMaster(false));
+        }, [username]);
+
+        // Simulated wallet balance (see PAYMENT_SAGA_SPEC.md / WalletSimulationPaymentGateway),
+        // shown in the account dropdown so the user knows how much they have available to spend.
+        const [walletBalance, setWalletBalance] = useState<number | null>(null);
+
+        useEffect(() => {
+            if (!username) { setWalletBalance(null); return; }
+            WalletServices.getBalance(username)
+                .then(wallet => setWalletBalance(wallet ? wallet.balance : null))
+                .catch(() => setWalletBalance(null));
         }, [username]);
 
         // Increment badge in real-time when a new application arrives via SSE
@@ -127,6 +139,12 @@ export default function(props) {
                                                 >
                                                  <StyledLinkHovered onClick={() => navigate('/profile')}> My Profile </StyledLinkHovered>                                       
                                             </Menu.Item>
+
+                                            {walletBalance != null && (
+                                                <Menu.Item name='wallet-balance' disabled>
+                                                    <i className="dollar sign icon" /> Balance: ${walletBalance.toFixed(2)}
+                                                </Menu.Item>
+                                            )}
 
                                             {isTaskMaster && (
                                                 <Menu.Item name='incoming-bookings'>

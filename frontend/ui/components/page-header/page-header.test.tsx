@@ -1,4 +1,4 @@
-import { render, waitFor, screen } from '@testing-library/react';
+import { render, waitFor, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -9,6 +9,12 @@ import ApplicationBadgeContext from '../../context/applicationBadgeContext';
 jest.mock('../../api/taskMasterServices', () => ({
     TaskMasterServices: {
         getMyTaskMaster: jest.fn(),
+    },
+}));
+
+jest.mock('../../api/walletServices', () => ({
+    WalletServices: {
+        getBalance: jest.fn(),
     },
 }));
 
@@ -24,9 +30,11 @@ jest.mock('../../hooks/useNotifications', () => ({
 }));
 
 import { TaskMasterServices } from '../../api/taskMasterServices';
+import { WalletServices } from '../../api/walletServices';
 import PageHeader from './index';
 
 const getMyTaskMasterMock = TaskMasterServices.getMyTaskMaster as jest.Mock;
+const getBalanceMock = WalletServices.getBalance as jest.Mock;
 
 function renderHeader(username: string | null) {
     return render(
@@ -47,6 +55,8 @@ function renderHeader(username: string | null) {
 describe('PageHeader — Apply for TaskMaster link', () => {
     beforeEach(() => {
         getMyTaskMasterMock.mockReset();
+        getBalanceMock.mockReset();
+        getBalanceMock.mockResolvedValue(null);
     });
 
     test('is a disabled, non-clickable label when the user is already a TaskMaster', async () => {
@@ -78,5 +88,47 @@ describe('PageHeader — Apply for TaskMaster link', () => {
         await waitFor(() => {
             expect(screen.getByRole('link', { name: /apply for taskmaster/i })).toBeInTheDocument();
         });
+    });
+});
+
+describe('PageHeader — wallet balance', () => {
+    beforeEach(() => {
+        getMyTaskMasterMock.mockReset();
+        getMyTaskMasterMock.mockResolvedValue(null);
+        getBalanceMock.mockReset();
+    });
+
+    test('shows the wallet balance fetched from WalletServices', async () => {
+        getBalanceMock.mockResolvedValue({ userId: 'carol', balance: 875.5, createdAt: '', updatedAt: '' });
+
+        renderHeader('carol');
+
+        await waitFor(() => {
+            expect(getBalanceMock).toHaveBeenCalledWith('carol');
+        });
+
+        fireEvent.mouseOver(screen.getByText('carol'));
+
+        await waitFor(() => {
+            expect(screen.getByText(/Balance: \$875\.50/)).toBeInTheDocument();
+        });
+    });
+
+    test('does not show a balance line when the wallet lookup fails or returns none', async () => {
+        getBalanceMock.mockResolvedValue(null);
+
+        renderHeader('dave');
+
+        await waitFor(() => {
+            expect(getBalanceMock).toHaveBeenCalledWith('dave');
+        });
+
+        fireEvent.mouseOver(screen.getByText('dave'));
+
+        await waitFor(() => {
+            expect(screen.getByText('My Profile')).toBeInTheDocument();
+        });
+
+        expect(screen.queryByText(/Balance:/)).not.toBeInTheDocument();
     });
 });

@@ -16,6 +16,10 @@ var endpoints = {
         address: "notification-service",
         port: 8080
     },
+    "payment-service": {
+        address: "payment-service",
+        port: 8080
+    },
     "ai-assistant-service": {
         address: "ai-assistant-service",
         port: 8080
