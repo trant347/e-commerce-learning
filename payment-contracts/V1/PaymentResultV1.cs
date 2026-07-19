@@ -10,6 +10,9 @@ public sealed record PaymentResultV1
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public required Guid SagaId { get; init; }
+    public required Guid EscrowId { get; init; }
+    public required string BookingId { get; init; }
+    public required string Operation { get; init; }
     public required Guid TransactionId { get; init; }
     public required decimal Amount { get; init; }
     public required string Currency { get; init; }
