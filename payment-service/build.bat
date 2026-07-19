@@ -1,1 +1,1 @@
-docker build -t payment-service:latest .
+docker build -f Dockerfile .. -t payment-service:latest

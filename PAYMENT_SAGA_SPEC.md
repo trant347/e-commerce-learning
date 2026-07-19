@@ -191,3 +191,141 @@ Each step below is only considered done once its own automated test(s) are added
 4. Wrap the existing HTTP call in `CompletePaymentAsync` with saga-state writes (`STARTED` before, `COMPLETED`/`FAILED` after).
 5. Add the reconciliation job (startup pass first; periodic timer if needed per open question #3).
 6. **Only if/when scale demands it**: follow the Appendix's migration path to Kafka-mediated orchestration.
+
+## TODO: migrate `/pay` to asynchronous Kafka orchestration
+
+Implement these tasks in order. Keep the current synchronous HTTP flow available behind an
+`AsyncPaymentsEnabled` feature flag until the asynchronous flow has been verified end to end.
+Every task must include at least one automated test before it is considered complete.
+
+### Task 1 — Define the message and HTTP contracts
+
+- [ ] Add versioned `PaymentRequestedV1` and `PaymentResultV1` contracts shared by their
+      respective producers and consumers.
+- [ ] Use `sagaId` as the Kafka message key and idempotency/correlation identifier.
+- [ ] Include `bookingId`, amount, currency, payer, payee, and a payment-method token in
+      `PaymentRequestedV1`.
+- [ ] Include `sagaId`, transaction id, amount, currency, status, and optional decline reason in
+      `PaymentResultV1`.
+- [ ] Define the new `/pay` response as `202 Accepted` with `sagaId`, `PENDING` status, and a
+      status URL.
+- [ ] Add serialization/compatibility tests for both V1 contracts.
+
+Do not put a raw card number or CVV in Kafka. The contract version is for safe schema evolution;
+it is unrelated to database optimistic concurrency.
+
+### Task 2 — Introduce payment-method tokenization
+
+- [ ] Replace raw card details in the asynchronous `/pay` request with a short-lived,
+      single-use payment-method token.
+- [ ] For the current simulation, add a tokenization boundary that validates the submitted card
+      and returns an opaque token. A real deployment should use the payment provider's frontend
+      SDK instead.
+- [ ] Ensure logs, saga documents, outbox records, and Kafka messages never contain raw card
+      numbers or CVVs.
+- [ ] Add tests for valid, invalid, expired, and reused tokens.
+
+### Task 3 — Make saga creation a durable enqueue operation
+
+- [ ] Extend `SagaState` with the payment request, dispatch status, attempt count, next-attempt
+      time, and dispatch timestamps so the saga document also acts as the request outbox.
+- [ ] Atomically prevent more than one active payment saga for the same booking.
+- [ ] Persist the `STARTED` saga and pending request before attempting to publish anything.
+- [ ] Return `503` without publishing when the saga/outbox write fails.
+- [ ] Add tests for persistence failure and concurrent `/pay` requests for the same booking.
+
+Keeping the pending command in the saga document permits an atomic single-document Mongo write
+without requiring multi-document transactions on the current standalone Mongo deployment.
+
+### Task 4 — Change `/pay` to return immediately
+
+- [ ] When `AsyncPaymentsEnabled` is true, validate the request, create the durable saga request,
+      and return `202 Accepted` without calling `IPaymentApiClient.ProcessPaymentAsync`.
+- [ ] Preserve the current authorization, booking status, amount, and duplicate-payment checks.
+- [ ] Keep the synchronous implementation as the disabled-feature fallback during rollout.
+- [ ] Add controller tests proving `/pay` returns the saga id and does not wait for or call
+      payment-service.
+
+### Task 5 — Publish pending payment requests from calendar-service
+
+- [ ] Add a `PaymentRequestOutboxWorker` that claims undispatched saga requests and publishes
+      them to the `payment-requests` topic.
+- [ ] Publish camel-case JSON, set `sagaId` as the message key, and propagate `traceparent`.
+- [ ] Mark a request dispatched only after Kafka acknowledges publication.
+- [ ] Retry publication failures with bounded exponential backoff and a claim lease so another
+      calendar-service replica can recover abandoned work.
+- [ ] Add tests for successful dispatch, Kafka failure, retry, and duplicate publication.
+
+### Task 6 — Consume payment requests in payment-service
+
+- [ ] Add a `PaymentRequestConsumerWorker` using a dedicated consumer group and manual offset
+      commits.
+- [ ] Validate the schema version and required fields before processing.
+- [ ] Redeem the payment-method token and call the existing payment processing logic.
+- [ ] Preserve the unique `SagaId` constraint so duplicate Kafka deliveries return the original
+      transaction rather than charging again.
+- [ ] Commit the Kafka offset only after the database transaction succeeds.
+- [ ] Add tests for approved, declined, malformed, unsupported-version, and duplicate events.
+
+The payment transaction remains append-only, so a database `Version` column is not required at
+this stage. Add optimistic concurrency only if multiple workers later update the same transaction
+through a mutable status state machine.
+
+### Task 7 — Add a transactional payment-result outbox
+
+- [ ] Add a PostgreSQL `payment_result_outbox` table.
+- [ ] Insert the payment transaction, wallet changes, and result-outbox row in the same database
+      transaction.
+- [ ] Add a worker that publishes undispatched rows to `payment-results` and marks them dispatched
+      only after Kafka acknowledgement.
+- [ ] Make result publication retryable and idempotent.
+- [ ] Add tests proving a rollback cannot leave wallet changes without a transaction/result, and
+      that an unpublished result is republished after restart.
+
+### Task 8 — Consume payment results in calendar-service
+
+- [ ] Add a `PaymentResultConsumerWorker` with manual offset commits.
+- [ ] Validate `sagaId`, amount, currency, and transaction id against the stored saga.
+- [ ] For `APPROVED`, idempotently complete the booking and saga, then publish the existing
+      payment-received notification.
+- [ ] For `DECLINED`, mark the saga failed and leave the booking payable.
+- [ ] Ignore already-applied duplicate results without repeating booking or notification changes.
+- [ ] Leave recoverable failures uncommitted so Kafka can redeliver them.
+- [ ] Add tests for approved, declined, mismatched, duplicate, and out-of-order results.
+
+### Task 9 — Expose status and update the frontend
+
+- [ ] Add a payment-status endpoint that returns `PENDING`, `COMPLETED`, or `FAILED` for the saga
+      while enforcing booking ownership.
+- [ ] Update `BookingService.pay` to accept the `202` response.
+- [ ] Update `PayBooking.tsx` to show a durable pending state and poll the status endpoint with
+      bounded backoff.
+- [ ] On completion, show success and refresh the booking; on failure, show the decline reason
+      and permit a new attempt only after the previous saga is terminal.
+- [ ] Preserve pending behavior across page reloads using server state rather than only React
+      state.
+- [ ] Add frontend tests for pending, approved, declined, timeout, and reload scenarios.
+
+### Task 10 — Harden recovery and operations
+
+- [ ] Update reconciliation to distinguish requests that were never dispatched from requests
+      dispatched but not yet completed.
+- [ ] Do not mark a saga failed merely because Kafka or payment-service is temporarily
+      unavailable.
+- [ ] Add retry limits and dead-letter topics for permanently invalid request/result messages.
+- [ ] Add structured logs and metrics for pending saga age, outbox backlog, retries, DLQ count,
+      processing duration, and Kafka consumer lag.
+- [ ] Lock payer/payee wallets in deterministic user-id order to reduce deadlock risk under
+      concurrent asynchronous payments.
+- [ ] Add crash-recovery tests for failures before request publication, during payment
+      processing, before result publication, and during calendar result application.
+
+### Task 11 — Configure infrastructure and complete rollout
+
+- [ ] Add `payment-requests`, `payment-results`, and their DLQ topics to `kafka-init`.
+- [ ] Add topic, consumer group, retry, polling, and feature-flag configuration to both services
+      and `docker-compose.yml`.
+- [ ] Verify the complete flow with multiple service replicas and duplicate event delivery.
+- [ ] Enable asynchronous payments by default after the new path is stable.
+- [ ] Remove the synchronous payment-processing path and obsolete `IPaymentApiClient` methods
+      only after rollback support is no longer required.

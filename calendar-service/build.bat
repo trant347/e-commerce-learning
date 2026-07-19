@@ -1,1 +1,1 @@
-docker build --build-arg version=0.0.1-SNAPSHOT . -t calendar-service
+docker build --build-arg version=0.0.1-SNAPSHOT -f Dockerfile .. -t calendar-service

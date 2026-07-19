@@ -7,7 +7,7 @@
     <RootNamespace>calendar_service</RootNamespace>
     <UserSecretsId>33c19f37-b6e2-4e36-858d-1fc249184352</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>.</DockerfileContext>
+    <DockerfileContext>..</DockerfileContext>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +21,10 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.11.1" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\payment-contracts\payment-contracts.csproj" />
   </ItemGroup>
 
 </Project>

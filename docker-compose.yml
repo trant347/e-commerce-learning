@@ -211,8 +211,8 @@ services:
 
   payment-service:
     build:
-      context: ./payment-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: payment-service/Dockerfile
     image: payment-service:latest
     environment:
     - ConnectionStrings__Postgres=Host=postgres-payments;Port=5432;Database=paymentdb;Username=${PAYMENTS_DB_USER};Password=${PAYMENTS_DB_PASSWORD}
