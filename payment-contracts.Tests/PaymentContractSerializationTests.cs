@@ -40,6 +40,7 @@ public class PaymentContractSerializationTests
         Assert.Equal("pmt_opaque", root.GetProperty("paymentMethodToken").GetString());
         Assert.False(root.TryGetProperty("kafkaMessageKey", out _));
         Assert.Equal(sagaId.ToString("D"), message.KafkaMessageKey);
+        message.Validate();
     }
 
     [Fact]
@@ -90,6 +91,31 @@ public class PaymentContractSerializationTests
         var json = JsonSerializer.Serialize(message, PaymentContractJson.SerializerOptions);
 
         Assert.DoesNotContain("paymentMethodToken", json);
+        message.Validate();
+    }
+
+    [Theory]
+    [InlineData(PaymentOperation.FundEscrow, null)]
+    [InlineData(PaymentOperation.ReleaseEscrow, "pmt_not_allowed")]
+    [InlineData(PaymentOperation.RefundEscrow, "pmt_not_allowed")]
+    public void PaymentRequestedV1_InvalidOperationTokenCombination_IsRejected(
+        string operation,
+        string? paymentMethodToken)
+    {
+        var message = new PaymentRequestedV1
+        {
+            SagaId = Guid.NewGuid(),
+            EscrowId = Guid.NewGuid(),
+            BookingId = "booking-123",
+            Operation = operation,
+            Amount = 125.50m,
+            Currency = "USD",
+            PayerUserId = "alice",
+            PayeeUserId = "admin-escrow",
+            PaymentMethodToken = paymentMethodToken
+        };
+
+        Assert.Throws<ArgumentException>(message.Validate);
     }
 
     [Fact]

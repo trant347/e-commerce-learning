@@ -54,7 +54,7 @@ namespace payment_service.Services
             {
                 Amount = Math.Round(request.Amount, 2, MidpointRounding.ToEven),
                 Currency = request.Currency,
-                MaskedCardNumber = MaskCardNumber(request.CreditCard.CardNumber),
+                MaskedCardNumber = PaymentCardUtility.Mask(request.CreditCard.CardNumber),
                 OwnerName = request.CreditCard.OwnerName,
                 Status = gatewayResult.Status,
                 DeclineReason = gatewayResult.DeclineReason,
@@ -97,16 +97,6 @@ namespace payment_service.Services
         /// callers/tests; the actual decline decision now lives in the gateway.
         /// </summary>
         public const string SimulatedDeclineCardNumber = WalletSimulationPaymentGateway.SimulatedDeclineCardNumber;
-
-        private static string MaskCardNumber(string cardNumber)
-        {
-            if (string.IsNullOrEmpty(cardNumber) || cardNumber.Length <= 4)
-            {
-                return "****";
-            }
-
-            return new string('*', cardNumber.Length - 4) + cardNumber[^4..];
-        }
 
         public Task<PaymentTransaction?> GetTransactionBySagaIdAsync(Guid sagaId) =>
             _dbContext.Transactions.FirstOrDefaultAsync(t => t.SagaId == sagaId);

@@ -11,6 +11,7 @@ namespace payment_service.Data
 
         public DbSet<PaymentTransaction> Transactions => Set<PaymentTransaction>();
         public DbSet<UserWallet> Wallets => Set<UserWallet>();
+        public DbSet<PaymentMethodTokenRecord> PaymentMethodTokens => Set<PaymentMethodTokenRecord>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -37,6 +38,19 @@ namespace payment_service.Data
                 // Enforce non-negative balances at the database level as well as in app code —
                 // a wallet must never be driven below zero by a race between concurrent charges.
                 entity.ToTable(t => t.HasCheckConstraint("CK_user_wallets_balance_non_negative", "\"Balance\" >= 0"));
+            });
+
+            modelBuilder.Entity<PaymentMethodTokenRecord>(entity =>
+            {
+                entity.ToTable("payment_method_tokens");
+                entity.HasKey(token => token.Id);
+                entity.HasIndex(token => token.TokenHash)
+                    .IsUnique()
+                    .HasDatabaseName("IX_payment_method_tokens_token_hash");
+                entity.HasIndex(token => token.ExpiresAt)
+                    .HasDatabaseName("IX_payment_method_tokens_expires_at");
+                entity.HasIndex(token => token.RedeemedAt)
+                    .HasDatabaseName("IX_payment_method_tokens_redeemed_at");
             });
         }
     }

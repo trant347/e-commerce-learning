@@ -9,10 +9,30 @@ namespace payment_service.Controllers
     public class PaymentController : ControllerBase
     {
         private readonly IPaymentService _paymentService;
+        private readonly IPaymentMethodTokenService _paymentMethodTokens;
 
-        public PaymentController(IPaymentService paymentService)
+        public PaymentController(
+            IPaymentService paymentService,
+            IPaymentMethodTokenService paymentMethodTokens)
         {
             _paymentService = paymentService;
+            _paymentMethodTokens = paymentMethodTokens;
+        }
+
+        [HttpPost("tokenize")]
+        public async Task<IActionResult> TokenizePaymentMethod(
+            [FromBody] CreditCardInfo creditCard,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var token = await _paymentMethodTokens.TokenizeAsync(creditCard, cancellationToken);
+                return Ok(token);
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(new { error = exception.Message });
+            }
         }
 
         [HttpPost("process")]

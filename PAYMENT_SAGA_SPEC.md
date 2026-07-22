@@ -207,6 +207,92 @@ The target business flow is now **pay before work**:
 4. Uploading proof durably requests release of the escrow to the TaskMaster.
 5. A permitted cancellation durably requests a refund from escrow to the requester.
 
+### How tokenization and escrow fit together
+
+Tokenization and escrow solve different problems:
+
+- **Tokenization protects card data.** It replaces a raw card number/CVV with a short-lived opaque
+  reference before an asynchronous command is persisted or sent through Kafka.
+- **Escrow controls money ownership.** It records that a specific booking's funds are being held
+  for a specific TaskMaster, even though the actual money is temporarily included in the admin
+  custody wallet's aggregate balance.
+- **The saga/outbox provides delivery reliability.** It ensures a fund, release, or refund command
+  survives calendar-service crashes and Kafka outages.
+
+`POST /api/payment/tokenize` does **not** charge the requester, create an escrow, or change a
+booking. It only validates card details and creates a temporary payment-method token. `/pay`
+later consumes that token to start the asynchronous `FUND_ESCROW` operation.
+
+Target funding sequence:
+
+```text
+Payment UI             payment-service          calendar-service           Kafka/payment worker
+    | POST /tokenize        |                           |                           |
+    | raw card details ---->| validate + create token   |                           |
+    |<-- pmt_... + expiry --|                           |                           |
+    |                                                   |                           |
+    | POST /booking/{id}/pay { paymentMethodToken } --->|                           |
+    |                                                   | persist escrow + saga     |
+    |<-- 202 { sagaId, escrowId, statusUrl } ------------|                           |
+    |                                                   | publish FUND_ESCROW ----->|
+    |                                                   |                           | redeem token once
+    |                                                   |                           | requester -> admin
+    |                                                   |<---- payment result ------|
+    |                                                   | escrow -> FUNDED          |
+```
+
+The UI sends raw card details only to the tokenization boundary. The later `/pay` request,
+`SagaState`, outbox payload, Kafka message, and logs carry only the opaque
+`paymentMethodToken`.
+
+### Escrow accounting model
+
+The admin wallet is a **custody account**, not the escrow ledger. Its balance may contain money
+for many bookings, so a dedicated escrow row is required for each booking:
+
+| Field | Purpose |
+|---|---|
+| `EscrowId` | Stable identifier shared across fund, release, and refund operations |
+| `BookingId` | Enforces one escrow account per booking |
+| `Amount` / `Currency` | Immutable amount fixed before work begins |
+| `RequesterUserId` | User who funded the escrow and receives any refund |
+| `TaskMasterUserId` | Beneficiary when proof triggers release |
+| `CustodyUserId` | Explicitly configured admin wallet holding the aggregate funds |
+| `Status` | `PENDING`, `FUNDED`, `RELEASED`, or `REFUNDED` |
+| Transaction ids | Audit links for funding, release, and refund movements |
+
+Each money movement and its escrow transition must commit in one payment-service PostgreSQL
+transaction:
+
+| Operation | Wallet movement | Escrow transition |
+|---|---|---|
+| `FUND_ESCROW` | requester → admin custody | `PENDING` → `FUNDED` |
+| `RELEASE_ESCROW` | admin custody → TaskMaster | `FUNDED` → `RELEASED` |
+| `REFUND_ESCROW` | admin custody → requester | `FUNDED` → `REFUNDED` |
+
+For example, an admin wallet balance of `$300` could represent three separate `$100` funded
+escrows. Releasing one booking transfers only that escrow's `$100`; the remaining two escrow rows
+still prove who owns the other `$200`. Reconciliation must compare the custody balance with the
+sum of all `FUNDED` escrow rows.
+
+### Component organization and implementation status
+
+| Component | Location | Status / responsibility |
+|---|---|---|
+| Shared event contracts | `payment-contracts/V1` | **Implemented (Task 1).** Defines operations, identifiers, Kafka key, token rules, and result/HTTP shapes. |
+| Tokenization endpoint | `payment-service/Controllers/PaymentController.cs` | **Implemented (Task 2).** `POST /api/payment/tokenize` accepts card details and returns an opaque token plus expiry. |
+| Token service | `payment-service/Services/PaymentMethodTokenService.cs` | **Implemented (Task 2).** Validates cards, issues tokens, and atomically redeems each token once. |
+| Token vault table | `payment_method_tokens` | **Implemented (Task 2).** Stores only token hash, masked metadata, simulation flag, expiry, and redemption time. |
+| Token cleanup | `PaymentMethodTokenCleanupWorker` | **Implemented (Task 2).** Removes expired/redeemed token records after retention. |
+| Escrow ledger | payment-service PostgreSQL | **Planned (Task 3).** Per-booking source of truth for held/released/refunded funds. |
+| Saga command outbox | calendar-service MongoDB | **Planned (Task 4).** Durable fund/release/refund command and dispatch state. |
+| Kafka workers/results | both services | **Planned (Tasks 6–10).** Execute commands and apply results idempotently. |
+| Async status UI | calendar-service/frontend | **Planned (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
+
+Tasks 1 and 2 establish the safe contracts and token boundary only. The currently deployed
+`/pay` flow remains synchronous until Tasks 3–11 connect the escrow ledger, saga outbox, Kafka
+workers, result handling, and frontend.
+
 ### Task 1 — Define escrow-aware message and HTTP contracts
 
 - [x] Add versioned `PaymentRequestedV1` and `PaymentResultV1` contracts in a shared
@@ -227,14 +313,56 @@ it is unrelated to database optimistic concurrency.
 
 ### Task 2 — Introduce payment-method tokenization
 
-- [ ] Replace raw card details in the asynchronous escrow-funding request with a short-lived,
+- [x] Replace raw card details in the asynchronous escrow-funding request with a short-lived,
       single-use payment-method token. Release and refund commands must not carry one.
-- [ ] For the current simulation, add a tokenization boundary that validates the submitted card
+- [x] For the current simulation, add a tokenization boundary that validates the submitted card
       and returns an opaque token. A real deployment should use the payment provider's frontend
       SDK instead.
-- [ ] Ensure logs, saga documents, outbox records, and Kafka messages never contain raw card
+- [x] Ensure logs, saga documents, outbox records, and Kafka messages never contain raw card
       numbers or CVVs.
-- [ ] Add tests for valid, invalid, expired, and reused tokens.
+- [x] Add tests for valid, invalid, expired, and reused tokens.
+
+The simulation token vault stores only a SHA-256 token hash, expiry/redemption timestamps, masked
+card number, owner name, and a non-sensitive simulated-decline flag. The opaque token itself,
+raw card number, expiry, and CVV are not persisted. Relational redemption uses a conditional
+single-row update so only one consumer can redeem a token. A background cleanup worker removes
+expired/redeemed records after the configured retention period.
+
+Example simulation request:
+
+```http
+POST /api/payment/tokenize
+Content-Type: application/json
+
+{
+  "cardNumber": "4111111111111111",
+  "expiryDate": "12/30",
+  "cvv": "123",
+  "ownerName": "Example User"
+}
+```
+
+Example response:
+
+```json
+{
+  "paymentMethodToken": "pmt_<opaque-random-value>",
+  "expiresAt": "2030-01-15T12:05:00Z"
+}
+```
+
+Implementation details:
+
+1. `PaymentCardUtility` normalizes and validates the card number with the Luhn algorithm, checks
+   expiry, validates a 3–4 digit CVV, and requires an owner name.
+2. `PaymentMethodTokenService` creates a cryptographically random 256-bit opaque token.
+3. Only the token's SHA-256 hash is persisted. The plaintext token is returned once to the caller.
+4. Redemption hashes the supplied token and conditionally sets `RedeemedAt` only when the row is
+   unredeemed and unexpired. Concurrent consumers therefore cannot both redeem it.
+5. Redemption returns only masked card metadata and the simulation flag needed by the future
+   payment-request consumer; it never reconstructs or returns the raw card number or CVV.
+6. `PaymentMethodTokens:LifetimeSeconds`, `CleanupIntervalSeconds`, and `RetentionSeconds`
+   configure token lifetime and cleanup behavior.
 
 ### Task 3 — Add the escrow ledger and booking lifecycle
 

@@ -19,4 +19,33 @@ public sealed record PaymentRequestedV1
 
     [JsonIgnore]
     public string KafkaMessageKey => SagaId.ToString("D");
+
+    public void Validate()
+    {
+        if (Operation == PaymentOperation.FundEscrow)
+        {
+            if (string.IsNullOrWhiteSpace(PaymentMethodToken))
+            {
+                throw new ArgumentException(
+                    "FUND_ESCROW requires a payment-method token.",
+                    nameof(PaymentMethodToken));
+            }
+
+            return;
+        }
+
+        if (Operation is PaymentOperation.ReleaseEscrow or PaymentOperation.RefundEscrow)
+        {
+            if (!string.IsNullOrWhiteSpace(PaymentMethodToken))
+            {
+                throw new ArgumentException(
+                    $"{Operation} must not include a payment-method token.",
+                    nameof(PaymentMethodToken));
+            }
+
+            return;
+        }
+
+        throw new ArgumentException($"Unsupported payment operation '{Operation}'.", nameof(Operation));
+    }
 }
