@@ -287,9 +287,8 @@ namespace calendar_service.Controllers
 
         /// <summary>
         /// POST <c>/api/booking/{id}/submit-proof</c> — TaskMaster owner submits proof of the
-        /// completed job (a file/image URL already uploaded elsewhere) plus the invoice amount.
-        /// Moves the booking from ACCEPTED to IMPLEMENTED and notifies the requester that
-        /// payment is due.
+        /// completed job. Escrow-funded bookings request release of the already-fixed amount;
+        /// legacy bookings continue to submit an invoice until the async flow is fully enabled.
         /// </summary>
         /// <response code="200">The updated booking.</response>
         /// <response code="400">Missing proof file URL or invoice amount &lt;= 0.</response>
@@ -309,15 +308,85 @@ namespace calendar_service.Controllers
 
             try
             {
-                var updated = await _service.SubmitProofAsync(id, caller, body.ProofFileUrl, body.InvoiceAmount);
+                var booking = await _service.GetByIdAsync(id);
+                if (booking == null) return NotFound();
+
+                var isEscrowBooking = booking.EscrowId.HasValue;
+                var updated = isEscrowBooking
+                    ? await _service.RequestEscrowReleaseAsync(id, caller, body.ProofFileUrl)
+                    : await _service.SubmitProofAsync(id, caller, body.ProofFileUrl, body.InvoiceAmount);
 
                 await _notifications.PublishAsync(new
                 {
-                    type = "BOOKING_PAYMENT_REQUIRED",
+                    type = isEscrowBooking
+                        ? "BOOKING_ESCROW_RELEASE_REQUESTED"
+                        : "BOOKING_PAYMENT_REQUIRED",
                     recipientUsername = updated.RequesterUsername,
-                    message = $"{updated.TaskMasterUsername} submitted proof of the completed job. " +
-                              $"Please pay ${updated.InvoiceAmount:0.00} to complete this booking.",
-                    actionType = "VIEW_PAYMENT_REQUEST",
+                    message = isEscrowBooking
+                        ? $"{updated.TaskMasterUsername} submitted proof of the completed job. Escrow release was requested."
+                        : $"{updated.TaskMasterUsername} submitted proof of the completed job. " +
+                          $"Please pay ${updated.InvoiceAmount:0.00} to complete this booking.",
+                    actionType = isEscrowBooking
+                        ? "VIEW_INCOMING_BOOKING_REQUEST"
+                        : "VIEW_PAYMENT_REQUEST",
+                    actionPayload = new Dictionary<string, string>
+                    {
+                        { "bookingId", updated.Id ?? string.Empty },
+                        { "taskMasterId", updated.TaskMasterId }
+                    }
+                });
+                return Ok(updated);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// POST <c>/api/booking/{id}/start-work</c> — starts work only after escrow funding.
+        /// </summary>
+        [HttpPost("{id}/start-work")]
+        public async Task<IActionResult> StartWork(string id)
+        {
+            var caller = CurrentUsername();
+            if (string.IsNullOrEmpty(caller)) return Unauthorized();
+
+            try
+            {
+                var updated = await _service.StartWorkAsync(id, caller);
+                return Ok(updated);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// POST <c>/api/booking/{id}/cancel</c> — cancels before funding, or requests a refund
+        /// when escrow is funded and work has not started.
+        /// </summary>
+        [HttpPost("{id}/cancel")]
+        public async Task<IActionResult> Cancel(string id)
+        {
+            var caller = CurrentUsername();
+            if (string.IsNullOrEmpty(caller)) return Unauthorized();
+
+            try
+            {
+                var updated = await _service.RequestCancellationAsync(id, caller);
+                var refundRequested = updated.RefundRequestedAt.HasValue
+                    && updated.Status != Booking.StatusCancelled;
+
+                await _notifications.PublishAsync(new
+                {
+                    type = refundRequested
+                        ? "BOOKING_REFUND_REQUESTED"
+                        : "BOOKING_CANCELLED",
+                    recipientUsername = updated.TaskMasterUsername,
+                    message = refundRequested
+                        ? $"{updated.RequesterUsername} requested cancellation and an escrow refund."
+                        : $"{updated.RequesterUsername} cancelled the booking.",
+                    actionType = "VIEW_INCOMING_BOOKING_REQUEST",
                     actionPayload = new Dictionary<string, string>
                     {
                         { "bookingId", updated.Id ?? string.Empty },
@@ -359,6 +428,13 @@ namespace calendar_service.Controllers
             var booking = await _service.GetByIdAsync(id);
             if (booking == null) return NotFound();
             if (!string.Equals(booking.RequesterUsername, caller, StringComparison.OrdinalIgnoreCase)) return Forbid();
+            if (booking.EscrowId.HasValue)
+            {
+                return Conflict(new
+                {
+                    error = "Escrow-backed bookings cannot use the legacy card-payment endpoint"
+                });
+            }
             if (booking.Status != Booking.StatusImplemented)
             {
                 return Conflict(new { error = $"Booking is {booking.Status} and cannot be paid" });

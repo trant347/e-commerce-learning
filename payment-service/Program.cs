@@ -27,6 +27,7 @@ builder.Services.Configure<PaymentMethodTokenOptions>(builder.Configuration.GetS
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IPaymentMethodTokenService, PaymentMethodTokenService>();
 builder.Services.AddScoped<IPaymentMethodTokenCleanupService, PaymentMethodTokenCleanupService>();
+builder.Services.AddScoped<IEscrowService, EscrowService>();
 builder.Services.AddHostedService<PaymentMethodTokenCleanupWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
 

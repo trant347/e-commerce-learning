@@ -344,6 +344,141 @@ namespace calendar_service.Tests
             Assert.IsType<NotFoundResult>(result);
         }
 
+        // ---- Escrow lifecycle ----
+
+        [Fact]
+        public async Task StartWork_FundedBooking_Returns200()
+        {
+            var service = new Mock<IBookingService>();
+            var booking = new Booking
+            {
+                Id = "bk-1",
+                Status = Booking.StatusInProgress,
+                EscrowStatus = Payment.Contracts.V1.EscrowStatus.Funded
+            };
+            service.Setup(s => s.StartWorkAsync("bk-1", Caller)).ReturnsAsync(booking);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>());
+
+            var result = await controller.StartWork("bk-1");
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            Assert.Same(booking, ok.Value);
+        }
+
+        [Fact]
+        public async Task SubmitProof_EscrowBooking_RequestsReleaseWithoutInvoice()
+        {
+            var service = new Mock<IBookingService>();
+            var notifications = new Mock<INotificationProducer>();
+            var escrowId = Guid.NewGuid();
+            var existing = new Booking { Id = "bk-1", EscrowId = escrowId };
+            var updated = new Booking
+            {
+                Id = "bk-1",
+                TaskMasterId = TaskMasterId,
+                TaskMasterUsername = OwnerUsername,
+                RequesterUsername = Caller,
+                Status = Booking.StatusImplemented,
+                EscrowId = escrowId,
+                EscrowStatus = Payment.Contracts.V1.EscrowStatus.Funded,
+                AgreedAmount = 100m,
+                InvoiceAmount = 100m,
+                ReleaseRequestedAt = DateTime.UtcNow
+            };
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(existing);
+            service.Setup(s => s.RequestEscrowReleaseAsync("bk-1", Caller, "proof.jpg"))
+                .ReturnsAsync(updated);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                notifications);
+            var result = await controller.SubmitProof(
+                "bk-1",
+                new BookingController.SubmitProofDto
+                {
+                    ProofFileUrl = "proof.jpg",
+                    InvoiceAmount = 999m
+                });
+
+            Assert.IsType<OkObjectResult>(result);
+            service.Verify(
+                s => s.RequestEscrowReleaseAsync("bk-1", Caller, "proof.jpg"),
+                Times.Once);
+            service.Verify(
+                s => s.SubmitProofAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<decimal>()),
+                Times.Never);
+            notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task Cancel_FundedBooking_RequestsRefundAndReturns200()
+        {
+            var service = new Mock<IBookingService>();
+            var notifications = new Mock<INotificationProducer>();
+            var booking = new Booking
+            {
+                Id = "bk-1",
+                TaskMasterId = TaskMasterId,
+                TaskMasterUsername = OwnerUsername,
+                RequesterUsername = Caller,
+                Status = Booking.StatusAccepted,
+                EscrowStatus = Payment.Contracts.V1.EscrowStatus.Funded,
+                RefundRequestedAt = DateTime.UtcNow
+            };
+            service.Setup(s => s.RequestCancellationAsync("bk-1", Caller))
+                .ReturnsAsync(booking);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                notifications);
+            var result = await controller.Cancel("bk-1");
+
+            Assert.IsType<OkObjectResult>(result);
+            notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task Pay_EscrowBooking_Returns409WithoutCallingLegacyPayment()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(new Booking
+            {
+                Id = "bk-1",
+                RequesterUsername = Caller,
+                Status = Booking.StatusImplemented,
+                EscrowId = Guid.NewGuid(),
+                InvoiceAmount = 100m
+            });
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                paymentClient: paymentClient);
+            var result = await controller.Pay("bk-1", ValidPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+            paymentClient.Verify(c => c.ProcessPaymentAsync(
+                    It.IsAny<CreditCardInfo>(),
+                    It.IsAny<decimal>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>()),
+                Times.Never);
+        }
+
         // ---- Pay ----
 
         private static Booking ImplementedBooking(decimal invoiceAmount = 100m) => new()
@@ -791,4 +926,3 @@ namespace calendar_service.Tests
         }
     }
 }
-

@@ -284,14 +284,16 @@ sum of all `FUNDED` escrow rows.
 | Token service | `payment-service/Services/PaymentMethodTokenService.cs` | **Implemented (Task 2).** Validates cards, issues tokens, and atomically redeems each token once. |
 | Token vault table | `payment_method_tokens` | **Implemented (Task 2).** Stores only token hash, masked metadata, simulation flag, expiry, and redemption time. |
 | Token cleanup | `PaymentMethodTokenCleanupWorker` | **Implemented (Task 2).** Removes expired/redeemed token records after retention. |
-| Escrow ledger | payment-service PostgreSQL | **Planned (Task 3).** Per-booking source of truth for held/released/refunded funds. |
+| Escrow ledger | payment-service PostgreSQL | **Implemented (Task 3).** Per-booking source of truth with guarded funding/release/refund transitions. |
+| Booking escrow lifecycle | `calendar-service/Model/Booking.cs`, `BookingService` | **Implemented (Task 3).** Fixes price, projects escrow state, gates work/proof, and enforces cancellation rules. |
 | Saga command outbox | calendar-service MongoDB | **Planned (Task 4).** Durable fund/release/refund command and dispatch state. |
 | Kafka workers/results | both services | **Planned (Tasks 6–10).** Execute commands and apply results idempotently. |
 | Async status UI | calendar-service/frontend | **Planned (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
 
-Tasks 1 and 2 establish the safe contracts and token boundary only. The currently deployed
-`/pay` flow remains synchronous until Tasks 3–11 connect the escrow ledger, saga outbox, Kafka
-workers, result handling, and frontend.
+Tasks 1–3 establish the safe contracts, token boundary, escrow ledger, and booking lifecycle.
+Legacy non-escrow bookings retain the synchronous `/pay` flow. Escrow-backed bookings cannot use
+that endpoint until Tasks 4–11 connect the saga outbox, Kafka workers, result handling, and
+frontend.
 
 ### Task 1 — Define escrow-aware message and HTTP contracts
 
@@ -366,20 +368,42 @@ Implementation details:
 
 ### Task 3 — Add the escrow ledger and booking lifecycle
 
-- [ ] Fix the booking amount and currency before escrow funding; `/pay` must not accept an amount
+- [x] Fix the booking amount and currency before escrow funding; `/pay` must not accept an amount
       supplied by the client.
-- [ ] Add a PostgreSQL escrow record unique per booking with amount, currency, requester,
+- [x] Add a PostgreSQL escrow record unique per booking with amount, currency, requester,
       TaskMaster, custody account, status, and funding/release/refund transaction ids.
-- [ ] Use explicit escrow states such as `PENDING`, `FUNDED`, `RELEASED`, and `REFUNDED`, with
+- [x] Use explicit escrow states such as `PENDING`, `FUNDED`, `RELEASED`, and `REFUNDED`, with
       compare-and-set transitions that reject release/refund before funding or after a terminal
       transfer.
-- [ ] Treat the admin wallet only as the custody account; never infer a booking's escrow balance
+- [x] Treat the admin wallet only as the custody account; never infer a booking's escrow balance
       from the aggregate admin wallet balance.
-- [ ] Prevent the TaskMaster from starting/submitting proof until escrow is `FUNDED`.
-- [ ] Change proof upload from "send invoice" to "request escrow release".
-- [ ] Define cancellation rules and allow a refund only while the escrow is funded and not
+- [x] Prevent the TaskMaster from starting/submitting proof until escrow is `FUNDED`.
+- [x] Change proof upload from "send invoice" to "request escrow release".
+- [x] Define cancellation rules and allow a refund only while the escrow is funded and not
       released.
-- [ ] Add tests for valid lifecycle transitions and every invalid/duplicate transition.
+- [x] Add tests for valid lifecycle transitions and every invalid/duplicate transition.
+
+Implementation details:
+
+1. Accepting a priced booking copies the offered total into immutable `AgreedAmount` and
+   `AgreedCurrency` fields. Attaching an escrow is rejected until both are fixed.
+2. `escrows` is unique by booking and stores the requester, TaskMaster, configured custody
+   account, immutable amount/currency, current state, and all movement transaction ids.
+3. Relational transitions use conditional single-row updates. Only `PENDING → FUNDED`,
+   `FUNDED → RELEASED`, and `FUNDED → REFUNDED` are legal; duplicate and competing terminal
+   transitions fail.
+4. The calendar booking's `EscrowStatus` is only a projection of payment-service's PostgreSQL
+   source of truth. It is used for workflow display/gating, never as the financial ledger.
+5. Work can start only from `ACCEPTED` with `FUNDED` escrow and no refund request. Proof then
+   records a release request for the fixed amount; escrow bookings cannot fall back to legacy
+   synchronous `/pay`.
+6. The requester may cancel a pending booking or an accepted booking before escrow attachment.
+   Cancellation is temporarily rejected while funding is unresolved. Once funded, cancellation
+   requests a refund only before work starts; in-progress, released, or already-refunded
+   bookings reject cancellation.
+7. Task 3 records release/refund intent but does not move money. Task 7 will execute each wallet
+   movement, payment transaction, and escrow compare-and-set transition in one PostgreSQL
+   transaction.
 
 ### Task 4 — Make each saga a durable enqueue operation
 

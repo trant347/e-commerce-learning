@@ -40,6 +40,27 @@ namespace calendar_service.Services.Implementation
                     PartialFilterExpression = acceptedFilter
                 }));
 
+            // Keep occupied bookings in the same uniqueness boundary when ACCEPTED transitions
+            // to IN_PROGRESS/IMPLEMENTED/COMPLETED. Without this second index, changing status
+            // could remove the winning booking from the ACCEPTED-only race guard while another
+            // acceptance that already passed its overlap read is still in flight.
+            var occupiedFilter = new BsonDocument("Status",
+                new BsonDocument("$in", new BsonArray
+                {
+                    Booking.StatusAccepted,
+                    Booking.StatusInProgress,
+                    Booking.StatusImplemented,
+                    Booking.StatusCompleted
+                }));
+            _collection.Indexes.CreateOne(new CreateIndexModel<Booking>(
+                keys.Ascending(b => b.TaskMasterId).Ascending(b => b.SlotStart),
+                new CreateIndexOptions<Booking>
+                {
+                    Name = "uniq_taskmaster_slot_occupied_v2",
+                    Unique = true,
+                    PartialFilterExpression = occupiedFilter
+                }));
+
             // Race guard for CreateAsync: a given requester cannot have two non-terminal bookings
             // (PENDING or ACCEPTED) for the same TaskMaster starting at the same slot.
             // Without this, two near-simultaneous POSTs both pass the in-memory overlap check
@@ -125,7 +146,10 @@ namespace calendar_service.Services.Implementation
             // (job done, but the TaskMaster was there and busy for that slot).
             var acceptedOverlap = await FindOverlappingAsync(
                 taskMasterId, slotStartUtc, newEnd,
-                Booking.StatusAccepted, Booking.StatusImplemented, Booking.StatusCompleted);
+                Booking.StatusAccepted,
+                Booking.StatusInProgress,
+                Booking.StatusImplemented,
+                Booking.StatusCompleted);
             if (acceptedOverlap.Any())
             {
                 throw new InvalidOperationException("This range overlaps an already-booked slot");
@@ -200,6 +224,7 @@ namespace calendar_service.Services.Implementation
                 filter &= fb.In(b => b.Status, new[]
                 {
                     Booking.StatusAccepted,
+                    Booking.StatusInProgress,
                     Booking.StatusImplemented,
                     Booking.StatusCompleted,
                     Booking.StatusPending,
@@ -214,6 +239,7 @@ namespace calendar_service.Services.Implementation
                 var statusFilter = fb.In(b => b.Status, new[]
                 {
                     Booking.StatusAccepted,
+                    Booking.StatusInProgress,
                     Booking.StatusImplemented,
                     Booking.StatusCompleted
                 });
@@ -298,7 +324,10 @@ namespace calendar_service.Services.Implementation
             // they've already committed to or already worked.
             var acceptedOverlap = await FindOverlappingAsync(
                 existing.TaskMasterId, existing.SlotStart, existing.SlotEnd,
-                Booking.StatusAccepted, Booking.StatusImplemented, Booking.StatusCompleted);
+                Booking.StatusAccepted,
+                Booking.StatusInProgress,
+                Booking.StatusImplemented,
+                Booking.StatusCompleted);
             if (acceptedOverlap.Any(b => b.Id != bookingId))
             {
                 throw new InvalidOperationException("This range overlaps an already-accepted booking");
@@ -310,6 +339,13 @@ namespace calendar_service.Services.Implementation
                 .Set(b => b.Status, Booking.StatusAccepted)
                 .Set(b => b.ResponseMessage, responseMessage)
                 .Set(b => b.RespondedAt, now);
+            if (existing.OfferedTotalAmount is > 0)
+            {
+                existing.FixAgreedPrice();
+                update = update
+                    .Set(b => b.AgreedAmount, existing.AgreedAmount)
+                    .Set(b => b.AgreedCurrency, existing.AgreedCurrency);
+            }
             try
             {
                 await _collection.UpdateOneAsync(
@@ -376,6 +412,200 @@ namespace calendar_service.Services.Implementation
             return await _collection.Find(b => b.Id == bookingId).FirstAsync();
         }
 
+        public async Task<Booking> AttachEscrowAsync(
+            string bookingId,
+            string callerUsername,
+            Guid escrowId)
+        {
+            callerUsername = NormalizeUsername(callerUsername);
+            if (escrowId == Guid.Empty)
+            {
+                throw new InvalidOperationException("escrowId is required");
+            }
+
+            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Booking not found");
+
+            if (existing.RequesterUsername != callerUsername)
+            {
+                throw new UnauthorizedAccessException("Only the requester can fund this booking");
+            }
+            if (existing.Status != Booking.StatusAccepted)
+            {
+                throw new InvalidOperationException(
+                    $"Booking is {existing.Status} and cannot be prepared for escrow funding");
+            }
+            if (existing.AgreedAmount is null or <= 0 || string.IsNullOrWhiteSpace(existing.AgreedCurrency))
+            {
+                throw new InvalidOperationException("Booking price and currency must be fixed before escrow funding");
+            }
+            if (existing.EscrowId.HasValue)
+            {
+                throw new InvalidOperationException("Booking already has an escrow");
+            }
+
+            var result = await _collection.UpdateOneAsync(
+                b => b.Id == bookingId
+                    && b.Status == Booking.StatusAccepted
+                    && b.EscrowId == null,
+                Builders<Booking>.Update
+                    .Set(b => b.EscrowId, escrowId)
+                    .Set(b => b.EscrowStatus, Payment.Contracts.V1.EscrowStatus.Pending));
+            EnsureUpdated(result, "Booking changed before escrow could be attached");
+            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+        }
+
+        public async Task<Booking> MarkEscrowFundedAsync(string bookingId, Guid escrowId)
+        {
+            if (escrowId == Guid.Empty)
+            {
+                throw new InvalidOperationException("escrowId is required");
+            }
+
+            var result = await _collection.UpdateOneAsync(
+                b => b.Id == bookingId
+                    && b.Status == Booking.StatusAccepted
+                    && b.EscrowId == escrowId
+                    && b.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Pending,
+                Builders<Booking>.Update
+                    .Set(b => b.EscrowStatus, Payment.Contracts.V1.EscrowStatus.Funded));
+            EnsureUpdated(result, "Booking escrow is not pending funding");
+            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+        }
+
+        public async Task<Booking> StartWorkAsync(string bookingId, string callerUsername)
+        {
+            callerUsername = NormalizeUsername(callerUsername);
+            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Booking not found");
+
+            if (existing.TaskMasterUsername != callerUsername)
+            {
+                throw new UnauthorizedAccessException("Only the TaskMaster can start work");
+            }
+            if (existing.Status != Booking.StatusAccepted)
+            {
+                throw new InvalidOperationException($"Booking is {existing.Status} and work cannot be started");
+            }
+            if (existing.EscrowStatus != Payment.Contracts.V1.EscrowStatus.Funded)
+            {
+                throw new InvalidOperationException("Escrow must be FUNDED before work can start");
+            }
+            if (existing.RefundRequestedAt.HasValue)
+            {
+                throw new InvalidOperationException("Work cannot start after an escrow refund is requested");
+            }
+
+            var result = await _collection.UpdateOneAsync(
+                b => b.Id == bookingId
+                    && b.Status == Booking.StatusAccepted
+                    && b.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
+                    && b.RefundRequestedAt == null,
+                Builders<Booking>.Update
+                    .Set(b => b.Status, Booking.StatusInProgress)
+                    .Set(b => b.WorkStartedAt, DateTime.UtcNow));
+            EnsureUpdated(result, "Booking changed before work could be started");
+            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+        }
+
+        public async Task<Booking> RequestEscrowReleaseAsync(
+            string bookingId,
+            string callerUsername,
+            string proofFileUrl)
+        {
+            callerUsername = NormalizeUsername(callerUsername);
+            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Booking not found");
+
+            if (existing.TaskMasterUsername != callerUsername)
+            {
+                throw new UnauthorizedAccessException("Only the TaskMaster can submit proof for this booking");
+            }
+            if (existing.Status != Booking.StatusInProgress)
+            {
+                throw new InvalidOperationException(
+                    $"Booking is {existing.Status} and cannot request escrow release");
+            }
+            if (existing.EscrowStatus != Payment.Contracts.V1.EscrowStatus.Funded)
+            {
+                throw new InvalidOperationException("Escrow must be FUNDED before proof can request release");
+            }
+            if (existing.AgreedAmount is null or <= 0)
+            {
+                throw new InvalidOperationException("Booking has no fixed amount");
+            }
+            if (string.IsNullOrWhiteSpace(proofFileUrl))
+            {
+                throw new InvalidOperationException("Proof file is required");
+            }
+            if (existing.ReleaseRequestedAt.HasValue)
+            {
+                throw new InvalidOperationException("Escrow release has already been requested");
+            }
+
+            var now = DateTime.UtcNow;
+            var result = await _collection.UpdateOneAsync(
+                b => b.Id == bookingId
+                    && b.Status == Booking.StatusInProgress
+                    && b.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
+                    && b.ReleaseRequestedAt == null,
+                Builders<Booking>.Update
+                    .Set(b => b.Status, Booking.StatusImplemented)
+                    .Set(b => b.ProofFileUrl, proofFileUrl.Trim())
+                    .Set(b => b.InvoiceAmount, existing.AgreedAmount)
+                    .Set(b => b.ImplementedAt, now)
+                    .Set(b => b.ReleaseRequestedAt, now));
+            EnsureUpdated(result, "Booking changed before escrow release could be requested");
+            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+        }
+
+        public async Task<Booking> RequestCancellationAsync(
+            string bookingId,
+            string callerUsername)
+        {
+            callerUsername = NormalizeUsername(callerUsername);
+            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Booking not found");
+
+            if (existing.RequesterUsername != callerUsername)
+            {
+                throw new UnauthorizedAccessException("Only the requester can cancel this booking");
+            }
+
+            if (existing.Status == Booking.StatusPending
+                || (existing.Status == Booking.StatusAccepted
+                    && existing.EscrowId == null))
+            {
+                var cancelResult = await _collection.UpdateOneAsync(
+                    b => b.Id == bookingId
+                        && (b.Status == Booking.StatusPending
+                            || (b.Status == Booking.StatusAccepted
+                                && b.EscrowId == null)),
+                    Builders<Booking>.Update
+                        .Set(b => b.Status, Booking.StatusCancelled)
+                        .Set(b => b.CancelledAt, DateTime.UtcNow));
+                EnsureUpdated(cancelResult, "Booking changed before it could be cancelled");
+                return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+            }
+
+            if (existing.Status == Booking.StatusAccepted
+                && existing.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
+                && !existing.RefundRequestedAt.HasValue)
+            {
+                var refundResult = await _collection.UpdateOneAsync(
+                    b => b.Id == bookingId
+                        && b.Status == Booking.StatusAccepted
+                        && b.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
+                        && b.RefundRequestedAt == null,
+                    Builders<Booking>.Update.Set(b => b.RefundRequestedAt, DateTime.UtcNow));
+                EnsureUpdated(refundResult, "Booking changed before a refund could be requested");
+                return await _collection.Find(b => b.Id == bookingId).FirstAsync();
+            }
+
+            throw new InvalidOperationException(
+                "A booking can be cancelled only before work starts; a refund requires FUNDED, unreleased escrow");
+        }
+
         /// <summary>
         /// TaskMaster owner submits proof of the completed job (a file/image URL) plus the
         /// invoice amount. Moves the booking from ACCEPTED to IMPLEMENTED.
@@ -390,6 +620,11 @@ namespace calendar_service.Services.Implementation
             if (existing.TaskMasterUsername != callerUsername)
             {
                 throw new UnauthorizedAccessException("Only the TaskMaster can submit proof for this booking");
+            }
+            if (existing.EscrowId.HasValue)
+            {
+                throw new InvalidOperationException(
+                    "Escrow-funded bookings must submit proof as an escrow release request");
             }
             if (existing.Status != Booking.StatusAccepted)
             {
@@ -484,6 +719,14 @@ namespace calendar_service.Services.Implementation
         // equality (and therefore the existing indexes) instead of case-insensitive regex.
         private static string NormalizeUsername(string username) =>
             string.IsNullOrEmpty(username) ? username : username.Trim().ToLowerInvariant();
+
+        private static void EnsureUpdated(UpdateResult result, string message)
+        {
+            if (result.MatchedCount == 0 || result.ModifiedCount == 0)
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
 
         private static DateTime NormalizeToHour(DateTime dt)
         {

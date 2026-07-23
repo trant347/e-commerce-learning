@@ -38,6 +38,40 @@ namespace calendar_service.Services.Contracts
         Task<Booking?> DeclineAsync(string bookingId, string callerUsername, string? responseMessage);
 
         /// <summary>
+        /// Associates the accepted booking with its pending payment-service escrow. The booking
+        /// must already have a fixed server-side amount and currency.
+        /// </summary>
+        Task<Booking> AttachEscrowAsync(
+            string bookingId,
+            string callerUsername,
+            Guid escrowId);
+
+        /// <summary>
+        /// Applies a verified funding result to the booking's escrow projection.
+        /// </summary>
+        Task<Booking> MarkEscrowFundedAsync(string bookingId, Guid escrowId);
+
+        /// <summary>
+        /// Starts work only after the booking's escrow projection is FUNDED.
+        /// </summary>
+        Task<Booking> StartWorkAsync(string bookingId, string callerUsername);
+
+        /// <summary>
+        /// Stores proof and marks release as requested without accepting a TaskMaster-supplied
+        /// invoice amount. The immutable agreed booking amount remains authoritative.
+        /// </summary>
+        Task<Booking> RequestEscrowReleaseAsync(
+            string bookingId,
+            string callerUsername,
+            string proofFileUrl);
+
+        /// <summary>
+        /// Cancels an unfunded booking immediately, or records a refund request for a FUNDED
+        /// booking that has not started work. Released or in-progress work cannot be cancelled.
+        /// </summary>
+        Task<Booking> RequestCancellationAsync(string bookingId, string callerUsername);
+
+        /// <summary>
         /// TaskMaster owner submits proof of the completed job (a file/image URL) plus the
         /// invoice amount. Moves the booking from ACCEPTED to IMPLEMENTED.
         /// </summary>

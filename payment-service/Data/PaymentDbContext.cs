@@ -12,6 +12,7 @@ namespace payment_service.Data
         public DbSet<PaymentTransaction> Transactions => Set<PaymentTransaction>();
         public DbSet<UserWallet> Wallets => Set<UserWallet>();
         public DbSet<PaymentMethodTokenRecord> PaymentMethodTokens => Set<PaymentMethodTokenRecord>();
+        public DbSet<EscrowRecord> Escrows => Set<EscrowRecord>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -51,6 +52,35 @@ namespace payment_service.Data
                     .HasDatabaseName("IX_payment_method_tokens_expires_at");
                 entity.HasIndex(token => token.RedeemedAt)
                     .HasDatabaseName("IX_payment_method_tokens_redeemed_at");
+            });
+
+            modelBuilder.Entity<EscrowRecord>(entity =>
+            {
+                entity.ToTable("escrows");
+                entity.HasKey(escrow => escrow.Id);
+                entity.Property(escrow => escrow.Amount).HasColumnType("numeric(18,2)");
+                entity.HasIndex(escrow => escrow.BookingId)
+                    .IsUnique()
+                    .HasDatabaseName("IX_escrows_booking_id");
+                entity.HasIndex(escrow => escrow.FundingTransactionId)
+                    .IsUnique()
+                    .HasFilter("\"FundingTransactionId\" IS NOT NULL")
+                    .HasDatabaseName("IX_escrows_funding_transaction_id");
+                entity.HasIndex(escrow => escrow.ReleaseTransactionId)
+                    .IsUnique()
+                    .HasFilter("\"ReleaseTransactionId\" IS NOT NULL")
+                    .HasDatabaseName("IX_escrows_release_transaction_id");
+                entity.HasIndex(escrow => escrow.RefundTransactionId)
+                    .IsUnique()
+                    .HasFilter("\"RefundTransactionId\" IS NOT NULL")
+                    .HasDatabaseName("IX_escrows_refund_transaction_id");
+                entity.ToTable(table =>
+                {
+                    table.HasCheckConstraint("CK_escrows_amount_positive", "\"Amount\" > 0");
+                    table.HasCheckConstraint(
+                        "CK_escrows_status_valid",
+                        "\"Status\" IN ('PENDING', 'FUNDED', 'RELEASED', 'REFUNDED')");
+                });
             });
         }
     }

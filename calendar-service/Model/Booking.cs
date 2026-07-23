@@ -13,6 +13,7 @@ namespace calendar_service.Model
     {
         public const string StatusPending = "PENDING";
         public const string StatusAccepted = "ACCEPTED";
+        public const string StatusInProgress = "IN_PROGRESS";
         public const string StatusDeclined = "DECLINED";
         public const string StatusCancelled = "CANCELLED";
 
@@ -52,6 +53,23 @@ namespace calendar_service.Model
         [BsonIgnore]
         public decimal? OfferedTotalAmount => OfferedRatePerHour.HasValue ? OfferedRatePerHour.Value * DurationHours : null;
 
+        /// <summary>
+        /// Immutable booking price copied from the accepted offer before escrow funding.
+        /// The asynchronous /pay flow must use this server-side value, never a client amount.
+        /// </summary>
+        public decimal? AgreedAmount { get; set; }
+
+        public string? AgreedCurrency { get; set; }
+
+        /// <summary>Stable payment-service escrow id for the asynchronous payment flow.</summary>
+        public Guid? EscrowId { get; set; }
+
+        /// <summary>
+        /// Read-only projection of payment-service's authoritative escrow status. It is updated
+        /// only from verified payment results and must not be treated as the financial ledger.
+        /// </summary>
+        public string? EscrowStatus { get; set; }
+
         public string Status { get; set; } = StatusPending;
 
         public string? RequestMessage { get; set; }
@@ -90,7 +108,27 @@ namespace calendar_service.Model
         /// <summary>When the TaskMaster submitted proof of job + invoice (moved to IMPLEMENTED).</summary>
         public DateTime? ImplementedAt { get; set; }
 
+        public DateTime? WorkStartedAt { get; set; }
+        public DateTime? ReleaseRequestedAt { get; set; }
+        public DateTime? RefundRequestedAt { get; set; }
+        public DateTime? CancelledAt { get; set; }
+
         /// <summary>When the requester paid the invoice (moved to COMPLETED).</summary>
         public DateTime? CompletedAt { get; set; }
+
+        public void FixAgreedPrice(string currency = "USD")
+        {
+            if (OfferedTotalAmount is null or <= 0)
+            {
+                throw new InvalidOperationException("A positive offered price is required before acceptance");
+            }
+            if (string.IsNullOrWhiteSpace(currency) || currency.Trim().Length != 3)
+            {
+                throw new InvalidOperationException("Currency must be a three-letter code");
+            }
+
+            AgreedAmount = Math.Round(OfferedTotalAmount.Value, 2, MidpointRounding.ToEven);
+            AgreedCurrency = currency.Trim().ToUpperInvariant();
+        }
     }
 }
