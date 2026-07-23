@@ -29,10 +29,34 @@ namespace calendar_service.Model
 
         public string BookingId { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Present for escrow commands. Legacy synchronous payment sagas leave these out.
+        /// </summary>
+        public Guid? EscrowId { get; set; }
+
+        public string? Operation { get; set; }
+
         public string Status { get; set; } = StatusStarted;
 
         /// <summary>Amount that was requested to be charged when the saga was started.</summary>
         public decimal RequestedAmount { get; set; }
+
+        /// <summary>
+        /// Embedded outbox payload. Persisted in the same document as STARTED so a crash cannot
+        /// leave a saga without a command or a command without a saga.
+        /// </summary>
+        public PendingPaymentRequest? PaymentRequest { get; set; }
+
+        [BsonRepresentation(BsonType.String)]
+        public SagaDispatchStatus? DispatchStatus { get; set; }
+        public int DispatchAttemptCount { get; set; }
+        public DateTime? NextDispatchAttemptAt { get; set; }
+        public DateTime? LastDispatchAttemptAt { get; set; }
+        public DateTime? DispatchClaimedAt { get; set; }
+        public DateTime? DispatchClaimExpiresAt { get; set; }
+        public DateTime? DispatchedAt { get; set; }
+        public string? LastDispatchError { get; set; }
+        public string? TraceParent { get; set; }
 
         /// <summary>Set when the saga resolves to FAILED (declined, mismatch, unreachable, etc).</summary>
         public string? FailureReason { get; set; }

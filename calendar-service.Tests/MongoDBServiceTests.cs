@@ -3,6 +3,7 @@ using calendar_service.Services.DAO;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
+using Payment.Contracts.V1;
 using Xunit;
 
 namespace calendar_service.Tests
@@ -59,6 +60,45 @@ namespace calendar_service.Tests
             var roundTripped = BsonSerializer.Deserialize<SagaState>(bytes);
 
             Assert.Equal(saga.SagaId, roundTripped.SagaId);
+        }
+
+        [Fact]
+        public void RegisteredGuidSerializer_RoundTripsEmbeddedPaymentRequest()
+        {
+            calendar_service.MongoDbGuidSupport.Register();
+            var saga = new SagaState
+            {
+                SagaId = Guid.NewGuid(),
+                EscrowId = Guid.NewGuid(),
+                BookingId = "bk-1",
+                Operation = PaymentOperation.FundEscrow,
+                Status = SagaState.StatusStarted,
+                RequestedAmount = 10m,
+                DispatchStatus = SagaDispatchStatus.PENDING
+            };
+            saga.PaymentRequest = new PendingPaymentRequest
+            {
+                SchemaVersion = PaymentRequestedV1.CurrentSchemaVersion,
+                SagaId = saga.SagaId,
+                EscrowId = saga.EscrowId.Value,
+                BookingId = saga.BookingId,
+                Operation = saga.Operation!,
+                Amount = saga.RequestedAmount,
+                Currency = "USD",
+                PayerUserId = "alice",
+                PayeeUserId = "admin-custody",
+                PaymentMethodToken = "pmt_token"
+            };
+
+            var document = saga.ToBsonDocument();
+            var roundTripped = BsonSerializer.Deserialize<SagaState>(document);
+
+            Assert.Equal("PENDING", document["DispatchStatus"].AsString);
+            Assert.Equal(saga.EscrowId, roundTripped.EscrowId);
+            Assert.Equal(SagaDispatchStatus.PENDING, roundTripped.DispatchStatus);
+            Assert.NotNull(roundTripped.PaymentRequest);
+            Assert.Equal(saga.SagaId, roundTripped.PaymentRequest!.SagaId);
+            Assert.Equal(saga.EscrowId, roundTripped.PaymentRequest.EscrowId);
         }
     }
 }

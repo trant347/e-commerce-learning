@@ -286,13 +286,14 @@ sum of all `FUNDED` escrow rows.
 | Token cleanup | `PaymentMethodTokenCleanupWorker` | **Implemented (Task 2).** Removes expired/redeemed token records after retention. |
 | Escrow ledger | payment-service PostgreSQL | **Implemented (Task 3).** Per-booking source of truth with guarded funding/release/refund transitions. |
 | Booking escrow lifecycle | `calendar-service/Model/Booking.cs`, `BookingService` | **Implemented (Task 3).** Fixes price, projects escrow state, gates work/proof, and enforces cancellation rules. |
-| Saga command outbox | calendar-service MongoDB | **Planned (Task 4).** Durable fund/release/refund command and dispatch state. |
+| Saga command outbox | calendar-service MongoDB | **Implemented (Task 4).** Atomically stores STARTED saga state, command payload, dispatch state, retry metadata, and tracing context. |
 | Kafka workers/results | both services | **Planned (Tasks 6–10).** Execute commands and apply results idempotently. |
 | Async status UI | calendar-service/frontend | **Planned (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
 
-Tasks 1–3 establish the safe contracts, token boundary, escrow ledger, and booking lifecycle.
+Tasks 1–4 establish the safe contracts, token boundary, escrow ledger, booking lifecycle, and
+durable command outbox.
 Legacy non-escrow bookings retain the synchronous `/pay` flow. Escrow-backed bookings cannot use
-that endpoint until Tasks 4–11 connect the saga outbox, Kafka workers, result handling, and
+that endpoint until Tasks 5–11 connect the funding endpoint, Kafka workers, result handling, and
 frontend.
 
 ### Task 1 — Define escrow-aware message and HTTP contracts
@@ -407,15 +408,33 @@ Implementation details:
 
 ### Task 4 — Make each saga a durable enqueue operation
 
-- [ ] Extend `SagaState` with `escrowId`, operation, payment request, dispatch status, attempt
+- [x] Extend `SagaState` with `escrowId`, operation, payment request, dispatch status, attempt
       count, next-attempt time, and dispatch timestamps so it also acts as the command outbox.
-- [ ] Atomically prevent more than one active saga for the same booking and operation.
-- [ ] Persist the `STARTED` saga and pending request before attempting to publish anything.
-- [ ] Return `503` without publishing when the saga/outbox write fails.
-- [ ] Add tests for persistence failure and concurrent funding/release/refund requests.
+- [x] Atomically prevent more than one active saga for the same booking and operation.
+- [x] Persist the `STARTED` saga and pending request before attempting to publish anything.
+- [x] Return `503` without publishing when the saga/outbox write fails.
+- [x] Add tests for persistence failure and concurrent funding/release/refund requests.
 
 Keeping the pending command in the saga document permits an atomic single-document Mongo write
 without requiring multi-document transactions on the current standalone Mongo deployment.
+
+Implementation details:
+
+1. `SagaState.PaymentRequest` embeds a Mongo-safe copy of `PaymentRequestedV1` in the same
+   document as `STARTED`, so there is no state where only the saga or only the command exists.
+2. New commands start with dispatch status `PENDING`, attempt count `0`, an immediately eligible
+   `NextDispatchAttemptAt`, optional `traceparent`, and empty claim/attempt/dispatched timestamps.
+3. A partial unique index on `(BookingId, Operation)` applies only to active `STARTED` escrow
+   operations. MongoDB therefore rejects concurrent duplicate funding, release, or refund
+   requests atomically while allowing different operations and later retries after resolution.
+4. Duplicate `SagaId` failures remain distinct from active-operation conflicts, preserving the
+   saga idempotency invariant.
+5. Outbox persistence errors are wrapped as `SagaOutboxPersistenceException`; middleware maps
+   them to `503 Service Unavailable`. Task 6 is the only component that will publish commands,
+   so a failed insert cannot result in publication.
+6. Legacy synchronous sagas have no embedded payment request and remain eligible for the old
+   reconciliation worker. Outbox sagas are explicitly excluded so an undispatched Kafka command
+   cannot be mistaken for a missing synchronous charge.
 
 ### Task 5 — Change `/pay` to enqueue escrow funding and return immediately
 

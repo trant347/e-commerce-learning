@@ -1,5 +1,6 @@
 using calendar_service.Auth;
 using calendar_service.MessageQueue;
+using calendar_service.Middleware;
 using calendar_service.Models.ConsulConfig;
 using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
@@ -96,6 +97,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseMiddleware<SagaOutboxExceptionMiddleware>();
 app.UseMiddleware<JwtAuthMiddleware>();
 app.UseAuthorization();
 

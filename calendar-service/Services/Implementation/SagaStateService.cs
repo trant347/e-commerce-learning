@@ -1,7 +1,10 @@
 using calendar_service.Model;
+using calendar_service.Services;
 using calendar_service.Services.Contracts;
 using calendar_service.Services.DAO;
+using MongoDB.Bson;
 using MongoDB.Driver;
+using Payment.Contracts.V1;
 
 namespace calendar_service.Services.Implementation
 {
@@ -45,6 +48,32 @@ namespace calendar_service.Services.Implementation
                 keys.Ascending(s => s.BookingId).Descending(s => s.CreatedAt),
                 new CreateIndexOptions<SagaState> { Name = "bookingid_createdat_desc" }));
 
+            var activeOperationFilter = new BsonDocument
+            {
+                { "Status", SagaState.StatusStarted },
+                {
+                    "Operation",
+                    new BsonDocument("$in", new BsonArray
+                    {
+                        PaymentOperation.FundEscrow,
+                        PaymentOperation.ReleaseEscrow,
+                        PaymentOperation.RefundEscrow
+                    })
+                }
+            };
+            _collection.Indexes.CreateOne(new CreateIndexModel<SagaState>(
+                keys.Ascending(s => s.BookingId).Ascending(s => s.Operation),
+                new CreateIndexOptions<SagaState>
+                {
+                    Name = "uniq_active_booking_operation",
+                    Unique = true,
+                    PartialFilterExpression = activeOperationFilter
+                }));
+
+            _collection.Indexes.CreateOne(new CreateIndexModel<SagaState>(
+                keys.Ascending(s => s.DispatchStatus).Ascending(s => s.NextDispatchAttemptAt),
+                new CreateIndexOptions<SagaState> { Name = "dispatch_status_next_attempt" }));
+
             try
             {
                 _collection.Indexes.CreateOne(new CreateIndexModel<SagaState>(
@@ -83,6 +112,78 @@ namespace calendar_service.Services.Implementation
             await _collection.InsertOneAsync(saga);
             _logger.LogInformation("SagaState STARTED sagaId={SagaId} bookingId={BookingId} amount={Amount}",
                 sagaId, bookingId, requestedAmount);
+            return saga;
+        }
+
+        public async Task<SagaState> EnqueueAsync(
+            PaymentRequestedV1 request,
+            string? traceParent = null,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateRequest(request);
+
+            var normalizedRequest = request with
+            {
+                BookingId = request.BookingId.Trim(),
+                Currency = request.Currency.Trim().ToUpperInvariant(),
+                PayerUserId = request.PayerUserId.Trim(),
+                PayeeUserId = request.PayeeUserId.Trim(),
+                PaymentMethodToken = string.IsNullOrWhiteSpace(request.PaymentMethodToken)
+                    ? null
+                    : request.PaymentMethodToken.Trim()
+            };
+            var now = DateTime.UtcNow;
+            var saga = new SagaState
+            {
+                SagaId = normalizedRequest.SagaId,
+                BookingId = normalizedRequest.BookingId,
+                EscrowId = normalizedRequest.EscrowId,
+                Operation = normalizedRequest.Operation,
+                Status = SagaState.StatusStarted,
+                RequestedAmount = normalizedRequest.Amount,
+                PaymentRequest = PendingPaymentRequest.FromContract(normalizedRequest),
+                DispatchStatus = SagaDispatchStatus.PENDING,
+                DispatchAttemptCount = 0,
+                NextDispatchAttemptAt = now,
+                TraceParent = string.IsNullOrWhiteSpace(traceParent) ? null : traceParent.Trim(),
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            try
+            {
+                await _collection.InsertOneAsync(
+                    saga,
+                    cancellationToken: cancellationToken);
+            }
+            catch (MongoWriteException ex) when (IsActiveOperationDuplicate(ex))
+            {
+                throw new ActivePaymentSagaException(saga.BookingId, saga.Operation!);
+            }
+            catch (MongoWriteException ex) when (
+                ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+            {
+                throw;
+            }
+            catch (MongoException ex)
+            {
+                throw new SagaOutboxPersistenceException(
+                    "Payment saga and outbox request could not be persisted.",
+                    ex);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new SagaOutboxPersistenceException(
+                    "Payment saga and outbox request could not be persisted.",
+                    ex);
+            }
+
+            _logger.LogInformation(
+                "Enqueued payment saga sagaId={SagaId} bookingId={BookingId} escrowId={EscrowId} operation={Operation}",
+                saga.SagaId,
+                saga.BookingId,
+                saga.EscrowId,
+                saga.Operation);
             return saga;
         }
 
@@ -136,7 +237,11 @@ namespace calendar_service.Services.Implementation
         public Task<List<SagaState>> FindStuckAsync(TimeSpan stuckThreshold)
         {
             var cutoff = DateTime.UtcNow - stuckThreshold;
-            return _collection.Find(s => s.Status == SagaState.StatusStarted && s.CreatedAt < cutoff).ToListAsync();
+            return _collection.Find(
+                    s => s.Status == SagaState.StatusStarted
+                        && s.PaymentRequest == null
+                        && s.CreatedAt < cutoff)
+                .ToListAsync();
         }
 
         public async Task<SagaState?> TryClaimAsync(Guid sagaId, TimeSpan claimTtl)
@@ -151,6 +256,7 @@ namespace calendar_service.Services.Implementation
             var filter = Builders<SagaState>.Filter.And(
                 Builders<SagaState>.Filter.Eq(s => s.SagaId, sagaId),
                 Builders<SagaState>.Filter.Eq(s => s.Status, SagaState.StatusStarted),
+                Builders<SagaState>.Filter.Eq(s => s.PaymentRequest, null),
                 Builders<SagaState>.Filter.Or(
                     Builders<SagaState>.Filter.Eq(s => s.ReconciliationClaimedAt, null),
                     Builders<SagaState>.Filter.Lt(s => s.ReconciliationClaimedAt, claimCutoff)));
@@ -159,6 +265,57 @@ namespace calendar_service.Services.Implementation
 
             return await _collection.FindOneAndUpdateAsync(
                 filter, update, new FindOneAndUpdateOptions<SagaState> { ReturnDocument = ReturnDocument.After });
+        }
+
+        private static bool IsActiveOperationDuplicate(MongoWriteException exception) =>
+            exception.WriteError?.Category == ServerErrorCategory.DuplicateKey
+            && exception.WriteError.Message.Contains(
+                "uniq_active_booking_operation",
+                StringComparison.Ordinal);
+
+        private static void ValidateRequest(PaymentRequestedV1 request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.Validate();
+
+            if (request.SchemaVersion != PaymentRequestedV1.CurrentSchemaVersion)
+            {
+                throw new ArgumentException(
+                    $"Unsupported payment request schema version {request.SchemaVersion}.",
+                    nameof(request));
+            }
+            if (request.SagaId == Guid.Empty)
+            {
+                throw new ArgumentException("SagaId is required.", nameof(request));
+            }
+            if (request.EscrowId == Guid.Empty)
+            {
+                throw new ArgumentException("EscrowId is required.", nameof(request));
+            }
+            if (string.IsNullOrWhiteSpace(request.BookingId))
+            {
+                throw new ArgumentException("BookingId is required.", nameof(request));
+            }
+            if (request.Amount <= 0)
+            {
+                throw new ArgumentException("Amount must be greater than zero.", nameof(request));
+            }
+            if (string.IsNullOrWhiteSpace(request.Currency) || request.Currency.Trim().Length != 3)
+            {
+                throw new ArgumentException("Currency must be a three-letter code.", nameof(request));
+            }
+            if (string.IsNullOrWhiteSpace(request.PayerUserId)
+                || string.IsNullOrWhiteSpace(request.PayeeUserId))
+            {
+                throw new ArgumentException("PayerUserId and PayeeUserId are required.", nameof(request));
+            }
+            if (string.Equals(
+                request.PayerUserId.Trim(),
+                request.PayeeUserId.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("PayerUserId and PayeeUserId must be different.", nameof(request));
+            }
         }
     }
 }

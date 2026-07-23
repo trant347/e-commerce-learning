@@ -1,10 +1,12 @@
 using calendar_service.Model;
+using calendar_service.Services;
 using calendar_service.Services.DAO;
 using calendar_service.Services.Implementation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Driver;
 using Moq;
+using Payment.Contracts.V1;
 using System.Net;
 using Xunit;
 
@@ -123,6 +125,32 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public void Constructor_CreatesUniqueActiveBookingOperationIndex()
+        {
+            var col = new Mock<IMongoCollection<SagaState>>(MockBehavior.Loose);
+            var indexes = new Mock<IMongoIndexManager<SagaState>>(MockBehavior.Loose);
+            col.SetupGet(c => c.Indexes).Returns(indexes.Object);
+            var db = new Mock<IMongoDBService>();
+            db.Setup(d => d.GetCollection<SagaState>("SagaState")).Returns(col.Object);
+            var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
+
+            _ = new SagaStateService(
+                db.Object,
+                NullLogger<SagaStateService>.Instance,
+                config);
+
+            indexes.Verify(i => i.CreateOne(
+                    It.Is<CreateIndexModel<SagaState>>(model =>
+                        model.Options != null
+                        && model.Options.Name == "uniq_active_booking_operation"
+                        && model.Options.Unique == true
+                        && model.Options.PartialFilterExpression != null),
+                    It.IsAny<CreateOneIndexOptions>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+
+        [Fact]
         public async Task StartAsync_InsertsStartedSagaWithGivenFields()
         {
             var (svc, col) = BuildService();
@@ -145,6 +173,158 @@ namespace calendar_service.Tests
             col.Verify(c => c.InsertOneAsync(
                 It.IsAny<SagaState>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()),
                 Times.Once);
+        }
+
+        [Fact]
+        public async Task EnqueueAsync_InsertsStartedSagaAndPendingRequestAsOneDocument()
+        {
+            var (svc, col) = BuildService();
+            var request = NewPaymentRequest(PaymentOperation.FundEscrow);
+            SagaState? inserted = null;
+            col.Setup(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<SagaState, InsertOneOptions, CancellationToken>(
+                    (saga, _, _) => inserted = saga)
+                .Returns(Task.CompletedTask);
+
+            var saga = await svc.EnqueueAsync(
+                request with
+                {
+                    BookingId = " booking-1 ",
+                    Currency = "usd",
+                    PayerUserId = " requester ",
+                    PayeeUserId = " admin-custody ",
+                    PaymentMethodToken = " pmt_token "
+                },
+                " 00-trace-parent ");
+
+            Assert.Same(inserted, saga);
+            Assert.Equal(SagaState.StatusStarted, saga.Status);
+            Assert.Equal(request.SagaId, saga.SagaId);
+            Assert.Equal(request.EscrowId, saga.EscrowId);
+            Assert.Equal(PaymentOperation.FundEscrow, saga.Operation);
+            Assert.Equal(SagaDispatchStatus.PENDING, saga.DispatchStatus);
+            Assert.Equal(0, saga.DispatchAttemptCount);
+            Assert.NotNull(saga.NextDispatchAttemptAt);
+            Assert.Equal("00-trace-parent", saga.TraceParent);
+            Assert.NotNull(saga.PaymentRequest);
+            Assert.Equal("booking-1", saga.PaymentRequest!.BookingId);
+            Assert.Equal("USD", saga.PaymentRequest.Currency);
+            Assert.Equal("requester", saga.PaymentRequest.PayerUserId);
+            Assert.Equal("admin-custody", saga.PaymentRequest.PayeeUserId);
+            Assert.Equal("pmt_token", saga.PaymentRequest.PaymentMethodToken);
+            Assert.Equal(request, saga.PaymentRequest.ToContract());
+            col.Verify(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+
+        [Fact]
+        public async Task EnqueueAsync_PersistenceFailure_PropagatesWithoutAnyFollowupWrite()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("Mongo unavailable"));
+
+            var exception = await Assert.ThrowsAsync<SagaOutboxPersistenceException>(
+                () => svc.EnqueueAsync(NewPaymentRequest(PaymentOperation.FundEscrow)));
+
+            Assert.IsType<TimeoutException>(exception.InnerException);
+            col.Verify(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+            col.Verify(c => c.FindOneAndUpdateAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<UpdateDefinition<SagaState>>(),
+                    It.IsAny<FindOneAndUpdateOptions<SagaState, SagaState>>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Theory]
+        [InlineData(PaymentOperation.FundEscrow)]
+        [InlineData(PaymentOperation.ReleaseEscrow)]
+        [InlineData(PaymentOperation.RefundEscrow)]
+        public async Task EnqueueAsync_ConcurrentSameBookingOperation_SecondRequestIsRejected(
+            string operation)
+        {
+            var (svc, col) = BuildService();
+            col.SetupSequence(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask)
+                .ThrowsAsync(BuildDuplicateKeyMongoWriteException(
+                    "uniq_active_booking_operation"));
+
+            await svc.EnqueueAsync(NewPaymentRequest(operation));
+            var exception = await Assert.ThrowsAsync<ActivePaymentSagaException>(
+                () => svc.EnqueueAsync(NewPaymentRequest(operation)));
+
+            Assert.Equal("booking-1", exception.BookingId);
+            Assert.Equal(operation, exception.Operation);
+        }
+
+        [Fact]
+        public async Task EnqueueAsync_DuplicateSagaId_DoesNotMisreportActiveOperation()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(BuildDuplicateKeyMongoWriteException("uniq_saga_id"));
+
+            await Assert.ThrowsAsync<MongoWriteException>(
+                () => svc.EnqueueAsync(NewPaymentRequest(PaymentOperation.FundEscrow)));
+        }
+
+        [Fact]
+        public async Task EnqueueAsync_DifferentOperationsForSameBooking_AreAllowed()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            await svc.EnqueueAsync(NewPaymentRequest(PaymentOperation.ReleaseEscrow));
+            await svc.EnqueueAsync(NewPaymentRequest(PaymentOperation.RefundEscrow));
+
+            col.Verify(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task EnqueueAsync_InvalidRequest_DoesNotWrite()
+        {
+            var (svc, col) = BuildService();
+            var request = NewPaymentRequest(PaymentOperation.FundEscrow) with
+            {
+                PaymentMethodToken = null
+            };
+
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => svc.EnqueueAsync(request));
+
+            col.Verify(c => c.InsertOneAsync(
+                    It.IsAny<SagaState>(),
+                    It.IsAny<InsertOneOptions>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
         }
 
         [Fact]
@@ -383,6 +563,71 @@ namespace calendar_service.Tests
             var result = await svc.TryClaimAsync(Guid.NewGuid(), TimeSpan.FromSeconds(45));
 
             Assert.Null(result);
+        }
+
+        private static PaymentRequestedV1 NewPaymentRequest(string operation)
+        {
+            var isFunding = operation == PaymentOperation.FundEscrow;
+            return new PaymentRequestedV1
+            {
+                SagaId = Guid.NewGuid(),
+                EscrowId = Guid.NewGuid(),
+                BookingId = "booking-1",
+                Operation = operation,
+                Amount = 100m,
+                Currency = "USD",
+                PayerUserId = isFunding ? "requester" : "admin-custody",
+                PayeeUserId = operation == PaymentOperation.ReleaseEscrow
+                    ? "taskmaster"
+                    : isFunding
+                        ? "admin-custody"
+                        : "requester",
+                PaymentMethodToken = isFunding ? "pmt_token" : null
+            };
+        }
+
+        private static MongoWriteException BuildDuplicateKeyMongoWriteException(
+            string indexName)
+        {
+            var writeError = (WriteError)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(WriteError));
+            SetBackingField(writeError, "_category", ServerErrorCategory.DuplicateKey);
+            SetBackingField(writeError, "_code", 11000);
+            SetBackingField(
+                writeError,
+                "_message",
+                $"E11000 duplicate key error index: {indexName}");
+
+            var exception = (MongoWriteException)System.Runtime.Serialization.FormatterServices
+                .GetUninitializedObject(typeof(MongoWriteException));
+            SetBackingField(exception, "_writeError", writeError);
+            return exception;
+        }
+
+        private static void SetBackingField(
+            object target,
+            string fieldName,
+            object? value)
+        {
+            var type = target.GetType();
+            while (type != null)
+            {
+                var field = type.GetField(
+                    fieldName,
+                    System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic);
+                if (field != null)
+                {
+                    field.SetValue(target, value);
+                    return;
+                }
+
+                type = type.BaseType;
+            }
+
+            throw new InvalidOperationException(
+                $"Field '{fieldName}' was not found on {target.GetType().Name}.");
         }
     }
 }

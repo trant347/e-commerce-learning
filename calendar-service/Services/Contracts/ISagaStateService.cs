@@ -1,4 +1,5 @@
 using calendar_service.Model;
+using Payment.Contracts.V1;
 
 namespace calendar_service.Services.Contracts
 {
@@ -12,6 +13,15 @@ namespace calendar_service.Services.Contracts
     {
         /// <summary>Writes a new STARTED saga row before the payment-service call is made.</summary>
         Task<SagaState> StartAsync(string bookingId, Guid sagaId, decimal requestedAmount);
+
+        /// <summary>
+        /// Atomically inserts a STARTED saga and its pending escrow command. A partial unique
+        /// index rejects a second active saga for the same booking and operation.
+        /// </summary>
+        Task<SagaState> EnqueueAsync(
+            PaymentRequestedV1 request,
+            string? traceParent = null,
+            CancellationToken cancellationToken = default);
 
         /// <summary>Marks a saga COMPLETED once the payment is verified and the booking updated.</summary>
         Task<SagaState?> CompleteAsync(Guid sagaId, string paymentTransactionId);
