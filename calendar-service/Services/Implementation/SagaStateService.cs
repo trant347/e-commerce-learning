@@ -187,6 +187,118 @@ namespace calendar_service.Services.Implementation
             return saga;
         }
 
+        public async Task<SagaState?> TryClaimNextDispatchAsync(
+            TimeSpan claimLease,
+            CancellationToken cancellationToken = default)
+        {
+            if (claimLease <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(claimLease),
+                    "Dispatch claim lease must be greater than zero.");
+            }
+
+            var now = DateTime.UtcNow;
+            var filter = Builders<SagaState>.Filter.And(
+                Builders<SagaState>.Filter.Eq(s => s.Status, SagaState.StatusStarted),
+                Builders<SagaState>.Filter.Ne(s => s.PaymentRequest, null),
+                Builders<SagaState>.Filter.Or(
+                    Builders<SagaState>.Filter.And(
+                        Builders<SagaState>.Filter.Eq(
+                            s => s.DispatchStatus,
+                            SagaDispatchStatus.PENDING),
+                        Builders<SagaState>.Filter.Lte(
+                            s => s.NextDispatchAttemptAt,
+                            now)),
+                    Builders<SagaState>.Filter.And(
+                        Builders<SagaState>.Filter.Eq(
+                            s => s.DispatchStatus,
+                            SagaDispatchStatus.CLAIMED),
+                        Builders<SagaState>.Filter.Lte(
+                            s => s.DispatchClaimExpiresAt,
+                            now))));
+
+            var update = Builders<SagaState>.Update
+                .Set(s => s.DispatchStatus, SagaDispatchStatus.CLAIMED)
+                .Set(s => s.DispatchClaimedAt, now)
+                .Set(s => s.DispatchClaimExpiresAt, now.Add(claimLease))
+                .Set(s => s.LastDispatchAttemptAt, now)
+                .Inc(s => s.DispatchAttemptCount, 1)
+                .Set(s => s.UpdatedAt, now);
+
+            return await _collection.FindOneAndUpdateAsync(
+                filter,
+                update,
+                new FindOneAndUpdateOptions<SagaState>
+                {
+                    ReturnDocument = ReturnDocument.After,
+                    Sort = Builders<SagaState>.Sort
+                        .Ascending(s => s.NextDispatchAttemptAt)
+                        .Ascending(s => s.CreatedAt)
+                },
+                cancellationToken);
+        }
+
+        public async Task<bool> MarkDispatchedAsync(
+            Guid sagaId,
+            DateTime claimTimestamp,
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTime.UtcNow;
+            var filter = CurrentDispatchClaimFilter(sagaId, claimTimestamp);
+            var update = Builders<SagaState>.Update
+                .Set(s => s.DispatchStatus, SagaDispatchStatus.DISPATCHED)
+                .Set(s => s.DispatchedAt, now)
+                .Set(s => s.DispatchClaimedAt, null)
+                .Set(s => s.DispatchClaimExpiresAt, null)
+                .Set(s => s.NextDispatchAttemptAt, null)
+                .Set(s => s.LastDispatchError, null)
+                .Set(s => s.UpdatedAt, now);
+
+            var result = await _collection.UpdateOneAsync(
+                filter,
+                update,
+                cancellationToken: cancellationToken);
+            return result.ModifiedCount == 1;
+        }
+
+        public async Task<bool> RescheduleDispatchAsync(
+            Guid sagaId,
+            DateTime claimTimestamp,
+            DateTime nextAttemptAt,
+            string error,
+            CancellationToken cancellationToken = default)
+        {
+            if (nextAttemptAt.Kind != DateTimeKind.Utc)
+            {
+                throw new ArgumentException(
+                    "Next dispatch attempt must be expressed in UTC.",
+                    nameof(nextAttemptAt));
+            }
+            if (string.IsNullOrWhiteSpace(error))
+            {
+                throw new ArgumentException(
+                    "Dispatch failure reason is required.",
+                    nameof(error));
+            }
+
+            var now = DateTime.UtcNow;
+            var filter = CurrentDispatchClaimFilter(sagaId, claimTimestamp);
+            var update = Builders<SagaState>.Update
+                .Set(s => s.DispatchStatus, SagaDispatchStatus.PENDING)
+                .Set(s => s.NextDispatchAttemptAt, nextAttemptAt)
+                .Set(s => s.LastDispatchError, Truncate(error.Trim(), 2000))
+                .Set(s => s.DispatchClaimedAt, null)
+                .Set(s => s.DispatchClaimExpiresAt, null)
+                .Set(s => s.UpdatedAt, now);
+
+            var result = await _collection.UpdateOneAsync(
+                filter,
+                update,
+                cancellationToken: cancellationToken);
+            return result.ModifiedCount == 1;
+        }
+
         public async Task<SagaState?> CompleteAsync(Guid sagaId, string paymentTransactionId)
         {
             var update = Builders<SagaState>.Update
@@ -272,6 +384,21 @@ namespace calendar_service.Services.Implementation
             && exception.WriteError.Message.Contains(
                 "uniq_active_booking_operation",
                 StringComparison.Ordinal);
+
+        private static FilterDefinition<SagaState> CurrentDispatchClaimFilter(
+            Guid sagaId,
+            DateTime claimTimestamp) =>
+            Builders<SagaState>.Filter.And(
+                Builders<SagaState>.Filter.Eq(s => s.SagaId, sagaId),
+                Builders<SagaState>.Filter.Eq(
+                    s => s.DispatchStatus,
+                    SagaDispatchStatus.CLAIMED),
+                Builders<SagaState>.Filter.Eq(
+                    s => s.DispatchClaimedAt,
+                    claimTimestamp));
+
+        private static string Truncate(string value, int maxLength) =>
+            value.Length <= maxLength ? value : value[..maxLength];
 
         private static void ValidateRequest(PaymentRequestedV1 request)
         {

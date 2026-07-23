@@ -565,6 +565,118 @@ namespace calendar_service.Tests
             Assert.Null(result);
         }
 
+        [Fact]
+        public async Task TryClaimNextDispatchAsync_EligibleRequest_ReturnsClaimedSaga()
+        {
+            var (svc, col) = BuildService();
+            var claimed = new SagaState
+            {
+                SagaId = Guid.NewGuid(),
+                BookingId = "booking-1",
+                Status = SagaState.StatusStarted,
+                DispatchStatus = SagaDispatchStatus.CLAIMED,
+                DispatchAttemptCount = 1,
+                DispatchClaimedAt = DateTime.UtcNow,
+                DispatchClaimExpiresAt = DateTime.UtcNow.AddSeconds(30),
+                PaymentRequest = PendingPaymentRequest.FromContract(
+                    NewPaymentRequest(PaymentOperation.FundEscrow))
+            };
+            FindOneAndUpdateOptions<SagaState, SagaState>? options = null;
+            col.Setup(c => c.FindOneAndUpdateAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<UpdateDefinition<SagaState>>(),
+                    It.IsAny<FindOneAndUpdateOptions<SagaState, SagaState>>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<FilterDefinition<SagaState>, UpdateDefinition<SagaState>,
+                    FindOneAndUpdateOptions<SagaState, SagaState>, CancellationToken>(
+                    (_, _, capturedOptions, _) => options = capturedOptions)
+                .ReturnsAsync(claimed);
+
+            var result = await svc.TryClaimNextDispatchAsync(
+                TimeSpan.FromSeconds(30));
+
+            Assert.Same(claimed, result);
+            Assert.Equal(SagaDispatchStatus.CLAIMED, result!.DispatchStatus);
+            Assert.Equal(1, result.DispatchAttemptCount);
+            Assert.NotNull(result.DispatchClaimedAt);
+            Assert.NotNull(result.DispatchClaimExpiresAt);
+            Assert.NotNull(options?.Sort);
+            Assert.Equal(ReturnDocument.After, options?.ReturnDocument);
+        }
+
+        [Fact]
+        public async Task TryClaimNextDispatchAsync_NoEligibleRequest_ReturnsNull()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.FindOneAndUpdateAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<UpdateDefinition<SagaState>>(),
+                    It.IsAny<FindOneAndUpdateOptions<SagaState, SagaState>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SagaState?)null);
+
+            var result = await svc.TryClaimNextDispatchAsync(
+                TimeSpan.FromSeconds(30));
+
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task MarkDispatchedAsync_CurrentClaim_ReturnsTrue()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.UpdateOneAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<UpdateDefinition<SagaState>>(),
+                    It.IsAny<UpdateOptions>(),
+                    It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UpdateResultWithModifiedCount(1));
+
+            var result = await svc.MarkDispatchedAsync(
+                Guid.NewGuid(),
+                DateTime.UtcNow);
+
+            Assert.True(result);
+        }
+
+        [Fact]
+        public async Task MarkDispatchedAsync_StaleClaim_ReturnsFalse()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.UpdateOneAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<UpdateDefinition<SagaState>>(),
+                    It.IsAny<UpdateOptions>(),
+                    It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UpdateResultWithModifiedCount(0));
+
+            var result = await svc.MarkDispatchedAsync(
+                Guid.NewGuid(),
+                DateTime.UtcNow.AddMinutes(-1));
+
+            Assert.False(result);
+        }
+
+        [Fact]
+        public async Task RescheduleDispatchAsync_CurrentClaim_ReturnsTrue()
+        {
+            var (svc, col) = BuildService();
+            col.Setup(c => c.UpdateOneAsync(
+                    It.IsAny<FilterDefinition<SagaState>>(),
+                    It.IsAny<UpdateDefinition<SagaState>>(),
+                    It.IsAny<UpdateOptions>(),
+                    It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UpdateResultWithModifiedCount(1));
+
+            var result = await svc.RescheduleDispatchAsync(
+                Guid.NewGuid(),
+                DateTime.UtcNow,
+                DateTime.UtcNow.AddSeconds(5),
+                "Kafka unavailable");
+
+            Assert.True(result);
+        }
+
         private static PaymentRequestedV1 NewPaymentRequest(string operation)
         {
             var isFunding = operation == PaymentOperation.FundEscrow;
@@ -602,6 +714,15 @@ namespace calendar_service.Tests
                 .GetUninitializedObject(typeof(MongoWriteException));
             SetBackingField(exception, "_writeError", writeError);
             return exception;
+        }
+
+        private static UpdateResult UpdateResultWithModifiedCount(long count)
+        {
+            var result = new Mock<UpdateResult>();
+            result.SetupGet(r => r.IsAcknowledged).Returns(true);
+            result.SetupGet(r => r.MatchedCount).Returns(count);
+            result.SetupGet(r => r.ModifiedCount).Returns(count);
+            return result.Object;
         }
 
         private static void SetBackingField(

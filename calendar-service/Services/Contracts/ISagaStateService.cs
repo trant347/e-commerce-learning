@@ -23,6 +23,34 @@ namespace calendar_service.Services.Contracts
             string? traceParent = null,
             CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Atomically claims the next eligible undispatched outbox request. A CLAIMED request
+        /// becomes eligible again after its lease expires so another replica can recover it.
+        /// </summary>
+        Task<SagaState?> TryClaimNextDispatchAsync(
+            TimeSpan claimLease,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Marks a claimed request dispatched only when the supplied claim timestamp still owns
+        /// the lease. Returns false if the lease was lost or the request was already resolved.
+        /// </summary>
+        Task<bool> MarkDispatchedAsync(
+            Guid sagaId,
+            DateTime claimTimestamp,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Releases a failed claim back to PENDING with its next eligible retry time. The update
+        /// succeeds only for the current lease owner.
+        /// </summary>
+        Task<bool> RescheduleDispatchAsync(
+            Guid sagaId,
+            DateTime claimTimestamp,
+            DateTime nextAttemptAt,
+            string error,
+            CancellationToken cancellationToken = default);
+
         /// <summary>Marks a saga COMPLETED once the payment is verified and the booking updated.</summary>
         Task<SagaState?> CompleteAsync(Guid sagaId, string paymentTransactionId);
 

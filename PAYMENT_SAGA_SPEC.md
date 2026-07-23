@@ -466,13 +466,31 @@ Implementation details:
 
 ### Task 6 — Publish pending escrow commands from calendar-service
 
-- [ ] Add a `PaymentRequestOutboxWorker` that claims undispatched saga requests and publishes
+- [x] Add a `PaymentRequestOutboxWorker` that claims undispatched saga requests and publishes
       them to the `payment-requests` topic.
-- [ ] Publish camel-case JSON, set `sagaId` as the message key, and propagate `traceparent`.
-- [ ] Mark a request dispatched only after Kafka acknowledges publication.
-- [ ] Retry publication failures with bounded exponential backoff and a claim lease so another
+- [x] Publish camel-case JSON, set `sagaId` as the message key, and propagate `traceparent`.
+- [x] Mark a request dispatched only after Kafka acknowledges publication.
+- [x] Retry publication failures with bounded exponential backoff and a claim lease so another
       calendar-service replica can recover abandoned work.
-- [ ] Add tests for successful dispatch, Kafka failure, retry, and duplicate publication.
+- [x] Add tests for successful dispatch, Kafka failure, retry, and duplicate publication.
+
+Implementation details:
+
+1. `TryClaimNextDispatchAsync` uses one MongoDB `FindOneAndUpdate` to claim either an eligible
+   `PENDING` request or a `CLAIMED` request whose lease expired. Requests are ordered by next
+   attempt time and creation time, and each claim increments the attempt count.
+2. `DispatchClaimedAt` is the lease token. Dispatch acknowledgement and failure rescheduling
+   update the saga only when that exact claim still owns the document, so a stale replica cannot
+   overwrite a newer claim.
+3. `PaymentRequestProducer` serializes with the shared web/camel-case JSON options, uses the
+   contract's `SagaId` Kafka key, restores the stored `traceparent` header, and requires a
+   `Persisted` delivery report with Kafka `acks=all` and idempotent production enabled.
+4. The producer's delivery timeout defaults to 10 seconds, below the 30-second claim lease, to
+   avoid routine lease expiry while a degraded broker is still holding a publish call open.
+5. Failed attempts return to `PENDING` with configurable exponential backoff capped at 60
+   seconds. A bounded batch size prevents one worker pass from monopolizing the hosted service.
+6. Delivery remains intentionally at-least-once: a crash after Kafka persistence but before the
+   Mongo acknowledgement may republish the same saga id, which Task 7 must process idempotently.
 
 ### Task 7 — Consume escrow commands transactionally in payment-service
 
