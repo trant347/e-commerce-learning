@@ -1,9 +1,12 @@
+﻿using System.Diagnostics;
 using System.Security.Claims;
 using calendar_service.MessageQueue;
 using calendar_service.Model;
+using calendar_service.Services;
 using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
 using Microsoft.AspNetCore.Mvc;
+using Payment.Contracts.V1;
 
 namespace calendar_service.Controllers
 {
@@ -63,6 +66,7 @@ namespace calendar_service.Controllers
             public string ExpiryDate { get; set; } = string.Empty;
             public string CVV { get; set; } = string.Empty;
             public string OwnerName { get; set; } = string.Empty;
+            public string PaymentMethodToken { get; set; } = string.Empty;
         }
 
         /// <summary>
@@ -401,25 +405,33 @@ namespace calendar_service.Controllers
         }
 
         /// <summary>
-        /// POST <c>/api/booking/{id}/pay</c> — requester pays the invoice. The card details are
-        /// forwarded server-to-server to payment-service's <c>/api/payment/process</c> endpoint
-        /// (the frontend never calls payment-service directly), and the resulting transaction is
-        /// verified (APPROVED status, amount matches the invoice) before the booking is moved
-        /// from IMPLEMENTED to COMPLETED. Notifies the TaskMaster that payment was received.
+        /// POST <c>/api/booking/{id}/pay</c> — when asynchronous payments are enabled, the
+        /// requester supplies a payment-method token for an ACCEPTED booking and receives a
+        /// durable escrow-funding saga response immediately. During rollout, disabling the
+        /// feature retains the legacy IMPLEMENTED-booking card-payment flow.
         /// </summary>
-        /// <response code="200">The updated booking.</response>
-        /// <response code="400">Missing card details, or booking has no invoice amount.</response>
+        /// <response code="200">The updated booking from the legacy synchronous flow.</response>
+        /// <response code="202">Escrow funding was durably enqueued.</response>
+        /// <response code="400">Required token or legacy card details are missing.</response>
         /// <response code="401">No authenticated caller.</response>
         /// <response code="402">Payment was declined or payment-service could not be reached.</response>
         /// <response code="403">Caller is not the requester.</response>
         /// <response code="404">No booking with that id.</response>
-        /// <response code="409">Booking is not IMPLEMENTED.</response>
+        /// <response code="409">Booking is ineligible or payment is already active.</response>
+        /// <response code="503">The durable saga/outbox request could not be persisted.</response>
         [HttpPost("{id}/pay")]
         public async Task<IActionResult> Pay(string id, [FromBody] PayDto body)
         {
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
-            if (body == null || string.IsNullOrWhiteSpace(body.CardNumber) || string.IsNullOrWhiteSpace(body.CVV)
+            if (body == null) return BadRequest("Payment details are required");
+
+            if (_configuration.GetValue("AsyncPaymentsEnabled", false))
+            {
+                return await EnqueueEscrowFundingAsync(id, body, caller);
+            }
+
+            if (string.IsNullOrWhiteSpace(body.CardNumber) || string.IsNullOrWhiteSpace(body.CVV)
                 || string.IsNullOrWhiteSpace(body.ExpiryDate) || string.IsNullOrWhiteSpace(body.OwnerName))
             {
                 return BadRequest("cardNumber, expiryDate, cvv and ownerName are required");
@@ -575,6 +587,121 @@ namespace calendar_service.Controllers
                 LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
                 return Conflict(new { error = ex.Message });
             }
+        }
+
+        private async Task<IActionResult> EnqueueEscrowFundingAsync(
+            string bookingId,
+            PayDto body,
+            string caller)
+        {
+            if (string.IsNullOrWhiteSpace(body.PaymentMethodToken))
+            {
+                return BadRequest("paymentMethodToken is required");
+            }
+
+            var booking = await _service.GetByIdAsync(bookingId);
+            if (booking == null) return NotFound();
+            if (!string.Equals(booking.RequesterUsername, caller, StringComparison.OrdinalIgnoreCase))
+            {
+                return Forbid();
+            }
+            if (booking.Status != Booking.StatusAccepted)
+            {
+                return Conflict(new
+                {
+                    error = $"Booking is {booking.Status} and is not eligible for escrow funding"
+                });
+            }
+            if (booking.AgreedAmount is null or <= 0
+                || string.IsNullOrWhiteSpace(booking.AgreedCurrency))
+            {
+                return Conflict(new
+                {
+                    error = "Booking price and currency must be fixed before escrow funding"
+                });
+            }
+            if (booking.WorkStartedAt.HasValue)
+            {
+                return Conflict(new { error = "Work has already started for this booking" });
+            }
+            if (booking.EscrowId.HasValue
+                && booking.EscrowStatus != EscrowStatus.Pending)
+            {
+                return Conflict(new
+                {
+                    error = $"Booking escrow is {booking.EscrowStatus} and cannot be funded again"
+                });
+            }
+
+            var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(bookingId);
+            if (latestSaga?.Status == SagaState.StatusStarted)
+            {
+                return Conflict(new
+                {
+                    error = "Escrow funding for this booking is already being processed"
+                });
+            }
+
+            var escrowId = booking.EscrowId ?? Guid.NewGuid();
+            if (!booking.EscrowId.HasValue)
+            {
+                try
+                {
+                    booking = await _service.AttachEscrowAsync(bookingId, caller, escrowId);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return Forbid();
+                }
+                catch (KeyNotFoundException)
+                {
+                    return NotFound();
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return Conflict(new { error = ex.Message });
+                }
+            }
+
+            var custodyUserId = _configuration["Escrow:CustodyUserId"];
+            if (string.IsNullOrWhiteSpace(custodyUserId))
+            {
+                throw new InvalidOperationException("Escrow:CustodyUserId is required");
+            }
+
+            var sagaId = Guid.NewGuid();
+            var request = new PaymentRequestedV1
+            {
+                SagaId = sagaId,
+                EscrowId = escrowId,
+                BookingId = bookingId,
+                Operation = PaymentOperation.FundEscrow,
+                Amount = booking.AgreedAmount!.Value,
+                Currency = booking.AgreedCurrency!,
+                PayerUserId = caller,
+                PayeeUserId = custodyUserId,
+                PaymentMethodToken = body.PaymentMethodToken.Trim()
+            };
+
+            try
+            {
+                await _sagaStateService.EnqueueAsync(
+                    request,
+                    Activity.Current?.Id,
+                    HttpContext.RequestAborted);
+            }
+            catch (ActivePaymentSagaException ex)
+            {
+                return Conflict(new { error = ex.Message });
+            }
+
+            var response = new PaymentAcceptedResponseV1
+            {
+                SagaId = sagaId,
+                EscrowId = escrowId,
+                StatusUrl = $"/api/booking/payment-status/{sagaId:D}"
+            };
+            return Accepted(response.StatusUrl, response);
         }
 
         /// <summary>

@@ -438,14 +438,31 @@ Implementation details:
 
 ### Task 5 — Change `/pay` to enqueue escrow funding and return immediately
 
-- [ ] When `AsyncPaymentsEnabled` is true, validate the accepted booking and token, create the
+- [x] When `AsyncPaymentsEnabled` is true, validate the accepted booking and token, create the
       escrow plus durable `FUND_ESCROW` saga request, and return `202 Accepted` without calling
       `IPaymentApiClient.ProcessPaymentAsync`.
-- [ ] Preserve ownership checks and reject unpaid-price changes, duplicate funding, work already
+- [x] Preserve ownership checks and reject unpaid-price changes, duplicate funding, work already
       started, and bookings that are not eligible for funding.
-- [ ] Keep the synchronous implementation as the disabled-feature fallback during rollout.
-- [ ] Add controller tests proving `/pay` returns saga/escrow ids and does not wait for or call
+- [x] Keep the synchronous implementation as the disabled-feature fallback during rollout.
+- [x] Add controller tests proving `/pay` returns saga/escrow ids and does not wait for or call
       payment-service directly.
+
+Implementation details:
+
+1. The async request accepts only `paymentMethodToken`; raw card fields remain limited to the
+   disabled-feature legacy path and are never copied into the saga/outbox request.
+2. Funding requires the requester-owned booking to remain `ACCEPTED` with its immutable amount
+   and currency fixed. Started work, funded/terminal escrows, and active saga duplicates return
+   `409`.
+3. The booking first receives a stable pending escrow id, then `EnqueueAsync` atomically persists
+   the `STARTED` saga and `FUND_ESCROW` command. If that durable write returns `503`, a retry
+   reuses the same pending escrow id rather than creating another escrow.
+4. The command moves funds from the requester to the explicitly configured
+   `Escrow:CustodyUserId`; the TaskMaster remains the escrow beneficiary for the later release.
+5. Successful enqueue returns `PaymentAcceptedResponseV1` with `202 Accepted`, a `Location`
+   header, saga/escrow ids, `PENDING`, and the future Task 11 payment-status URL.
+6. `AsyncPaymentsEnabled` defaults to `false`, preserving the existing synchronous
+   `IMPLEMENTED`-booking payment path during rollout.
 
 ### Task 6 — Publish pending escrow commands from calendar-service
 

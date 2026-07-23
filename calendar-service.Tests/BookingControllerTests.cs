@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Payment.Contracts.V1;
 using Xunit;
 
 namespace calendar_service.Tests
@@ -480,6 +481,346 @@ namespace calendar_service.Tests
         }
 
         // ---- Pay ----
+
+        private static Booking AcceptedBooking(Guid? escrowId = null) => new()
+        {
+            Id = "bk-1",
+            TaskMasterId = TaskMasterId,
+            TaskMasterUsername = OwnerUsername,
+            RequesterUsername = Caller,
+            SlotStart = FutureSlot(),
+            DurationHours = 1,
+            Status = Booking.StatusAccepted,
+            AgreedAmount = 100m,
+            AgreedCurrency = "USD",
+            EscrowId = escrowId,
+            EscrowStatus = escrowId.HasValue ? EscrowStatus.Pending : null
+        };
+
+        private static IConfiguration AsyncPaymentConfiguration() =>
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AsyncPaymentsEnabled"] = "true",
+                    ["Escrow:CustodyUserId"] = "admin-custody"
+                })
+                .Build();
+
+        private static BookingController.PayDto ValidTokenPayDto() => new()
+        {
+            PaymentMethodToken = "pmt_opaque-token"
+        };
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_AttachesEscrowEnqueuesFundingAndReturns202()
+        {
+            var service = new Mock<IBookingService>();
+            var paymentClient = new Mock<IPaymentApiClient>();
+            var sagaState = new Mock<ISagaStateService>();
+            var accepted = AcceptedBooking();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(accepted);
+            service.Setup(s => s.AttachEscrowAsync("bk-1", Caller, It.IsAny<Guid>()))
+                .ReturnsAsync((string _, string _, Guid escrowId) =>
+                {
+                    accepted.EscrowId = escrowId;
+                    accepted.EscrowStatus = EscrowStatus.Pending;
+                    return accepted;
+                });
+
+            PaymentRequestedV1? enqueued = null;
+            sagaState.Setup(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<PaymentRequestedV1, string?, CancellationToken>(
+                    (request, _, _) => enqueued = request)
+                .ReturnsAsync((PaymentRequestedV1 request, string? _, CancellationToken _) =>
+                    new SagaState
+                    {
+                        SagaId = request.SagaId,
+                        EscrowId = request.EscrowId,
+                        BookingId = request.BookingId,
+                        Operation = request.Operation
+                    });
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                paymentClient: paymentClient,
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            var acceptedResult = Assert.IsType<AcceptedResult>(result);
+            var response = Assert.IsType<PaymentAcceptedResponseV1>(acceptedResult.Value);
+            Assert.NotEqual(Guid.Empty, response.SagaId);
+            Assert.Equal(accepted.EscrowId, response.EscrowId);
+            Assert.Equal(PaymentAcceptedResponseV1.PendingStatus, response.Status);
+            Assert.Equal(
+                $"/api/booking/payment-status/{response.SagaId:D}",
+                response.StatusUrl);
+            Assert.Equal(response.StatusUrl, acceptedResult.Location);
+
+            Assert.NotNull(enqueued);
+            Assert.Equal(response.SagaId, enqueued.SagaId);
+            Assert.Equal(response.EscrowId, enqueued.EscrowId);
+            Assert.Equal("bk-1", enqueued.BookingId);
+            Assert.Equal(PaymentOperation.FundEscrow, enqueued.Operation);
+            Assert.Equal(100m, enqueued.Amount);
+            Assert.Equal("USD", enqueued.Currency);
+            Assert.Equal(Caller, enqueued.PayerUserId);
+            Assert.Equal("admin-custody", enqueued.PayeeUserId);
+            Assert.Equal("pmt_opaque-token", enqueued.PaymentMethodToken);
+            paymentClient.Verify(c => c.ProcessPaymentAsync(
+                    It.IsAny<CreditCardInfo>(),
+                    It.IsAny<decimal>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_RetryReusesPendingEscrow()
+        {
+            var escrowId = Guid.NewGuid();
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            service.Setup(s => s.GetByIdAsync("bk-1"))
+                .ReturnsAsync(AcceptedBooking(escrowId));
+            sagaState.Setup(s => s.EnqueueAsync(
+                    It.Is<PaymentRequestedV1>(request => request.EscrowId == escrowId),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((PaymentRequestedV1 request, string? _, CancellationToken _) =>
+                    new SagaState { SagaId = request.SagaId });
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<AcceptedResult>(result);
+            service.Verify(
+                s => s.AttachEscrowAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_WithoutToken_Returns400()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", new BookingController.PayDto());
+
+            Assert.IsType<BadRequestObjectResult>(result);
+            service.Verify(s => s.GetByIdAsync(It.IsAny<string>()), Times.Never);
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Theory]
+        [InlineData(Booking.StatusPending)]
+        [InlineData(Booking.StatusInProgress)]
+        [InlineData(Booking.StatusImplemented)]
+        [InlineData(Booking.StatusCompleted)]
+        public async Task Pay_AsyncEnabled_WhenBookingIsNotAccepted_Returns409(
+            string status)
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var booking = AcceptedBooking();
+            booking.Status = status;
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+            service.Verify(s => s.AttachEscrowAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>()),
+                Times.Never);
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_WhenFundingSagaIsActive_Returns409()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(AcceptedBooking());
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
+                .ReturnsAsync(new SagaState
+                {
+                    BookingId = "bk-1",
+                    Status = SagaState.StatusStarted,
+                    Operation = PaymentOperation.FundEscrow
+                });
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+            service.Verify(s => s.AttachEscrowAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>()),
+                Times.Never);
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_WhenCallerIsNotRequester_Returns403()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var booking = AcceptedBooking();
+            booking.RequesterUsername = "carol";
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<ForbidResult>(result);
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_WithoutFixedPrice_Returns409()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var booking = AcceptedBooking();
+            booking.AgreedAmount = null;
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+            service.Verify(s => s.AttachEscrowAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>()),
+                Times.Never);
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_WhenEscrowAlreadyFunded_Returns409()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var booking = AcceptedBooking(Guid.NewGuid());
+            booking.EscrowStatus = EscrowStatus.Funded;
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task Pay_AsyncEnabled_WhenConcurrentEnqueueWins_Returns409()
+        {
+            var escrowId = Guid.NewGuid();
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            service.Setup(s => s.GetByIdAsync("bk-1"))
+                .ReturnsAsync(AcceptedBooking(escrowId));
+            sagaState.Setup(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new calendar_service.Services.ActivePaymentSagaException(
+                    "bk-1",
+                    PaymentOperation.FundEscrow));
+
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+
+            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+
+            Assert.IsType<ConflictObjectResult>(result);
+        }
 
         private static Booking ImplementedBooking(decimal invoiceAmount = 100m) => new()
         {
