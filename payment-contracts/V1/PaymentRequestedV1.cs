@@ -15,6 +15,7 @@ public sealed record PaymentRequestedV1
     public required string Currency { get; init; }
     public required string PayerUserId { get; init; }
     public required string PayeeUserId { get; init; }
+    public string TaskMasterUserId { get; init; } = string.Empty;
     public string? PaymentMethodToken { get; init; }
 
     [JsonIgnore]
@@ -22,6 +23,13 @@ public sealed record PaymentRequestedV1
 
     public void Validate()
     {
+        if (string.IsNullOrWhiteSpace(TaskMasterUserId))
+        {
+            throw new ArgumentException(
+                "TaskMasterUserId is required.",
+                nameof(TaskMasterUserId));
+        }
+
         if (Operation == PaymentOperation.FundEscrow)
         {
             if (string.IsNullOrWhiteSpace(PaymentMethodToken))

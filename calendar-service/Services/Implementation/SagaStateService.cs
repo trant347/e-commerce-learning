@@ -128,6 +128,7 @@ namespace calendar_service.Services.Implementation
                 Currency = request.Currency.Trim().ToUpperInvariant(),
                 PayerUserId = request.PayerUserId.Trim(),
                 PayeeUserId = request.PayeeUserId.Trim(),
+                TaskMasterUserId = request.TaskMasterUserId.Trim(),
                 PaymentMethodToken = string.IsNullOrWhiteSpace(request.PaymentMethodToken)
                     ? null
                     : request.PaymentMethodToken.Trim()
@@ -432,9 +433,12 @@ namespace calendar_service.Services.Implementation
                 throw new ArgumentException("Currency must be a three-letter code.", nameof(request));
             }
             if (string.IsNullOrWhiteSpace(request.PayerUserId)
-                || string.IsNullOrWhiteSpace(request.PayeeUserId))
+                || string.IsNullOrWhiteSpace(request.PayeeUserId)
+                || string.IsNullOrWhiteSpace(request.TaskMasterUserId))
             {
-                throw new ArgumentException("PayerUserId and PayeeUserId are required.", nameof(request));
+                throw new ArgumentException(
+                    "PayerUserId, PayeeUserId, and TaskMasterUserId are required.",
+                    nameof(request));
             }
             if (string.Equals(
                 request.PayerUserId.Trim(),

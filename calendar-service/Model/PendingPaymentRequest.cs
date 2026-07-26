@@ -17,6 +17,7 @@ namespace calendar_service.Model
         public string Currency { get; set; } = string.Empty;
         public string PayerUserId { get; set; } = string.Empty;
         public string PayeeUserId { get; set; } = string.Empty;
+        public string TaskMasterUserId { get; set; } = string.Empty;
         public string? PaymentMethodToken { get; set; }
 
         public static PendingPaymentRequest FromContract(PaymentRequestedV1 request) => new()
@@ -30,6 +31,7 @@ namespace calendar_service.Model
             Currency = request.Currency,
             PayerUserId = request.PayerUserId,
             PayeeUserId = request.PayeeUserId,
+            TaskMasterUserId = request.TaskMasterUserId,
             PaymentMethodToken = request.PaymentMethodToken
         };
 
@@ -44,6 +46,7 @@ namespace calendar_service.Model
             Currency = Currency,
             PayerUserId = PayerUserId,
             PayeeUserId = PayeeUserId,
+            TaskMasterUserId = TaskMasterUserId,
             PaymentMethodToken = PaymentMethodToken
         };
     }

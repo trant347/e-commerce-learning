@@ -49,6 +49,23 @@ namespace payment_service.Models
         /// </summary>
         public Guid? SagaId { get; set; }
 
+        public Guid? EscrowId { get; set; }
+
+        [MaxLength(100)]
+        public string? BookingId { get; set; }
+
+        [MaxLength(20)]
+        public string? Operation { get; set; }
+
+        [MaxLength(200)]
+        public string? PayerUserId { get; set; }
+
+        [MaxLength(200)]
+        public string? PayeeUserId { get; set; }
+
+        [MaxLength(200)]
+        public string? TaskMasterUserId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

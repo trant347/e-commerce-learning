@@ -21,6 +21,7 @@ public class PaymentContractSerializationTests
             Currency = "USD",
             PayerUserId = "alice",
             PayeeUserId = "admin-escrow",
+            TaskMasterUserId = "bob",
             PaymentMethodToken = "pmt_opaque"
         };
 
@@ -37,6 +38,7 @@ public class PaymentContractSerializationTests
         Assert.Equal("USD", root.GetProperty("currency").GetString());
         Assert.Equal("alice", root.GetProperty("payerUserId").GetString());
         Assert.Equal("admin-escrow", root.GetProperty("payeeUserId").GetString());
+        Assert.Equal("bob", root.GetProperty("taskMasterUserId").GetString());
         Assert.Equal("pmt_opaque", root.GetProperty("paymentMethodToken").GetString());
         Assert.False(root.TryGetProperty("kafkaMessageKey", out _));
         Assert.Equal(sagaId.ToString("D"), message.KafkaMessageKey);
@@ -57,6 +59,7 @@ public class PaymentContractSerializationTests
               "currency": "USD",
               "payerUserId": "alice",
               "payeeUserId": "admin-escrow",
+              "taskMasterUserId": "bob",
               "paymentMethodToken": "pmt_opaque",
               "futureOptionalField": "ignored"
             }
@@ -85,7 +88,8 @@ public class PaymentContractSerializationTests
             Amount = 125.50m,
             Currency = "USD",
             PayerUserId = "admin-escrow",
-            PayeeUserId = "bob"
+            PayeeUserId = "bob",
+            TaskMasterUserId = "bob"
         };
 
         var json = JsonSerializer.Serialize(message, PaymentContractJson.SerializerOptions);
@@ -112,6 +116,7 @@ public class PaymentContractSerializationTests
             Currency = "USD",
             PayerUserId = "alice",
             PayeeUserId = "admin-escrow",
+            TaskMasterUserId = "bob",
             PaymentMethodToken = paymentMethodToken
         };
 

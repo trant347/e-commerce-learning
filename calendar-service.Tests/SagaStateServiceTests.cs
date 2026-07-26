@@ -694,6 +694,7 @@ namespace calendar_service.Tests
                     : isFunding
                         ? "admin-custody"
                         : "requester",
+                TaskMasterUserId = "taskmaster",
                 PaymentMethodToken = isFunding ? "pmt_token" : null
             };
         }

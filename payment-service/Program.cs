@@ -28,8 +28,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IPaymentMethodTokenService, PaymentMethodTokenService>();
 builder.Services.AddScoped<IPaymentMethodTokenCleanupService, PaymentMethodTokenCleanupService>();
 builder.Services.AddScoped<IEscrowService, EscrowService>();
+builder.Services.AddScoped<IPaymentRequestProcessor, PaymentRequestProcessor>();
 builder.Services.AddHostedService<PaymentMethodTokenCleanupWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
+builder.Services.AddHostedService<payment_service.MessageQueue.PaymentRequestConsumerWorker>();
 
 // Consul service discovery
 builder.Services.Configure<payment_service.ConsulConfig.ConsulConfig>(builder.Configuration.GetSection("ConsulConfig"));

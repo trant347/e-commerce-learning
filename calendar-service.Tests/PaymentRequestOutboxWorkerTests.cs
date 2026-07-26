@@ -200,6 +200,7 @@ namespace calendar_service.Tests
                 Currency = "USD",
                 PayerUserId = "requester",
                 PayeeUserId = "admin-custody",
+                TaskMasterUserId = "taskmaster",
                 PaymentMethodToken = "pmt_token"
             };
             return new SagaState

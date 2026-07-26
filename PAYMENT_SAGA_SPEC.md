@@ -494,21 +494,47 @@ Implementation details:
 
 ### Task 7 — Consume escrow commands transactionally in payment-service
 
-- [ ] Add a `PaymentRequestConsumerWorker` using a dedicated consumer group and manual offset
+- [x] Add a `PaymentRequestConsumerWorker` using a dedicated consumer group and manual offset
       commits.
-- [ ] Validate the schema version, operation, escrow state, amount, currency, payer, and payee
+- [x] Validate the schema version, operation, escrow state, amount, currency, payer, and payee
       before processing.
-- [ ] For `FUND_ESCROW`, redeem the token and transfer requester funds into the admin custody
+- [x] For `FUND_ESCROW`, redeem the token and transfer requester funds into the admin custody
       wallet; for `RELEASE_ESCROW` and `REFUND_ESCROW`, transfer held funds from custody to the
       TaskMaster or requester without a payment-method token.
-- [ ] Persist the wallet movement, payment transaction, and escrow state transition in one
+- [x] Persist the wallet movement, payment transaction, and escrow state transition in one
       PostgreSQL transaction.
-- [ ] Preserve the unique `SagaId` constraint so duplicate Kafka deliveries return the original
+- [x] Preserve the unique `SagaId` constraint so duplicate Kafka deliveries return the original
       result rather than moving money again.
-- [ ] Lock wallets in deterministic user-id order to reduce deadlock risk.
-- [ ] Commit the Kafka offset only after the database transaction succeeds.
-- [ ] Add tests for funding, release, refund, insufficient funds, invalid escrow state, malformed,
+- [x] Lock wallets in deterministic user-id order to reduce deadlock risk.
+- [x] Commit the Kafka offset only after the database transaction succeeds.
+- [x] Add tests for funding, release, refund, insufficient funds, invalid escrow state, malformed,
       unsupported-version, and duplicate events.
+
+Implementation details:
+
+1. `PaymentRequestedV1` now carries an additive `taskMasterUserId` field. Funding already
+   identifies requester and custody as the transfer parties, so this beneficiary is required to
+   create and validate the authoritative escrow ledger without a synchronous payment-service
+   callback.
+2. `PaymentRequestProcessor` normalizes and validates the command, then opens one PostgreSQL
+   transaction. It locks the escrow row and both wallets with `FOR UPDATE`; wallet ids are sorted
+   ordinally before locking so competing transfers acquire locks in the same order.
+3. Funding creates or validates a `PENDING` escrow, atomically redeems the single-use token,
+   moves requester funds to custody, records the transaction, and transitions the escrow to
+   `FUNDED`. Release and refund require `FUNDED`, validate their operation-specific parties, move
+   custody funds, and transition to `RELEASED` or `REFUNDED`.
+4. Declined funding attempts still persist their transaction and consumed token, but leave
+   wallet balances unchanged and the escrow `PENDING` so a later saga can retry with a new token.
+5. Escrow command identity fields are stored on `payment_transactions`. A duplicate `SagaId`
+   returns the original `PaymentResultV1`; a concurrent unique-key race rolls back and then
+   reloads that winner, so no wallet movement can be applied twice.
+6. `PaymentRequestConsumerWorker` uses a dedicated group with auto commit and auto offset storage
+   disabled. It commits only after processor success. On failure it seeks the partition back to
+   the failed offset before retrying, preventing a later cumulative commit from skipping the
+   failed command.
+7. Task 7 returns the in-memory result to the consumer but does not publish it. Task 8 will add
+   the transactional result outbox so the database outcome and future `payment-results` event
+   cannot diverge.
 
 ### Task 8 — Add a transactional payment-result outbox
 

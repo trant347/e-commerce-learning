@@ -29,6 +29,9 @@ namespace payment_service.Data
                     .IsUnique()
                     .HasFilter("\"SagaId\" IS NOT NULL")
                     .HasDatabaseName("IX_payment_transactions_saga_id");
+                entity.HasIndex(t => t.EscrowId)
+                    .HasFilter("\"EscrowId\" IS NOT NULL")
+                    .HasDatabaseName("IX_payment_transactions_escrow_id");
             });
 
             modelBuilder.Entity<UserWallet>(entity =>

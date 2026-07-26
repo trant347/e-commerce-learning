@@ -680,6 +680,7 @@ namespace calendar_service.Controllers
                 Currency = booking.AgreedCurrency!,
                 PayerUserId = caller,
                 PayeeUserId = custodyUserId,
+                TaskMasterUserId = booking.TaskMasterUsername,
                 PaymentMethodToken = body.PaymentMethodToken.Trim()
             };
 
