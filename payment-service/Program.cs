@@ -2,6 +2,7 @@ using Consul;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using payment_service.Data;
+using payment_service.MessageQueue;
 using payment_service.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,9 +30,14 @@ builder.Services.AddScoped<IPaymentMethodTokenService, PaymentMethodTokenService
 builder.Services.AddScoped<IPaymentMethodTokenCleanupService, PaymentMethodTokenCleanupService>();
 builder.Services.AddScoped<IEscrowService, EscrowService>();
 builder.Services.AddScoped<IPaymentRequestProcessor, PaymentRequestProcessor>();
+builder.Services.AddScoped<IPaymentResultOutboxStore, PaymentResultOutboxStore>();
+builder.Services.Configure<PaymentResultProducerOptions>(
+    builder.Configuration.GetSection("PaymentResultProducer"));
+builder.Services.AddSingleton<IPaymentResultProducer, PaymentResultProducer>();
 builder.Services.AddHostedService<PaymentMethodTokenCleanupWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.PaymentRequestConsumerWorker>();
+builder.Services.AddHostedService<PaymentResultOutboxWorker>();
 
 // Consul service discovery
 builder.Services.Configure<payment_service.ConsulConfig.ConsulConfig>(builder.Configuration.GetSection("ConsulConfig"));

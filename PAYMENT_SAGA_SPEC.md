@@ -532,20 +532,43 @@ Implementation details:
    disabled. It commits only after processor success. On failure it seeks the partition back to
    the failed offset before retrying, preventing a later cumulative commit from skipping the
    failed command.
-7. Task 7 returns the in-memory result to the consumer but does not publish it. Task 8 will add
-   the transactional result outbox so the database outcome and future `payment-results` event
-   cannot diverge.
+7. Task 7 returns the in-memory result to the consumer. Task 8 now persists that result in the
+   same transaction and publishes it asynchronously through the result outbox.
 
 ### Task 8 — Add a transactional payment-result outbox
 
-- [ ] Add a PostgreSQL `payment_result_outbox` table.
-- [ ] Insert the payment transaction, wallet and escrow changes, and result-outbox row in the same
+- [x] Add a PostgreSQL `payment_result_outbox` table.
+- [x] Insert the payment transaction, wallet and escrow changes, and result-outbox row in the same
       database transaction.
-- [ ] Add a worker that publishes undispatched rows to `payment-results` and marks them dispatched
+- [x] Add a worker that publishes undispatched rows to `payment-results` and marks them dispatched
       only after Kafka acknowledgement.
-- [ ] Make result publication retryable and idempotent.
-- [ ] Add tests proving rollback cannot leave wallet or escrow changes without a result and that
+- [x] Make result publication retryable and idempotent.
+- [x] Add tests proving rollback cannot leave wallet or escrow changes without a result and that
       an unpublished result is republished after restart.
+
+Implementation details:
+
+1. `payment_result_outbox` stores one unique row per saga and transaction, including the
+   camel-case `PaymentResultV1` JSON payload, trace context, dispatch state, attempt count,
+   retry time, claim lease, last error, and acknowledgement timestamp.
+2. `PaymentRequestProcessor` adds the payment transaction and result-outbox row before its single
+   `SaveChangesAsync` call. Wallet, token, escrow, transaction, and result changes therefore
+   commit or roll back together inside the same relational transaction.
+3. `PaymentResultOutboxWorker` atomically claims due rows with PostgreSQL
+   `FOR UPDATE SKIP LOCKED`. Expired claims are eligible again after a process stop, and claim
+   acknowledgement/rescheduling uses compare-and-set updates keyed by the claim timestamp.
+4. `PaymentResultProducer` publishes to `payment-results` with `SagaId` as the Kafka key,
+   `Acks.All`, Kafka producer idempotence, and persisted-delivery acknowledgement. The worker
+   marks a row `DISPATCHED` only after that acknowledgement.
+5. Publication failures return the row to `PENDING` with configurable exponential backoff. The
+   claim lease must exceed the Kafka message timeout by more than five seconds so another worker
+   cannot reclaim a normally in-flight publication.
+6. Delivery remains intentionally at-least-once across a crash after Kafka persistence but before
+   the PostgreSQL acknowledgement. The stable saga key and Task 9 result deduplication make that
+   recovery path safe.
+7. The migration backfills existing escrow transactions, and every worker pass reconciles any
+   transaction still missing an outbox row. This closes the rolling-deployment window where an
+   older payment-service instance could commit a Task 7 transaction after the one-time backfill.
 
 ### Task 9 — Consume escrow results in calendar-service
 

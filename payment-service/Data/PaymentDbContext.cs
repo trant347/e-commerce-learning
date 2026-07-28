@@ -13,6 +13,7 @@ namespace payment_service.Data
         public DbSet<UserWallet> Wallets => Set<UserWallet>();
         public DbSet<PaymentMethodTokenRecord> PaymentMethodTokens => Set<PaymentMethodTokenRecord>();
         public DbSet<EscrowRecord> Escrows => Set<EscrowRecord>();
+        public DbSet<PaymentResultOutbox> PaymentResultOutbox => Set<PaymentResultOutbox>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -84,6 +85,28 @@ namespace payment_service.Data
                         "CK_escrows_status_valid",
                         "\"Status\" IN ('PENDING', 'FUNDED', 'RELEASED', 'REFUNDED')");
                 });
+            });
+
+            modelBuilder.Entity<PaymentResultOutbox>(entity =>
+            {
+                entity.ToTable("payment_result_outbox");
+                entity.HasKey(row => row.Id);
+                entity.Property(row => row.Payload).HasColumnType("jsonb");
+                entity.HasIndex(row => row.SagaId)
+                    .IsUnique()
+                    .HasDatabaseName("IX_payment_result_outbox_saga_id");
+                entity.HasIndex(row => row.TransactionId)
+                    .IsUnique()
+                    .HasDatabaseName("IX_payment_result_outbox_transaction_id");
+                entity.HasIndex(row => new
+                    {
+                        row.DispatchStatus,
+                        row.NextDispatchAttemptAt
+                    })
+                    .HasDatabaseName("IX_payment_result_outbox_pending");
+                entity.ToTable(table => table.HasCheckConstraint(
+                    "CK_payment_result_outbox_dispatch_status_valid",
+                    "\"DispatchStatus\" IN ('PENDING', 'CLAIMED', 'DISPATCHED')"));
             });
         }
     }

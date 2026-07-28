@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Payment.Contracts;
 using payment_service.Data;
 using payment_service.Models;
 using Payment.Contracts.V1;
@@ -52,6 +55,7 @@ namespace payment_service.Services
             try
             {
                 var result = await ProcessNewAsync(request, cancellationToken);
+                AddResultOutbox(result);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 if (dbTransaction != null)
                 {
@@ -203,11 +207,27 @@ namespace payment_service.Services
             return escrow;
         }
 
+        private void AddResultOutbox(PaymentResultV1 result)
+        {
+            var now = UtcNow();
+            _dbContext.PaymentResultOutbox.Add(new PaymentResultOutbox
+            {
+                SagaId = result.SagaId,
+                TransactionId = result.TransactionId,
+                Payload = JsonSerializer.Serialize(
+                    result,
+                    PaymentContractJson.SerializerOptions),
+                NextDispatchAttemptAt = now,
+                TraceParent = Activity.Current?.Id,
+                CreatedAt = now
+            });
+        }
+
         private async Task<EscrowRecord?> GetEscrowForUpdateAsync(
             Guid escrowId,
             CancellationToken cancellationToken)
         {
-            if (_dbContext.Database.IsRelational())
+            if (UsesPostgres())
             {
                 return await _dbContext.Escrows
                     .FromSqlInterpolated(
@@ -232,7 +252,7 @@ namespace payment_service.Services
                 .OrderBy(userId => userId, StringComparer.Ordinal))
             {
                 UserWallet? wallet;
-                if (_dbContext.Database.IsRelational())
+                if (UsesPostgres())
                 {
                     wallet = await _dbContext.Wallets
                         .FromSqlInterpolated(
@@ -528,5 +548,9 @@ namespace payment_service.Services
         };
 
         private DateTime UtcNow() => _timeProvider.GetUtcNow().UtcDateTime;
+
+        private bool UsesPostgres() =>
+            _dbContext.Database.ProviderName
+                == "Npgsql.EntityFrameworkCore.PostgreSQL";
     }
 }

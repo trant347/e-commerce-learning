@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using payment_service.Data;
@@ -39,6 +41,9 @@ namespace payment_service.Tests
             Assert.Equal(request.SagaId, transaction.SagaId);
             Assert.Equal(request.EscrowId, transaction.EscrowId);
             Assert.Equal(PaymentOperation.FundEscrow, transaction.Operation);
+            var outbox = await dbContext.PaymentResultOutbox.SingleAsync();
+            Assert.Equal(request.SagaId, outbox.SagaId);
+            Assert.Equal(result.TransactionId, outbox.TransactionId);
         }
 
         [Fact]
@@ -117,6 +122,7 @@ namespace payment_service.Tests
                 EscrowRecord.StatusPending,
                 (await dbContext.Escrows.SingleAsync()).Status);
             Assert.Single(dbContext.Transactions);
+            Assert.Single(dbContext.PaymentResultOutbox);
         }
 
         [Fact]
@@ -163,6 +169,7 @@ namespace payment_service.Tests
             Assert.Equal(400m, WalletBalance(dbContext, "requester"));
             Assert.Equal(200m, WalletBalance(dbContext, "admin-custody"));
             Assert.Single(dbContext.Transactions);
+            Assert.Single(dbContext.PaymentResultOutbox);
             tokenService.Verify(
                 service => service.RedeemAsync(
                     request.PaymentMethodToken!,
@@ -187,6 +194,48 @@ namespace payment_service.Tests
                     It.IsAny<CancellationToken>()),
                 Times.Never);
             Assert.Empty(dbContext.Transactions);
+        }
+
+        [Fact]
+        public async Task ResultOutboxWriteFailure_RollsBackPaymentChanges()
+        {
+            await using var connection =
+                new SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+            var interceptor = new FailOutboxSaveInterceptor();
+            var options = new DbContextOptionsBuilder<PaymentDbContext>()
+                .UseSqlite(connection)
+                .AddInterceptors(interceptor)
+                .Options;
+            await using (var setup = new PaymentDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                SeedWallets(
+                    setup,
+                    ("requester", 500m),
+                    ("admin-custody", 100m),
+                    ("taskmaster", 0m));
+            }
+
+            interceptor.FailOutboxWrites = true;
+            await using (var processing = new PaymentDbContext(options))
+            {
+                var processor = NewProcessor(
+                    processing,
+                    ValidTokenService().Object);
+
+                await Assert.ThrowsAsync<DbUpdateException>(
+                    () => processor.ProcessAsync(FundingRequest()));
+            }
+
+            await using var verification = new PaymentDbContext(options);
+            Assert.Equal(500m, WalletBalance(verification, "requester"));
+            Assert.Equal(
+                100m,
+                WalletBalance(verification, "admin-custody"));
+            Assert.Empty(verification.Escrows);
+            Assert.Empty(verification.Transactions);
+            Assert.Empty(verification.PaymentResultOutbox);
         }
 
         private static PaymentDbContext NewContext()
@@ -315,6 +364,29 @@ namespace payment_service.Tests
             }
 
             public override DateTimeOffset GetUtcNow() => _utcNow;
+        }
+
+        private sealed class FailOutboxSaveInterceptor
+            : SaveChangesInterceptor
+        {
+            public bool FailOutboxWrites { get; set; }
+
+            public override ValueTask<int> SavedChangesAsync(
+                    SaveChangesCompletedEventData eventData,
+                    int result,
+                    CancellationToken cancellationToken = default)
+            {
+                if (FailOutboxWrites)
+                {
+                    throw new DbUpdateException(
+                        "Simulated outbox persistence failure.");
+                }
+
+                return base.SavedChangesAsync(
+                    eventData,
+                    result,
+                    cancellationToken);
+            }
         }
     }
 }
