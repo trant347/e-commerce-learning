@@ -4,6 +4,7 @@ using calendar_service.Services.DAO;
 using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using Payment.Contracts.V1;
 
 namespace calendar_service.Services.Implementation
 {
@@ -473,6 +474,108 @@ namespace calendar_service.Services.Implementation
             return await _collection.Find(b => b.Id == bookingId).FirstAsync();
         }
 
+        public async Task<PaymentResultApplication> ApplyApprovedPaymentResultAsync(
+            PaymentResultV1 result,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(result);
+
+            var existing = await _collection.Find(b => b.Id == result.BookingId)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new PaymentResultRetryableException(
+                    $"Booking {result.BookingId} is not available yet.");
+
+            if (existing.EscrowId != result.EscrowId)
+            {
+                throw new InvalidOperationException(
+                    "Payment result escrow does not match the booking escrow.");
+            }
+
+            if (IsAlreadyApplied(existing, result))
+            {
+                return new PaymentResultApplication(
+                    existing,
+                    PaymentResultApplicationOutcome.AlreadyApplied);
+            }
+
+            var now = DateTime.UtcNow;
+            FilterDefinition<Booking> filter;
+            UpdateDefinition<Booking> update;
+
+            switch (result.Operation)
+            {
+                case PaymentOperation.FundEscrow:
+                    filter = Builders<Booking>.Filter.Where(b =>
+                        b.Id == result.BookingId
+                        && b.Status == Booking.StatusAccepted
+                        && b.EscrowId == result.EscrowId
+                        && b.EscrowStatus == EscrowStatus.Pending);
+                    update = Builders<Booking>.Update
+                        .Set(b => b.EscrowStatus, EscrowStatus.Funded)
+                        .Set(b => b.PaymentTransactionId, result.TransactionId.ToString("D"));
+                    break;
+
+                case PaymentOperation.ReleaseEscrow:
+                    filter = Builders<Booking>.Filter.Where(b =>
+                        b.Id == result.BookingId
+                        && b.Status == Booking.StatusImplemented
+                        && b.EscrowId == result.EscrowId
+                        && b.EscrowStatus == EscrowStatus.Funded
+                        && b.ReleaseRequestedAt != null);
+                    update = Builders<Booking>.Update
+                        .Set(b => b.Status, Booking.StatusCompleted)
+                        .Set(b => b.EscrowStatus, EscrowStatus.Released)
+                        .Set(b => b.PaymentTransactionId, result.TransactionId.ToString("D"))
+                        .Set(b => b.CompletedAt, now);
+                    break;
+
+                case PaymentOperation.RefundEscrow:
+                    filter = Builders<Booking>.Filter.Where(b =>
+                        b.Id == result.BookingId
+                        && b.Status == Booking.StatusAccepted
+                        && b.EscrowId == result.EscrowId
+                        && b.EscrowStatus == EscrowStatus.Funded
+                        && b.RefundRequestedAt != null);
+                    update = Builders<Booking>.Update
+                        .Set(b => b.Status, Booking.StatusCancelled)
+                        .Set(b => b.EscrowStatus, EscrowStatus.Refunded)
+                        .Set(b => b.PaymentTransactionId, result.TransactionId.ToString("D"))
+                        .Set(b => b.CancelledAt, now);
+                    break;
+
+                default:
+                    throw new InvalidOperationException(
+                        $"Unsupported payment operation '{result.Operation}'.");
+            }
+
+            var updateResult = await _collection.UpdateOneAsync(
+                filter,
+                update,
+                cancellationToken: cancellationToken);
+            if (updateResult.ModifiedCount != 1)
+            {
+                var current = await _collection.Find(b => b.Id == result.BookingId)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new PaymentResultRetryableException(
+                        $"Booking {result.BookingId} disappeared while applying a payment result.");
+                if (IsAlreadyApplied(current, result))
+                {
+                    return new PaymentResultApplication(
+                        current,
+                        PaymentResultApplicationOutcome.AlreadyApplied);
+                }
+
+                throw new PaymentResultRetryableException(
+                    $"Payment result {result.SagaId:D} arrived before booking {result.BookingId} was ready for {result.Operation}.");
+            }
+
+            var updated = await _collection.Find(b => b.Id == result.BookingId)
+                .FirstAsync(cancellationToken);
+            return new PaymentResultApplication(
+                updated,
+                PaymentResultApplicationOutcome.Applied);
+        }
+
         public async Task<Booking> StartWorkAsync(string bookingId, string callerUsername)
         {
             callerUsername = NormalizeUsername(callerUsername);
@@ -726,6 +829,27 @@ namespace calendar_service.Services.Implementation
             {
                 throw new InvalidOperationException(message);
             }
+        }
+
+        private static bool IsAlreadyApplied(Booking booking, PaymentResultV1 result)
+        {
+            var transactionId = result.TransactionId.ToString("D");
+            return result.Operation switch
+            {
+                PaymentOperation.FundEscrow =>
+                    booking.Status == Booking.StatusAccepted
+                    && booking.EscrowStatus == EscrowStatus.Funded
+                    && booking.PaymentTransactionId == transactionId,
+                PaymentOperation.ReleaseEscrow =>
+                    booking.Status == Booking.StatusCompleted
+                    && booking.EscrowStatus == EscrowStatus.Released
+                    && booking.PaymentTransactionId == transactionId,
+                PaymentOperation.RefundEscrow =>
+                    booking.Status == Booking.StatusCancelled
+                    && booking.EscrowStatus == EscrowStatus.Refunded
+                    && booking.PaymentTransactionId == transactionId,
+                _ => false
+            };
         }
 
         private static DateTime NormalizeToHour(DateTime dt)

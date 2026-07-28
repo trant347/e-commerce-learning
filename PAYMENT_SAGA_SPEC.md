@@ -572,19 +572,40 @@ Implementation details:
 
 ### Task 9 — Consume escrow results in calendar-service
 
-- [ ] Add a `PaymentResultConsumerWorker` with manual offset commits.
-- [ ] Validate `sagaId`, `escrowId`, operation, amount, currency, and transaction id against the
+- [x] Add a `PaymentResultConsumerWorker` with manual offset commits.
+- [x] Validate `sagaId`, `escrowId`, operation, amount, currency, and transaction id against the
       stored saga.
-- [ ] On approved funding, mark the booking escrow-funded and notify both parties that work may
+- [x] On approved funding, mark the booking escrow-funded and notify both parties that work may
       begin.
-- [ ] On approved release, complete the booking and notify the TaskMaster that funds were paid.
-- [ ] On approved refund, mark the booking cancelled/refunded and notify the requester.
-- [ ] For a declined operation, mark only that saga failed and leave the escrow in its previous
+- [x] On approved release, complete the booking and notify the TaskMaster that funds were paid.
+- [x] On approved refund, mark the booking cancelled/refunded and notify the requester.
+- [x] For a declined operation, mark only that saga failed and leave the escrow in its previous
       authoritative state.
-- [ ] Ignore already-applied duplicate results without repeating booking or notification changes.
-- [ ] Leave recoverable failures uncommitted so Kafka can redeliver them.
-- [ ] Add tests for funding, release, refund, declined, mismatched, duplicate, and out-of-order
+- [x] Ignore already-applied duplicate results without repeating booking or notification changes.
+- [x] Leave recoverable failures uncommitted so Kafka can redeliver them.
+- [x] Add tests for funding, release, refund, declined, mismatched, duplicate, and out-of-order
       results.
+
+Implementation details:
+
+1. `PaymentResultConsumerWorker` uses a dedicated consumer group with auto commit and auto offset
+   storage disabled. It commits only after result processing succeeds; recoverable failures seek
+   back to the failed offset before retrying so a later cumulative commit cannot skip the result.
+2. `PaymentResultProcessor` validates the Kafka key and V1 contract, loads the stored saga, and
+   compares escrow, booking, operation, amount, currency, and any previously known transaction
+   id before applying a result.
+3. Approved results use atomic MongoDB compare-and-set booking transitions: `PENDING -> FUNDED`,
+   funded release requests -> `COMPLETED`/`RELEASED`, and funded refund requests ->
+   `CANCELLED`/`REFUNDED`. Results that arrive before the required booking state remain
+   uncommitted for redelivery.
+4. Declines and permanent contract mismatches fail only the matching saga. They do not mutate the
+   booking's escrow projection, which remains in its previous payment-service-authoritative state.
+5. Saga completion/failure updates require `STARTED`, and the transaction id is persisted on the
+   terminal saga. Exact redeliveries short-circuit; if the booking transition committed before a
+   crash but saga completion did not, the retry completes the saga without repeating
+   notifications.
+6. Funding publishes work-may-begin notifications to both requester and TaskMaster, release
+   notifies the TaskMaster that funds were paid, and refund notifies the requester.
 
 ### Task 10 — Trigger release and refund durably
 

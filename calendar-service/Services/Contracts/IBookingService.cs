@@ -1,4 +1,5 @@
 ﻿using calendar_service.Model;
+using Payment.Contracts.V1;
 
 namespace calendar_service.Services.Contracts
 {
@@ -50,6 +51,15 @@ namespace calendar_service.Services.Contracts
         /// Applies a verified funding result to the booking's escrow projection.
         /// </summary>
         Task<Booking> MarkEscrowFundedAsync(string bookingId, Guid escrowId);
+
+        /// <summary>
+        /// Applies an approved payment result with compare-and-set booking transitions. Returning
+        /// AlreadyApplied lets a redelivered Kafka result finish saga acknowledgement without
+        /// repeating the booking mutation.
+        /// </summary>
+        Task<PaymentResultApplication> ApplyApprovedPaymentResultAsync(
+            PaymentResultV1 result,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Starts work only after the booking's escrow projection is FUNDED.

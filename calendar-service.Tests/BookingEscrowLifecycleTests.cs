@@ -221,6 +221,85 @@ namespace calendar_service.Tests
                 () => service.MarkEscrowFundedAsync("booking-1", Guid.NewGuid()));
         }
 
+        [Theory]
+        [InlineData(PaymentOperation.FundEscrow, Booking.StatusAccepted, EscrowStatus.Pending, Booking.StatusAccepted, EscrowStatus.Funded)]
+        [InlineData(PaymentOperation.ReleaseEscrow, Booking.StatusImplemented, EscrowStatus.Funded, Booking.StatusCompleted, EscrowStatus.Released)]
+        [InlineData(PaymentOperation.RefundEscrow, Booking.StatusAccepted, EscrowStatus.Funded, Booking.StatusCancelled, EscrowStatus.Refunded)]
+        public async Task ApplyApprovedPaymentResultAsync_ValidState_AppliesTransition(
+            string operation,
+            string initialStatus,
+            string initialEscrowStatus,
+            string finalStatus,
+            string finalEscrowStatus)
+        {
+            var escrowId = Guid.NewGuid();
+            var transactionId = Guid.NewGuid();
+            var existing = BookingWith(initialStatus, initialEscrowStatus);
+            existing.EscrowId = escrowId;
+            existing.ReleaseRequestedAt =
+                operation == PaymentOperation.ReleaseEscrow ? DateTime.UtcNow : null;
+            existing.RefundRequestedAt =
+                operation == PaymentOperation.RefundEscrow ? DateTime.UtcNow : null;
+            var updated = BookingWith(finalStatus, finalEscrowStatus);
+            updated.EscrowId = escrowId;
+            updated.PaymentTransactionId = transactionId.ToString("D");
+            var (service, collection) = BuildService(existing, updated);
+            SetupSuccessfulUpdate(collection);
+
+            var application = await service.ApplyApprovedPaymentResultAsync(
+                PaymentResult(
+                    operation,
+                    escrowId,
+                    transactionId));
+
+            Assert.Equal(PaymentResultApplicationOutcome.Applied, application.Outcome);
+            Assert.Equal(finalStatus, application.Booking.Status);
+            Assert.Equal(finalEscrowStatus, application.Booking.EscrowStatus);
+            Assert.Equal(
+                transactionId.ToString("D"),
+                application.Booking.PaymentTransactionId);
+            VerifyOneUpdate(collection);
+        }
+
+        [Fact]
+        public async Task ApplyApprovedPaymentResultAsync_ExactTerminalDuplicate_DoesNotUpdate()
+        {
+            var escrowId = Guid.NewGuid();
+            var transactionId = Guid.NewGuid();
+            var existing = BookingWith(
+                Booking.StatusCompleted,
+                EscrowStatus.Released);
+            existing.EscrowId = escrowId;
+            existing.PaymentTransactionId = transactionId.ToString("D");
+            var (service, collection) = BuildService(existing);
+
+            var application = await service.ApplyApprovedPaymentResultAsync(
+                PaymentResult(
+                    PaymentOperation.ReleaseEscrow,
+                    escrowId,
+                    transactionId));
+
+            Assert.Equal(
+                PaymentResultApplicationOutcome.AlreadyApplied,
+                application.Outcome);
+            VerifyNoUpdate(collection);
+        }
+
+        private static PaymentResultV1 PaymentResult(
+            string operation,
+            Guid escrowId,
+            Guid transactionId) => new()
+        {
+            SagaId = Guid.NewGuid(),
+            EscrowId = escrowId,
+            BookingId = "booking-1",
+            Operation = operation,
+            TransactionId = transactionId,
+            Amount = 100m,
+            Currency = "USD",
+            Status = PaymentResultV1.StatusApproved
+        };
+
         private static Booking BookingWith(string status, string? escrowStatus = null) => new()
         {
             Id = "booking-1",

@@ -338,6 +338,39 @@ namespace calendar_service.Services.Implementation
             return result;
         }
 
+        public async Task<bool> CompleteResultAsync(
+            Guid sagaId,
+            string paymentTransactionId,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _collection.UpdateOneAsync(
+                s => s.SagaId == sagaId && s.Status == SagaState.StatusStarted,
+                Builders<SagaState>.Update
+                    .Set(s => s.Status, SagaState.StatusCompleted)
+                    .Set(s => s.PaymentTransactionId, paymentTransactionId)
+                    .Set(s => s.FailureReason, null)
+                    .Set(s => s.UpdatedAt, DateTime.UtcNow),
+                cancellationToken: cancellationToken);
+            return result.ModifiedCount == 1;
+        }
+
+        public async Task<bool> FailResultAsync(
+            Guid sagaId,
+            string paymentTransactionId,
+            string failureReason,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _collection.UpdateOneAsync(
+                s => s.SagaId == sagaId && s.Status == SagaState.StatusStarted,
+                Builders<SagaState>.Update
+                    .Set(s => s.Status, SagaState.StatusFailed)
+                    .Set(s => s.PaymentTransactionId, paymentTransactionId)
+                    .Set(s => s.FailureReason, Truncate(failureReason.Trim(), 2000))
+                    .Set(s => s.UpdatedAt, DateTime.UtcNow),
+                cancellationToken: cancellationToken);
+            return result.ModifiedCount == 1;
+        }
+
         public async Task<SagaState?> GetBySagaIdAsync(Guid sagaId) =>
             await _collection.Find(s => s.SagaId == sagaId).FirstOrDefaultAsync();
 

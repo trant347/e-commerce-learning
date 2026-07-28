@@ -57,6 +57,25 @@ namespace calendar_service.Services.Contracts
         /// <summary>Marks a saga FAILED (declined, mismatch, unreachable, etc).</summary>
         Task<SagaState?> FailAsync(Guid sagaId, string failureReason);
 
+        /// <summary>
+        /// Completes a result only while the saga is STARTED. Returns false for a duplicate or
+        /// concurrently resolved result.
+        /// </summary>
+        Task<bool> CompleteResultAsync(
+            Guid sagaId,
+            string paymentTransactionId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Fails a result only while the saga is STARTED and records the transaction that
+        /// produced the decline or invalid result.
+        /// </summary>
+        Task<bool> FailResultAsync(
+            Guid sagaId,
+            string paymentTransactionId,
+            string failureReason,
+            CancellationToken cancellationToken = default);
+
         Task<SagaState?> GetBySagaIdAsync(Guid sagaId);
 
         /// <summary>

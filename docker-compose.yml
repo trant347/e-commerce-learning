@@ -60,6 +60,10 @@ services:
     - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
     - KafkaProducerConfig__BootstrapServers=kafka:29092
     - KafkaProducerConfig__NotificationTopic=notification-events
+    - KafkaConsumerConfig__BootstrapServers=kafka:29092
+    - KafkaConsumerConfig__PaymentResultTopic=payment-results
+    - KafkaConsumerConfig__PaymentResultGroupId=calendar-service-payment-results-v1
+    - KafkaConsumerConfig__PaymentResultFailureRetryDelaySeconds=5
     - JwtSettings__Secret=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - OTEL_SDK_DISABLED=true
