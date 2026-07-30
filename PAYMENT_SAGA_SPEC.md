@@ -609,13 +609,33 @@ Implementation details:
 
 ### Task 10 — Trigger release and refund durably
 
-- [ ] Make proof upload create a durable `RELEASE_ESCROW` saga/outbox request instead of sending
+- [x] Make proof upload create a durable `RELEASE_ESCROW` saga/outbox request instead of sending
       an invoice or transferring funds synchronously.
-- [ ] Make eligible cancellation create a durable `REFUND_ESCROW` saga/outbox request.
-- [ ] Reject proof release or refund when escrow is not funded, another matching operation is
+- [x] Make eligible cancellation create a durable `REFUND_ESCROW` saga/outbox request.
+- [x] Reject proof release or refund when escrow is not funded, another matching operation is
       active, or the escrow is already terminal.
-- [ ] Keep proof metadata durable even if Kafka is unavailable so release can resume later.
-- [ ] Add controller/service tests for release, refund, duplicate requests, and invalid states.
+- [x] Keep proof metadata durable even if Kafka is unavailable so release can resume later.
+- [x] Add controller/service tests for release, refund, duplicate requests, and invalid states.
+
+Implementation details:
+
+1. Escrow proof submission first persists the proof URL, fixed invoice amount, implemented
+   timestamp, and release-request timestamp on the booking, then inserts a `RELEASE_ESCROW`
+   SagaState/outbox document. Funded cancellation follows the same sequence with a durable
+   refund-request timestamp and `REFUND_ESCROW` command.
+2. Release commands transfer the immutable agreed amount from the configured custody account to
+   the TaskMaster; refund commands transfer it from custody back to the requester. Neither command
+   contains a payment-method token.
+3. Both endpoints return `202 Accepted` with the new saga id, escrow id, pending status, and status
+   URL after the MongoDB outbox insert succeeds. They do not publish a synchronous notification,
+   so Kafka downtime cannot turn a durably queued release/refund into a failed HTTP request.
+4. Proof and refund intent methods are idempotent for an identical persisted request. This lets a
+   caller retry after an outbox persistence failure without rewriting proof metadata or losing
+   cancellation intent.
+5. Active matching operations are rejected before mutation when visible, while the partial unique
+   SagaState index remains the concurrency backstop. Non-funded and terminal escrow states, work
+   that has not reached the release stage, missing fixed prices, and duplicate requests with
+   different proof metadata are rejected.
 
 ### Task 11 — Expose status and update the frontend
 

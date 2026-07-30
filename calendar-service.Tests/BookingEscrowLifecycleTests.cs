@@ -138,6 +138,27 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public async Task RequestEscrowReleaseAsync_PersistedMatchingIntent_ReturnsWithoutUpdate()
+        {
+            var existing = BookingWith(
+                status: Booking.StatusImplemented,
+                escrowStatus: EscrowStatus.Funded);
+            existing.AgreedAmount = 75m;
+            existing.InvoiceAmount = 75m;
+            existing.ProofFileUrl = "proof.jpg";
+            existing.ReleaseRequestedAt = DateTime.UtcNow;
+            var (service, collection) = BuildService(existing);
+
+            var result = await service.RequestEscrowReleaseAsync(
+                "booking-1",
+                TaskMaster,
+                " proof.jpg ");
+
+            Assert.Same(existing, result);
+            VerifyNoUpdate(collection);
+        }
+
+        [Fact]
         public async Task RequestCancellationAsync_UnfundedBooking_CancelsWithoutRefund()
         {
             var existing = BookingWith(status: Booking.StatusAccepted);
@@ -174,9 +195,13 @@ namespace calendar_service.Tests
             var existing = BookingWith(
                 status: Booking.StatusAccepted,
                 escrowStatus: EscrowStatus.Funded);
+            existing.AgreedAmount = 100m;
+            existing.AgreedCurrency = "USD";
             var updated = BookingWith(
                 status: Booking.StatusAccepted,
                 escrowStatus: EscrowStatus.Funded);
+            updated.AgreedAmount = 100m;
+            updated.AgreedCurrency = "USD";
             updated.RefundRequestedAt = DateTime.UtcNow;
             var (service, collection) = BuildService(existing, updated);
             SetupSuccessfulUpdate(collection);
@@ -186,6 +211,42 @@ namespace calendar_service.Tests
             Assert.Equal(Booking.StatusAccepted, result.Status);
             Assert.NotNull(result.RefundRequestedAt);
             Assert.Null(result.CancelledAt);
+        }
+
+        [Fact]
+        public async Task RequestCancellationAsync_PersistedRefundIntent_ReturnsWithoutUpdate()
+        {
+            var existing = BookingWith(
+                status: Booking.StatusAccepted,
+                escrowStatus: EscrowStatus.Funded);
+            existing.RefundRequestedAt = DateTime.UtcNow;
+            var (service, collection) = BuildService(existing);
+
+            var result = await service.RequestCancellationAsync(
+                "booking-1",
+                Requester);
+
+            Assert.Same(existing, result);
+            VerifyNoUpdate(collection);
+        }
+
+        [Fact]
+        public async Task RequestCancellationAsync_FundedWithoutFixedPrice_DoesNotPersistRefundIntent()
+        {
+            var existing = BookingWith(
+                status: Booking.StatusAccepted,
+                escrowStatus: EscrowStatus.Funded);
+            existing.AgreedAmount = null;
+            existing.AgreedCurrency = null;
+            var (service, collection) = BuildService(existing);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => service.RequestCancellationAsync(
+                    "booking-1",
+                    Requester));
+
+            Assert.Contains("price", exception.Message);
+            VerifyNoUpdate(collection);
         }
 
         [Theory]

@@ -316,30 +316,59 @@ namespace calendar_service.Controllers
                 if (booking == null) return NotFound();
 
                 var isEscrowBooking = booking.EscrowId.HasValue;
-                var updated = isEscrowBooking
-                    ? await _service.RequestEscrowReleaseAsync(id, caller, body.ProofFileUrl)
-                    : await _service.SubmitProofAsync(id, caller, body.ProofFileUrl, body.InvoiceAmount);
-
-                await _notifications.PublishAsync(new
+                if (isEscrowBooking
+                    && await HasActiveOperationAsync(
+                        id,
+                        PaymentOperation.ReleaseEscrow))
                 {
-                    type = isEscrowBooking
-                        ? "BOOKING_ESCROW_RELEASE_REQUESTED"
-                        : "BOOKING_PAYMENT_REQUIRED",
-                    recipientUsername = updated.RequesterUsername,
-                    message = isEscrowBooking
-                        ? $"{updated.TaskMasterUsername} submitted proof of the completed job. Escrow release was requested."
-                        : $"{updated.TaskMasterUsername} submitted proof of the completed job. " +
-                          $"Please pay ${updated.InvoiceAmount:0.00} to complete this booking.",
-                    actionType = isEscrowBooking
-                        ? "VIEW_INCOMING_BOOKING_REQUEST"
-                        : "VIEW_PAYMENT_REQUEST",
-                    actionPayload = new Dictionary<string, string>
+                    return Conflict(new
                     {
-                        { "bookingId", updated.Id ?? string.Empty },
-                        { "taskMasterId", updated.TaskMasterId }
-                    }
-                });
-                return Ok(updated);
+                        error = "Escrow release for this booking is already being processed"
+                    });
+                }
+
+                var updated = isEscrowBooking
+                    ? await _service.RequestEscrowReleaseAsync(
+                        id,
+                        caller,
+                        body.ProofFileUrl)
+                    : await _service.SubmitProofAsync(
+                        id,
+                        caller,
+                        body.ProofFileUrl,
+                        body.InvoiceAmount);
+
+                PaymentAcceptedResponseV1? accepted = null;
+                if (isEscrowBooking)
+                {
+                    accepted = await EnqueueEscrowTransferAsync(
+                        updated,
+                        PaymentOperation.ReleaseEscrow);
+                }
+
+                if (!isEscrowBooking)
+                {
+                    await _notifications.PublishAsync(new
+                    {
+                        type = "BOOKING_PAYMENT_REQUIRED",
+                        recipientUsername = updated.RequesterUsername,
+                        message = $"{updated.TaskMasterUsername} submitted proof of the completed job. " +
+                                  $"Please pay ${updated.InvoiceAmount:0.00} to complete this booking.",
+                        actionType = "VIEW_PAYMENT_REQUEST",
+                        actionPayload = new Dictionary<string, string>
+                        {
+                            { "bookingId", updated.Id ?? string.Empty },
+                            { "taskMasterId", updated.TaskMasterId }
+                        }
+                    });
+                }
+                return accepted == null
+                    ? Ok(updated)
+                    : Accepted(accepted.StatusUrl, accepted);
+            }
+            catch (ActivePaymentSagaException ex)
+            {
+                return Conflict(new { error = ex.Message });
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (KeyNotFoundException) { return NotFound(); }
@@ -377,27 +406,51 @@ namespace calendar_service.Controllers
 
             try
             {
+                var existing = await _service.GetByIdAsync(id);
+                if (existing == null) return NotFound();
+                if (await HasActiveOperationAsync(
+                        id,
+                        PaymentOperation.RefundEscrow))
+                {
+                    return Conflict(new
+                    {
+                        error = "Escrow refund for this booking is already being processed"
+                    });
+                }
+
                 var updated = await _service.RequestCancellationAsync(id, caller);
                 var refundRequested = updated.RefundRequestedAt.HasValue
                     && updated.Status != Booking.StatusCancelled;
-
-                await _notifications.PublishAsync(new
+                PaymentAcceptedResponseV1? accepted = null;
+                if (refundRequested)
                 {
-                    type = refundRequested
-                        ? "BOOKING_REFUND_REQUESTED"
-                        : "BOOKING_CANCELLED",
-                    recipientUsername = updated.TaskMasterUsername,
-                    message = refundRequested
-                        ? $"{updated.RequesterUsername} requested cancellation and an escrow refund."
-                        : $"{updated.RequesterUsername} cancelled the booking.",
-                    actionType = "VIEW_INCOMING_BOOKING_REQUEST",
-                    actionPayload = new Dictionary<string, string>
+                    accepted = await EnqueueEscrowTransferAsync(
+                        updated,
+                        PaymentOperation.RefundEscrow);
+                }
+
+                if (!refundRequested)
+                {
+                    await _notifications.PublishAsync(new
                     {
-                        { "bookingId", updated.Id ?? string.Empty },
-                        { "taskMasterId", updated.TaskMasterId }
-                    }
-                });
-                return Ok(updated);
+                        type = "BOOKING_CANCELLED",
+                        recipientUsername = updated.TaskMasterUsername,
+                        message = $"{updated.RequesterUsername} cancelled the booking.",
+                        actionType = "VIEW_INCOMING_BOOKING_REQUEST",
+                        actionPayload = new Dictionary<string, string>
+                        {
+                            { "bookingId", updated.Id ?? string.Empty },
+                            { "taskMasterId", updated.TaskMasterId }
+                        }
+                    });
+                }
+                return accepted == null
+                    ? Ok(updated)
+                    : Accepted(accepted.StatusUrl, accepted);
+            }
+            catch (ActivePaymentSagaException ex)
+            {
+                return Conflict(new { error = ex.Message });
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (KeyNotFoundException) { return NotFound(); }
@@ -703,6 +756,73 @@ namespace calendar_service.Controllers
                 StatusUrl = $"/api/booking/payment-status/{sagaId:D}"
             };
             return Accepted(response.StatusUrl, response);
+        }
+
+        private async Task<PaymentAcceptedResponseV1> EnqueueEscrowTransferAsync(
+            Booking booking,
+            string operation)
+        {
+            if (!booking.EscrowId.HasValue
+                || booking.AgreedAmount is null or <= 0
+                || string.IsNullOrWhiteSpace(booking.AgreedCurrency))
+            {
+                throw new InvalidOperationException(
+                    "Booking escrow, fixed amount, and currency are required");
+            }
+
+            var custodyUserId = _configuration["Escrow:CustodyUserId"];
+            if (string.IsNullOrWhiteSpace(custodyUserId))
+            {
+                throw new EscrowConfigurationException(
+                    "Escrow:CustodyUserId is required");
+            }
+
+            var payeeUserId = operation switch
+            {
+                PaymentOperation.ReleaseEscrow => booking.TaskMasterUsername,
+                PaymentOperation.RefundEscrow => booking.RequesterUsername,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(operation),
+                    operation,
+                    "Only release and refund transfers can be enqueued here.")
+            };
+            var sagaId = Guid.NewGuid();
+            var request = new PaymentRequestedV1
+            {
+                SagaId = sagaId,
+                EscrowId = booking.EscrowId.Value,
+                BookingId = booking.Id
+                    ?? throw new InvalidOperationException(
+                        "Booking id is required"),
+                Operation = operation,
+                Amount = booking.AgreedAmount.Value,
+                Currency = booking.AgreedCurrency,
+                PayerUserId = custodyUserId,
+                PayeeUserId = payeeUserId,
+                TaskMasterUserId = booking.TaskMasterUsername
+            };
+
+            await _sagaStateService.EnqueueAsync(
+                request,
+                Activity.Current?.Id,
+                HttpContext.RequestAborted);
+
+            return new PaymentAcceptedResponseV1
+            {
+                SagaId = sagaId,
+                EscrowId = booking.EscrowId.Value,
+                StatusUrl = $"/api/booking/payment-status/{sagaId:D}"
+            };
+        }
+
+        private async Task<bool> HasActiveOperationAsync(
+            string bookingId,
+            string operation)
+        {
+            var latest = await _sagaStateService.GetLatestByBookingIdAsync(
+                bookingId);
+            return latest?.Status == SagaState.StatusStarted
+                && latest.Operation == operation;
         }
 
         /// <summary>

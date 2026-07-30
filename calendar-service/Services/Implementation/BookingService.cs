@@ -624,6 +624,27 @@ namespace calendar_service.Services.Implementation
             {
                 throw new UnauthorizedAccessException("Only the TaskMaster can submit proof for this booking");
             }
+            if (string.IsNullOrWhiteSpace(proofFileUrl))
+            {
+                throw new InvalidOperationException("Proof file is required");
+            }
+            if (existing.ReleaseRequestedAt.HasValue)
+            {
+                if (existing.Status == Booking.StatusImplemented
+                    && existing.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
+                    && existing.AgreedAmount is > 0
+                    && string.Equals(
+                        existing.ProofFileUrl,
+                        proofFileUrl.Trim(),
+                        StringComparison.Ordinal)
+                    && existing.InvoiceAmount == existing.AgreedAmount)
+                {
+                    return existing;
+                }
+
+                throw new InvalidOperationException(
+                    "Escrow release has already been requested");
+            }
             if (existing.Status != Booking.StatusInProgress)
             {
                 throw new InvalidOperationException(
@@ -636,14 +657,6 @@ namespace calendar_service.Services.Implementation
             if (existing.AgreedAmount is null or <= 0)
             {
                 throw new InvalidOperationException("Booking has no fixed amount");
-            }
-            if (string.IsNullOrWhiteSpace(proofFileUrl))
-            {
-                throw new InvalidOperationException("Proof file is required");
-            }
-            if (existing.ReleaseRequestedAt.HasValue)
-            {
-                throw new InvalidOperationException("Escrow release has already been requested");
             }
 
             var now = DateTime.UtcNow;
@@ -693,8 +706,22 @@ namespace calendar_service.Services.Implementation
 
             if (existing.Status == Booking.StatusAccepted
                 && existing.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
+                && existing.RefundRequestedAt.HasValue)
+            {
+                return existing;
+            }
+
+            if (existing.Status == Booking.StatusAccepted
+                && existing.EscrowStatus == Payment.Contracts.V1.EscrowStatus.Funded
                 && !existing.RefundRequestedAt.HasValue)
             {
+                if (existing.AgreedAmount is null or <= 0
+                    || string.IsNullOrWhiteSpace(existing.AgreedCurrency))
+                {
+                    throw new InvalidOperationException(
+                        "Booking price and currency must be fixed before an escrow refund");
+                }
+
                 var refundResult = await _collection.UpdateOneAsync(
                     b => b.Id == bookingId
                         && b.Status == Booking.StatusAccepted
