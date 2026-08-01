@@ -212,4 +212,33 @@ public class PaymentContractSerializationTests
         Assert.Equal("PENDING", root.GetProperty("status").GetString());
         Assert.Equal($"/api/booking/payment-status/{sagaId:D}", root.GetProperty("statusUrl").GetString());
     }
+
+    [Fact]
+    public void PaymentStatusResponseV1_SerializesTerminalSagaAndEscrowState()
+    {
+        var sagaId = Guid.Parse("9fd5cb72-3a4b-42f6-aa5d-b0987df46c02");
+        var escrowId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var response = new PaymentStatusResponseV1
+        {
+            SagaId = sagaId,
+            BookingId = "booking-1",
+            EscrowId = escrowId,
+            Operation = PaymentOperation.ReleaseEscrow,
+            Status = "COMPLETED",
+            EscrowStatus = EscrowStatus.Released,
+            UpdatedAt = DateTime.Parse("2026-07-29T12:00:00Z").ToUniversalTime()
+        };
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(
+            response,
+            PaymentContractJson.SerializerOptions));
+        var root = document.RootElement;
+
+        Assert.Equal(sagaId, root.GetProperty("sagaId").GetGuid());
+        Assert.Equal("booking-1", root.GetProperty("bookingId").GetString());
+        Assert.Equal(escrowId, root.GetProperty("escrowId").GetGuid());
+        Assert.Equal(PaymentOperation.ReleaseEscrow, root.GetProperty("operation").GetString());
+        Assert.Equal("COMPLETED", root.GetProperty("status").GetString());
+        Assert.Equal(EscrowStatus.Released, root.GetProperty("escrowStatus").GetString());
+    }
 }

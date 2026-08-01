@@ -102,6 +102,18 @@ namespace calendar_service.Model
         [BsonIgnore]
         public bool PaymentPending { get; set; }
 
+        [BsonIgnore]
+        public Guid? LatestPaymentSagaId { get; set; }
+
+        [BsonIgnore]
+        public string? LatestPaymentStatus { get; set; }
+
+        [BsonIgnore]
+        public string? LatestPaymentOperation { get; set; }
+
+        [BsonIgnore]
+        public string? LatestPaymentFailureReason { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? RespondedAt { get; set; }
 

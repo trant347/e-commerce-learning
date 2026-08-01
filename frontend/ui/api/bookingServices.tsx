@@ -1,6 +1,27 @@
 import axios from 'axios';
 
-export type BookingStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED' | 'IMPLEMENTED' | 'COMPLETED';
+export type BookingStatus = 'PENDING' | 'ACCEPTED' | 'IN_PROGRESS' | 'DECLINED' | 'CANCELLED' | 'IMPLEMENTED' | 'COMPLETED';
+export type EscrowStatus = 'PENDING' | 'FUNDED' | 'RELEASED' | 'REFUNDED';
+export type PaymentOperation = 'FUND_ESCROW' | 'RELEASE_ESCROW' | 'REFUND_ESCROW';
+export type PaymentSagaStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+
+export interface PaymentAcceptedResponse {
+    sagaId: string;
+    escrowId: string;
+    status: 'PENDING';
+    statusUrl: string;
+}
+
+export interface PaymentStatusResponse {
+    sagaId: string;
+    bookingId: string;
+    escrowId: string;
+    operation: PaymentOperation;
+    status: PaymentSagaStatus;
+    escrowStatus?: EscrowStatus;
+    failureReason?: string;
+    updatedAt: string;
+}
 
 export interface Booking {
     id: string;
@@ -16,6 +37,10 @@ export interface Booking {
     offeredTotalAmount?: number;
     proofFileUrl?: string;
     invoiceAmount?: number;
+    agreedAmount?: number;
+    agreedCurrency?: string;
+    escrowId?: string;
+    escrowStatus?: EscrowStatus;
     paymentTransactionId?: string;
     /**
      * True when a payment attempt for this booking is currently ambiguous/in-flight (server is
@@ -24,6 +49,10 @@ export interface Booking {
      * across page reloads, unlike a purely client-side "already paid" message.
      */
     paymentPending?: boolean;
+    latestPaymentSagaId?: string;
+    latestPaymentStatus?: PaymentSagaStatus;
+    latestPaymentOperation?: PaymentOperation;
+    latestPaymentFailureReason?: string;
     createdAt: string;
     respondedAt?: string;
     implementedAt?: string;
@@ -113,8 +142,8 @@ export const BookingService = {
         ).then(res => res.data);
     },
 
-    /** TaskMaster submits proof of the completed job (a file/image URL) plus the invoice amount. */
-    submitProof(id: string, proofFileUrl: string, invoiceAmount: number): Promise<Booking> {
+    /** TaskMaster submits proof and, for escrow bookings, durably requests release. */
+    submitProof(id: string, proofFileUrl: string, invoiceAmount: number): Promise<Booking | PaymentAcceptedResponse> {
         return axios.post(
             `${BASE}/${encodeURIComponent(id)}/submit-proof`,
             { proofFileUrl, invoiceAmount },
@@ -122,13 +151,39 @@ export const BookingService = {
         ).then(res => res.data);
     },
 
-    /** Requester pays the invoice by submitting card details; calendar-service forwards them
-     * to payment-service server-to-server and verifies the result before completing the booking. */
-    pay(id: string, card: { cardNumber: string; expiryDate: string; cvv: string; ownerName: string }): Promise<Booking> {
-        return axios.post(
-            `${BASE}/${encodeURIComponent(id)}/pay`,
+    async pay(id: string, card: { cardNumber: string; expiryDate: string; cvv: string; ownerName: string }): Promise<Booking | PaymentAcceptedResponse> {
+        const tokenResponse = await axios.post(
+            '/payment-service/api/payment/tokenize',
             card,
             { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
+        );
+        return axios.post(
+            `${BASE}/${encodeURIComponent(id)}/pay`,
+            { ...card, paymentMethodToken: tokenResponse.data.paymentMethodToken },
+            { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
+    },
+
+    getPaymentStatus(sagaId: string): Promise<PaymentStatusResponse> {
+        return axios.get(
+            `${BASE}/payment-status/${encodeURIComponent(sagaId)}`,
+            { headers: authHeader() }
+        ).then(res => res.data);
+    },
+
+    startWork(id: string): Promise<Booking> {
+        return axios.post(
+            `${BASE}/${encodeURIComponent(id)}/start-work`,
+            {},
+            { headers: authHeader() }
+        ).then(res => res.data);
+    },
+
+    cancel(id: string): Promise<Booking | PaymentAcceptedResponse> {
+        return axios.post(
+            `${BASE}/${encodeURIComponent(id)}/cancel`,
+            {},
+            { headers: authHeader() }
         ).then(res => res.data);
     },
 };

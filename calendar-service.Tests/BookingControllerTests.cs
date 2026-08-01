@@ -96,6 +96,113 @@ namespace calendar_service.Tests
             return new DateTime(t.Year, t.Month, t.Day, t.Hour, 0, 0, DateTimeKind.Utc);
         }
 
+        [Fact]
+        public async Task GetPaymentStatus_RequesterOwner_ReturnsSagaAndCurrentEscrowState()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var sagaId = Guid.NewGuid();
+            var escrowId = Guid.NewGuid();
+            var updatedAt = DateTime.UtcNow;
+            sagaState.Setup(s => s.GetBySagaIdAsync(sagaId)).ReturnsAsync(new SagaState
+            {
+                SagaId = sagaId,
+                BookingId = "bk-1",
+                EscrowId = escrowId,
+                Operation = PaymentOperation.FundEscrow,
+                Status = SagaState.StatusCompleted,
+                UpdatedAt = updatedAt
+            });
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(new Booking
+            {
+                Id = "bk-1",
+                RequesterUsername = Caller,
+                TaskMasterUsername = OwnerUsername,
+                EscrowStatus = EscrowStatus.Funded
+            });
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState);
+
+            var result = await controller.GetPaymentStatus(sagaId);
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var response = Assert.IsType<PaymentStatusResponseV1>(ok.Value);
+            Assert.Equal(sagaId, response.SagaId);
+            Assert.Equal("bk-1", response.BookingId);
+            Assert.Equal(escrowId, response.EscrowId);
+            Assert.Equal(PaymentOperation.FundEscrow, response.Operation);
+            Assert.Equal(SagaState.StatusCompleted, response.Status);
+            Assert.Equal(EscrowStatus.Funded, response.EscrowStatus);
+            Assert.Equal(updatedAt, response.UpdatedAt);
+        }
+
+        [Fact]
+        public async Task GetPaymentStatus_UnrelatedCaller_Returns403()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var sagaId = Guid.NewGuid();
+            sagaState.Setup(s => s.GetBySagaIdAsync(sagaId)).ReturnsAsync(new SagaState
+            {
+                SagaId = sagaId,
+                BookingId = "bk-1",
+                EscrowId = Guid.NewGuid(),
+                Operation = PaymentOperation.FundEscrow
+            });
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(new Booking
+            {
+                Id = "bk-1",
+                RequesterUsername = "carol",
+                TaskMasterUsername = OwnerUsername
+            });
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState);
+
+            var result = await controller.GetPaymentStatus(sagaId);
+
+            Assert.IsType<ForbidResult>(result);
+        }
+
+        [Fact]
+        public async Task Get_PopulatesLatestSagaForReloadedFrontend()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var sagaId = Guid.NewGuid();
+            var booking = AcceptedBooking(Guid.NewGuid());
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1")).ReturnsAsync(new SagaState
+            {
+                SagaId = sagaId,
+                BookingId = "bk-1",
+                EscrowId = booking.EscrowId,
+                Operation = PaymentOperation.FundEscrow,
+                Status = SagaState.StatusFailed,
+                FailureReason = "Card declined"
+            });
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState);
+
+            var result = await controller.Get("bk-1");
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var response = Assert.IsType<Booking>(ok.Value);
+            Assert.Equal(sagaId, response.LatestPaymentSagaId);
+            Assert.Equal(SagaState.StatusFailed, response.LatestPaymentStatus);
+            Assert.Equal(PaymentOperation.FundEscrow, response.LatestPaymentOperation);
+            Assert.Equal("Card declined", response.LatestPaymentFailureReason);
+            Assert.False(response.PaymentPending);
+        }
+
         // ---- Create ----
 
         [Fact]
@@ -1502,20 +1609,29 @@ namespace calendar_service.Tests
         }
 
         [Fact]
-        public async Task Get_BookingNotImplemented_DoesNotQuerySagaState()
+        public async Task Get_TerminalBooking_StillProjectsLatestSagaForReloadedFrontend()
         {
-            // Avoid an extra Mongo round-trip for bookings that can't possibly have a
-            // meaningful pending payment (e.g. still PENDING, or already COMPLETED).
             var service = new Mock<IBookingService>();
             var booking = new Booking { Id = "bk-1", Status = Booking.StatusCompleted };
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
-            var sagaState = new Mock<ISagaStateService>(MockBehavior.Strict);
+            var sagaState = new Mock<ISagaStateService>();
+            sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
+                .ReturnsAsync(new SagaState
+                {
+                    SagaId = Guid.NewGuid(),
+                    BookingId = "bk-1",
+                    EscrowId = Guid.NewGuid(),
+                    Status = SagaState.StatusCompleted,
+                    Operation = PaymentOperation.ReleaseEscrow
+                });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
             var result = await ctrl.Get("bk-1");
 
-            Assert.IsType<OkObjectResult>(result);
-            sagaState.Verify(s => s.GetLatestByBookingIdAsync(It.IsAny<string>()), Times.Never);
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var returned = Assert.IsType<Booking>(ok.Value);
+            Assert.Equal(SagaState.StatusCompleted, returned.LatestPaymentStatus);
+            Assert.Equal(PaymentOperation.ReleaseEscrow, returned.LatestPaymentOperation);
         }
     }
 }

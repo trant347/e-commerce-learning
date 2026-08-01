@@ -179,8 +179,7 @@ namespace calendar_service.Controllers
         }
 
         /// <summary>
-        /// GET <c>/api/booking/{id}</c> — returns a single booking by id. No ownership check;
-        /// rely on the booking id being non-guessable (Mongo ObjectId).
+        /// GET <c>/api/booking/{id}</c> — returns a single booking by id.
         /// </summary>
         /// <response code="200">The booking.</response>
         /// <response code="404">No booking with that id.</response>
@@ -189,8 +188,59 @@ namespace calendar_service.Controllers
         {
             var item = await _service.GetByIdAsync(id);
             if (item == null) return NotFound();
-            await PopulatePaymentPendingAsync(item);
+            await PopulateLatestPaymentAsync(item);
             return Ok(item);
+        }
+
+        /// <summary>
+        /// Returns the durable saga status and current booking escrow projection. Only either
+        /// booking party or an administrator may inspect the payment attempt.
+        /// </summary>
+        [HttpGet("payment-status/{sagaId:guid}")]
+        public async Task<IActionResult> GetPaymentStatus(Guid sagaId)
+        {
+            var caller = CurrentUsername();
+            if (string.IsNullOrEmpty(caller)) return Unauthorized();
+
+            var saga = await _sagaStateService.GetBySagaIdAsync(sagaId);
+            if (saga == null) return NotFound();
+
+            var booking = await _service.GetByIdAsync(saga.BookingId);
+            if (booking == null) return NotFound();
+
+            var ownsBooking = string.Equals(
+                    booking.RequesterUsername,
+                    caller,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    booking.TaskMasterUsername,
+                    caller,
+                    StringComparison.OrdinalIgnoreCase);
+            if (!ownsBooking
+                && !User.IsInRole("ROLE_ADMIN")
+                && !User.IsInRole("ADMIN"))
+            {
+                return Forbid();
+            }
+
+            if (!saga.EscrowId.HasValue || string.IsNullOrWhiteSpace(saga.Operation))
+            {
+                return NotFound();
+            }
+
+            return Ok(new PaymentStatusResponseV1
+            {
+                SagaId = saga.SagaId,
+                BookingId = saga.BookingId,
+                EscrowId = saga.EscrowId.Value,
+                Operation = saga.Operation,
+                Status = saga.Status == SagaState.StatusStarted
+                    ? PaymentStatusResponseV1.PendingStatus
+                    : saga.Status,
+                EscrowStatus = booking.EscrowStatus,
+                FailureReason = saga.FailureReason,
+                UpdatedAt = saga.UpdatedAt
+            });
         }
 
         /// <summary>
@@ -836,17 +886,27 @@ namespace calendar_service.Controllers
                 "booking failed; leaving saga STARTED for reconciliation", bookingId, sagaId);
 
         /// <summary>
-        /// Sets <see cref="Booking.PaymentPending"/> so the frontend can block a duplicate /pay
-        /// attempt and show "payment is being processed" even after a page reload (see
-        /// PAYMENT_SAGA_SPEC.md). Only bookings currently awaiting payment can have a meaningful
-        /// pending saga, so the lookup is skipped otherwise to avoid an extra Mongo round-trip on
-        /// every booking read.
+        /// Exposes the latest durable saga so the frontend can resume status polling after a page
+        /// reload instead of relying on transient client state.
         /// </summary>
-        private async Task PopulatePaymentPendingAsync(Booking booking)
+        private async Task PopulateLatestPaymentAsync(Booking booking)
         {
-            if (booking.Status != Booking.StatusImplemented || booking.Id == null) return;
+            if (booking.Id == null) return;
             var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(booking.Id);
-            booking.PaymentPending = latestSaga != null && latestSaga.Status == SagaState.StatusStarted;
+            if (latestSaga == null) return;
+
+            booking.PaymentPending = latestSaga.Status == SagaState.StatusStarted;
+            if (!latestSaga.EscrowId.HasValue || string.IsNullOrWhiteSpace(latestSaga.Operation))
+            {
+                return;
+            }
+
+            booking.LatestPaymentSagaId = latestSaga.SagaId;
+            booking.LatestPaymentStatus = latestSaga.Status == SagaState.StatusStarted
+                ? PaymentStatusResponseV1.PendingStatus
+                : latestSaga.Status;
+            booking.LatestPaymentOperation = latestSaga.Operation;
+            booking.LatestPaymentFailureReason = latestSaga.FailureReason;
         }
 
         /// <summary>

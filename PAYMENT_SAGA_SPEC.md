@@ -639,17 +639,34 @@ Implementation details:
 
 ### Task 11 — Expose status and update the frontend
 
-- [ ] Add a payment-status endpoint that returns `PENDING`, `COMPLETED`, or `FAILED` for the saga
+- [x] Add a payment-status endpoint that returns `PENDING`, `COMPLETED`, or `FAILED` for the saga
       plus the current escrow state while enforcing booking ownership.
-- [ ] Update `BookingService.pay` to accept the `202` response.
-- [ ] Update the booking UI so payment occurs after acceptance and before work starts.
-- [ ] Show durable pending/funded/release/refund states and poll with bounded backoff.
-- [ ] On funding completion, show that money is safely held and work may begin; on release or
+- [x] Update `BookingService.pay` to accept the `202` response.
+- [x] Update the booking UI so payment occurs after acceptance and before work starts.
+- [x] Show durable pending/funded/release/refund states and poll with bounded backoff.
+- [x] On funding completion, show that money is safely held and work may begin; on release or
       refund completion, refresh the terminal booking state.
-- [ ] On failure, show the reason and permit a retry only after the prior saga is terminal.
-- [ ] Preserve pending behavior across page reloads using server state rather than only React
+- [x] On failure, show the reason and permit a retry only after the prior saga is terminal.
+- [x] Preserve pending behavior across page reloads using server state rather than only React
       state.
-- [ ] Add frontend tests for funding, held-in-escrow, release, refund, decline, timeout, and reload.
+- [x] Add frontend tests for funding, held-in-escrow, release, refund, decline, timeout, and reload.
+
+Implementation details:
+
+1. `GET /api/booking/payment-status/{sagaId}` maps durable `STARTED` saga rows to `PENDING`,
+   returns terminal `COMPLETED`/`FAILED` state with the booking's current escrow projection, and
+   allows only the requester, TaskMaster, or an administrator to read it.
+2. Single-booking reads expose the latest asynchronous saga id, operation, status, and failure
+   reason. The frontend reconstructs pending state from this server projection after reload;
+   legacy synchronous pending payments remain blocked without polling the escrow-only endpoint.
+3. Card details are exchanged for a short-lived payment-method token before `/pay` creates the
+   durable funding saga. The requester sees queued, funded, declined, released, and refunded
+   states, with bounded polling and a durable timeout message rather than an unsafe retry.
+4. Accepted bookings are funded before work begins. Once escrow is `FUNDED`, the TaskMaster can
+   move the booking to `IN_PROGRESS`; proof submission then persists proof and queues release.
+   Funded bookings can be cancelled before work to queue a refund.
+5. Frontend coverage exercises the `202` funding response, held escrow, release, refund request
+   and completion, decline/retry, bounded timeout, and reload recovery.
 
 ### Task 12 — Harden recovery and operations
 

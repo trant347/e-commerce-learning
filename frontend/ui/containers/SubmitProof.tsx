@@ -4,7 +4,7 @@ import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import axios from 'axios';
 
 import UserContext from '../context/userContext';
-import { Booking, BookingService } from '../api/bookingServices';
+import { Booking, BookingService, PaymentAcceptedResponse } from '../api/bookingServices';
 import Dialog from '../components/dialog/dialog';
 
 import '../components/new-task-master/new-task-master.css';
@@ -26,13 +26,19 @@ export default function SubmitProof() {
     const [submitting, setSubmitting] = useState(false);
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const [successOpen, setSuccessOpen] = useState(false);
+    const [releaseRequest, setReleaseRequest] = useState<PaymentAcceptedResponse | null>(null);
 
     useEffect(() => {
         if (!id) return;
         BookingService.get(id)
             .then(b => {
                 setBooking(b);
-                setInvoiceAmount(b.offeredTotalAmount != null ? b.offeredTotalAmount.toFixed(2) : '');
+                setInvoiceAmount(
+                    b.agreedAmount != null
+                        ? b.agreedAmount.toFixed(2)
+                        : b.offeredTotalAmount != null
+                            ? b.offeredTotalAmount.toFixed(2)
+                            : '');
                 setLoading(false);
             })
             .catch(() => {
@@ -40,6 +46,50 @@ export default function SubmitProof() {
                 setLoading(false);
             });
     }, [id]);
+
+    useEffect(() => {
+        if (!releaseRequest) return;
+        let cancelled = false;
+        let attempts = 0;
+        let timer: ReturnType<typeof setTimeout>;
+        const delays = [1000, 2000, 4000, 8000, 10000];
+
+        const poll = async () => {
+            try {
+                const status = await BookingService.getPaymentStatus(releaseRequest.sagaId);
+                if (cancelled) return;
+                if (status.status === 'COMPLETED') {
+                    setSuccessOpen(true);
+                    return;
+                }
+                if (status.status === 'FAILED') {
+                    setReleaseRequest(null);
+                    setFeedback({
+                        type: 'error',
+                        message: status.failureReason ?? 'Escrow release failed. Please retry.',
+                    });
+                    return;
+                }
+            } catch {
+                if (cancelled) return;
+            }
+
+            if (attempts < delays.length) {
+                timer = setTimeout(poll, delays[attempts++]);
+            } else {
+                setFeedback({
+                    type: 'error',
+                    message: 'Escrow release is still processing. Reload this booking later to continue checking.',
+                });
+            }
+        };
+
+        timer = setTimeout(poll, delays[attempts++]);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [releaseRequest]);
 
     if (!username) {
         return <Navigate to="/signin" replace />;
@@ -61,12 +111,12 @@ export default function SubmitProof() {
         return <Navigate to="/" replace />;
     }
 
-    if (booking.status !== 'ACCEPTED') {
+    if (booking.status !== 'IN_PROGRESS') {
         return (
             <div className="new-taskmaster-page">
                 <h1><i className="file alternate icon" /> Submit Proof of Job</h1>
                 <div className="form-feedback error" style={{ padding: '1.5rem' }}>
-                    This booking is <strong>{booking.status}</strong> and cannot be invoiced right now.
+                    This booking is <strong>{booking.status}</strong> and cannot submit proof right now.
                 </div>
                 <button className="submit-btn" style={{ marginTop: '1rem' }} onClick={() => navigate('/my-calendar')}>
                     Back to My Calendar
@@ -111,8 +161,12 @@ export default function SubmitProof() {
             const filename: string = uploadRes.data;
             const proofFileUrl = `/products/image/${filename}`;
 
-            await BookingService.submitProof(booking.id, proofFileUrl, amount);
-            setSuccessOpen(true);
+            const result = await BookingService.submitProof(booking.id, proofFileUrl, amount);
+            if ('sagaId' in result) {
+                setReleaseRequest(result);
+            } else {
+                setSuccessOpen(true);
+            }
         } catch (err: any) {
             const msg = err?.response?.data?.error || err?.response?.data?.message || 'Failed to submit proof of job. Please try again.';
             setFeedback({ type: 'error', message: msg });
@@ -125,9 +179,8 @@ export default function SubmitProof() {
         <div className="new-taskmaster-page">
             <h1><i className="file alternate icon" /> Submit Proof of Job</h1>
             <p style={{ color: '#666', marginBottom: '1.5rem' }}>
-                Upload proof that you completed the job for <strong>{booking.requesterUsername}</strong>,
-                then send the invoice. The booking will move to <strong>Implemented</strong> and the requester
-                will be asked to pay.
+                Upload proof that you completed the job for <strong>{booking.requesterUsername}</strong>.
+                The agreed escrow amount will then be durably queued for release.
             </p>
 
             <form onSubmit={handleSubmit}>
@@ -145,6 +198,7 @@ export default function SubmitProof() {
                         value={invoiceAmount}
                         onChange={e => setInvoiceAmount(e.target.value)}
                         required
+                        disabled={booking.agreedAmount != null}
                         placeholder="e.g. 45.00"
                     />
                 </div>
@@ -152,16 +206,21 @@ export default function SubmitProof() {
                 {feedback && (
                     <div className={`form-feedback ${feedback.type}`}>{feedback.message}</div>
                 )}
+                {releaseRequest && (
+                    <div className="form-feedback success">
+                        Proof is saved and escrow release is safely queued.
+                    </div>
+                )}
 
-                <button type="submit" className="submit-btn" disabled={submitting}>
+                <button type="submit" className="submit-btn" disabled={submitting || releaseRequest != null}>
                     {submitting ? 'Submitting...' : 'Submit Proof & Send Invoice'}
                 </button>
             </form>
 
             {successOpen && (
                 <Dialog
-                    title="Invoice sent"
-                    message="Proof of job and invoice were submitted. The requester has been notified to pay."
+                    title="Release requested"
+                    message="Proof of job was saved and escrow release is processing."
                     onClose={() => navigate('/my-calendar')}
                 />
             )}

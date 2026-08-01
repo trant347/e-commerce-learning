@@ -39,7 +39,8 @@ export default function MyCalendar() {
         BookingService.listIncoming()
             .then(bookings => {
                 const visible = bookings.filter(b =>
-                    b.status === 'ACCEPTED' || b.status === 'IMPLEMENTED' || b.status === 'COMPLETED');
+                    b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS'
+                    || b.status === 'IMPLEMENTED' || b.status === 'COMPLETED');
                 setEvents(visible.map(bookingToEvent));
             })
             .catch(() => setError('Failed to load your calendar.'));
@@ -80,6 +81,18 @@ function formatSlot(b: Booking): string {
 
 function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: () => void }) {
     const navigate = useNavigate();
+    const [current, setCurrent] = React.useState(booking);
+    const [starting, setStarting] = React.useState(false);
+    const [startError, setStartError] = React.useState<string | null>(null);
+
+    const startWork = () => {
+        setStarting(true);
+        setStartError(null);
+        BookingService.startWork(current.id)
+            .then(setCurrent)
+            .catch(err => setStartError(err?.response?.data?.error ?? 'Failed to start work.'))
+            .finally(() => setStarting(false));
+    };
 
     return (
         <Overlay onClick={onClose}>
@@ -93,7 +106,7 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
 
                 <Field>
                     <Label>Status</Label>
-                    <Value><strong>{booking.status}</strong></Value>
+                    <Value><strong>{current.status}</strong></Value>
                 </Field>
 
                 <Field>
@@ -131,7 +144,7 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                     </Field>
                 )}
 
-                {(booking.status === 'IMPLEMENTED' || booking.status === 'COMPLETED') && (
+                {(current.status === 'IMPLEMENTED' || current.status === 'COMPLETED') && (
                     <Field>
                         <Label>Invoice</Label>
                         <Value>
@@ -150,7 +163,7 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                                 </div>
                             )}
                             <div style={{ marginTop: '6px' }}>
-                                {booking.status === 'COMPLETED'
+                                {current.status === 'COMPLETED'
                                     ? 'Payment received. This booking is complete.'
                                     : 'Awaiting payment from the requester.'}
                             </div>
@@ -159,8 +172,14 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                 )}
 
                 <Actions>
-                    {booking.status === 'ACCEPTED' && (
-                        <SecondaryButton onClick={() => navigate(`/booking/${booking.id}/submit-proof`)}>
+                    {startError && <span style={{ color: '#db2828' }}>{startError}</span>}
+                    {current.status === 'ACCEPTED' && current.escrowStatus === 'FUNDED' && (
+                        <SecondaryButton onClick={startWork} disabled={starting}>
+                            {starting ? 'Starting...' : 'Start Work'}
+                        </SecondaryButton>
+                    )}
+                    {current.status === 'IN_PROGRESS' && (
+                        <SecondaryButton onClick={() => navigate(`/booking/${current.id}/submit-proof`)}>
                             <i className="file alternate icon" /> Submit Proof &amp; Send Invoice
                         </SecondaryButton>
                     )}
