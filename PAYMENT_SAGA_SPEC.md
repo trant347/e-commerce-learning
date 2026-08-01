@@ -290,6 +290,7 @@ sum of all `FUNDED` escrow rows.
 | Kafka workers/results | both services | **Implemented (Tasks 6–10).** Execute commands and apply results idempotently through transactional outboxes. |
 | Async status UI | calendar-service/frontend | **Implemented (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
 | Recovery and operations | both services | **Implemented (Task 12).** Distinguishes dispatch stages, dead-letters poison messages, exports saga metrics, and reconciles custody balances. |
+| Infrastructure and rollout | Docker Compose/both services | **Implemented (Task 13).** Provisions topics, configures workers and custody, and enables async escrow by default with an explicit rollback gate. |
 
 Tasks 1–4 establish the safe contracts, token boundary, escrow ledger, booking lifecycle, and
 durable command outbox.
@@ -709,11 +710,35 @@ Implementation details:
 
 ### Task 13 — Configure infrastructure and complete rollout
 
-- [ ] Add `payment-requests`, `payment-results`, and their DLQ topics to `kafka-init`.
-- [ ] Add topic, consumer group, retry, polling, and feature-flag configuration to both services
+- [x] Add `payment-requests`, `payment-results`, and their DLQ topics to `kafka-init`.
+- [x] Add topic, consumer group, retry, polling, and feature-flag configuration to both services
       and `docker-compose.yml`.
-- [ ] Configure the admin custody account explicitly; never infer it from the first admin user.
-- [ ] Verify funding, release, refund, multiple service replicas, and duplicate event delivery.
-- [ ] Enable asynchronous payments by default after the new path is stable.
-- [ ] Remove the synchronous payment-processing path and obsolete `IPaymentApiClient` methods
-      only after rollback support is no longer required.
+- [x] Configure the admin custody account explicitly; never infer it from the first admin user.
+- [x] Verify funding, release, refund, multiple service replicas, and duplicate event delivery.
+- [x] Enable asynchronous payments by default after the new path is stable.
+- [x] Retain the synchronous payment-processing path only as an explicit rollback option; remove
+      it and obsolete `IPaymentApiClient` methods once rollback support is no longer required.
+
+Implementation details:
+
+1. `kafka-init` now creates three-partition `payment-requests`, `payment-results`,
+   `payment-requests.dlq`, and `payment-results.dlq` topics before either payment worker starts.
+   Broker auto-creation is disabled so misspelled topic names fail instead of silently creating
+   unmonitored streams.
+2. Docker Compose supplies both services with their request/result topics, DLQ topics, consumer
+   groups, retry limits, producer timeouts, outbox polling/lease/backoff settings, reconciliation
+   intervals, and the async-payment feature flag. The checked-in appsettings contain the same
+   defaults for non-container startup.
+3. `PAYMENT_CUSTODY_USER_ID` identifies the dedicated internal custody account. Payment-service
+   initializes that exact wallet at zero balance before consumers start; it never selects an
+   administrator or receives the simulated user starting balance. Initialization is idempotent
+   across restarts and concurrent replicas, while the Task 12 reconciler continuously validates
+   its balance.
+4. Funding, release, refund, duplicate `sagaId` delivery, stale/competing dispatch claims, worker
+   restart recovery, and repeated custody initialization are covered by the calendar-service and
+   payment-service suites. Kafka consumer groups and database/Mongo claim leases distribute work
+   safely when service replicas are scaled out.
+5. `AsyncPaymentsEnabled` now defaults to `true` in calendar-service and Docker Compose. Setting
+   it to `false` remains the documented rollback switch during the stabilization window; the
+   synchronous HTTP client and processing endpoint are intentionally removed only after operators
+   no longer require that rollback.

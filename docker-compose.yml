@@ -60,12 +60,28 @@ services:
     - ConsulConfig__HealthCheckUrl=http://calendar-service:8080/health
     - KafkaProducerConfig__BootstrapServers=kafka:29092
     - KafkaProducerConfig__NotificationTopic=notification-events
+    - KafkaProducerConfig__PaymentRequestTopic=payment-requests
+    - KafkaProducerConfig__PaymentRequestMessageTimeoutMs=10000
+    - KafkaProducerConfig__ClientId=calendar-service
     - KafkaConsumerConfig__BootstrapServers=kafka:29092
     - KafkaConsumerConfig__PaymentResultTopic=payment-results
+    - KafkaConsumerConfig__PaymentResultDeadLetterTopic=payment-results.dlq
     - KafkaConsumerConfig__PaymentResultGroupId=calendar-service-payment-results-v1
     - KafkaConsumerConfig__PaymentResultFailureRetryDelaySeconds=5
+    - KafkaConsumerConfig__PaymentResultMaxInvalidMessageAttempts=3
+    - PaymentRequestOutbox__PollIntervalSeconds=2
+    - PaymentRequestOutbox__ClaimLeaseSeconds=30
+    - PaymentRequestOutbox__BaseRetryDelaySeconds=1
+    - PaymentRequestOutbox__MaxRetryDelaySeconds=60
+    - PaymentRequestOutbox__MaxBatchSize=100
+    - SagaReconciliation__StuckThresholdSeconds=30
+    - SagaReconciliation__PollIntervalSeconds=60
+    - SagaReconciliation__ClaimTtlSeconds=45
+    - AsyncPaymentsEnabled=true
+    - Escrow__CustodyUserId=${PAYMENT_CUSTODY_USER_ID:-admin-custody}
     - JwtSettings__Secret=${JwtSecret:?JwtSecret must be set in .env and be at least 32 characters}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
+    - ExternalServices__PaymentServiceBaseUrl=http://payment-service:8080
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # - OTEL_SERVICE_NAME=calendar-service
@@ -74,6 +90,7 @@ services:
     depends_on:
     - mongo
     - consul
+    - kafka-init
     - kafka
     # - otel-collector
 
@@ -150,7 +167,7 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       # Explicitly disable KRaft mode
       KAFKA_PROCESS_ROLES: ""
       KAFKA_CONTROLLER_QUORUM_VOTERS: ""
@@ -167,11 +184,14 @@ services:
     command:
       - |
         # Wait for Kafka to be ready
-        cub kafka-ready -b kafka:9092 1 20
-        # Create the 'bookings' topic
-        kafka-topics --create --if-not-exists --topic notification-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
-        kafka-topics --create --if-not-exists --topic user-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
-        echo "Topic created successfully."
+        cub kafka-ready -b kafka:29092 1 20
+        kafka-topics --create --if-not-exists --topic notification-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic user-events --partitions 1 --replication-factor 1 --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic payment-requests --partitions 3 --replication-factor 1 --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic payment-results --partitions 3 --replication-factor 1 --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic payment-requests.dlq --partitions 3 --replication-factor 1 --bootstrap-server kafka:29092
+        kafka-topics --create --if-not-exists --topic payment-results.dlq --partitions 3 --replication-factor 1 --bootstrap-server kafka:29092
+        echo "Kafka topics created successfully."
 
   redis:
     image: redis:6.0.9
@@ -225,6 +245,25 @@ services:
     - ConsulConfig__ServicePort=8080 # The port *your app listens on inside the container*
     - ConsulConfig__HealthCheckUrl=http://payment-service:8080/health
     - KafkaConsumerConfig__BootstrapServers=kafka:29092
+    - KafkaConsumerConfig__PaymentRequestTopic=payment-requests
+    - KafkaConsumerConfig__PaymentRequestDeadLetterTopic=payment-requests.dlq
+    - KafkaConsumerConfig__PaymentRequestGroupId=payment-service-payment-requests-v1
+    - KafkaConsumerConfig__PaymentRequestFailureRetryDelaySeconds=5
+    - KafkaConsumerConfig__PaymentRequestMaxInvalidMessageAttempts=3
+    - PaymentResultProducer__BootstrapServers=kafka:29092
+    - PaymentResultProducer__ClientId=payment-service
+    - PaymentResultProducer__Topic=payment-results
+    - PaymentResultProducer__MessageTimeoutMs=30000
+    - PaymentResultOutbox__PollIntervalSeconds=2
+    - PaymentResultOutbox__ClaimLeaseSeconds=60
+    - PaymentResultOutbox__BaseRetryDelaySeconds=1
+    - PaymentResultOutbox__MaxRetryDelaySeconds=60
+    - PaymentResultOutbox__MaxBatchSize=100
+    - PaymentMethodTokens__LifetimeSeconds=300
+    - PaymentMethodTokens__CleanupIntervalSeconds=300
+    - PaymentMethodTokens__RetentionSeconds=86400
+    - Escrow__CustodyUserId=${PAYMENT_CUSTODY_USER_ID:-admin-custody}
+    - EscrowReconciliation__PollIntervalSeconds=60
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # - OTEL_SERVICE_NAME=payment-service

@@ -10,6 +10,7 @@ namespace calendar_service.MessageQueue
     {
         private readonly IProducer<string, string> _producer;
         private readonly ILogger<KafkaDeadLetterProducer> _logger;
+        private readonly string _topic;
 
         public KafkaDeadLetterProducer(
             IConfiguration configuration,
@@ -26,6 +27,10 @@ namespace calendar_service.MessageQueue
                 Acks = Acks.All,
                 EnableIdempotence = true
             }).Build();
+            _topic =
+                configuration[
+                    "KafkaConsumerConfig:PaymentResultDeadLetterTopic"]
+                ?? "payment-results.dlq";
             _logger = logger;
         }
 
@@ -35,7 +40,6 @@ namespace calendar_service.MessageQueue
             int attemptCount,
             CancellationToken cancellationToken)
         {
-            var topic = consumeResult.Topic + ".dlq";
             var headers = new Headers();
             if (consumeResult.Message.Headers != null)
             {
@@ -58,7 +62,7 @@ namespace calendar_service.MessageQueue
                 Encoding.UTF8.GetBytes(attemptCount.ToString()));
 
             var delivery = await _producer.ProduceAsync(
-                topic,
+                _topic,
                 new Message<string, string>
                 {
                     Key = consumeResult.Message.Key,
@@ -76,7 +80,7 @@ namespace calendar_service.MessageQueue
                 exception,
                 "Dead-lettered payment message sourceTopic={SourceTopic} dlqTopic={DlqTopic} partition={Partition} offset={Offset} attempts={Attempts}",
                 consumeResult.Topic,
-                topic,
+                _topic,
                 consumeResult.Partition.Value,
                 consumeResult.Offset.Value,
                 attemptCount);

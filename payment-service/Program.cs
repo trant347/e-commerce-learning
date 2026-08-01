@@ -56,6 +56,7 @@ builder.Services.Configure<PaymentResultProducerOptions>(
     builder.Configuration.GetSection("PaymentResultProducer"));
 builder.Services.AddSingleton<IPaymentResultProducer, PaymentResultProducer>();
 builder.Services.AddSingleton<IKafkaDeadLetterProducer, KafkaDeadLetterProducer>();
+builder.Services.AddHostedService<CustodyWalletInitializer>();
 builder.Services.AddHostedService<PaymentMethodTokenCleanupWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.PaymentRequestConsumerWorker>();
