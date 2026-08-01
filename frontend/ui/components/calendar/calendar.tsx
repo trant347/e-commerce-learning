@@ -23,6 +23,8 @@ export interface Event {
   end: Date;
   /** Optional caller-defined payload, surfaced again via onEventClick. */
   data?: unknown;
+  /** Optional caller-defined colors for status-aware event rendering. */
+  style?: React.CSSProperties;
 }
 
 export interface BusyRange {
@@ -241,6 +243,7 @@ export const Calendar: React.FC<CalendarProps> = ({ events, busy, onChange, onCl
     return {
       top: `${(topMinutes / 60) * HOUR_HEIGHT}px`,
       height: `${(durationMinutes / 60) * HOUR_HEIGHT}px`,
+      ...event.style,
     };
   };
 

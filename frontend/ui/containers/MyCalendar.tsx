@@ -7,7 +7,44 @@ import { Calendar, Event } from '../components/calendar/calendar';
 import { Booking, BookingService, openAuthenticatedFile } from '../api/bookingServices';
 import { TaskMasterServices } from '../api/taskMasterServices';
 
-function bookingToEvent(b: Booking): Event {
+const BOOKING_EVENT_STYLES: Record<string, React.CSSProperties> = {
+    WAITING_FOR_FUNDING: {
+        backgroundColor: '#fff4ce',
+        borderLeftColor: '#f0a500',
+        color: '#5c4300',
+    },
+    READY_TO_START: {
+        backgroundColor: '#deecf9',
+        borderLeftColor: '#0078d4',
+        color: '#004578',
+    },
+    IN_PROGRESS: {
+        backgroundColor: '#e8e1f8',
+        borderLeftColor: '#6b4eff',
+        color: '#3b2470',
+    },
+    IMPLEMENTED: {
+        backgroundColor: '#fde7d9',
+        borderLeftColor: '#d83b01',
+        color: '#7a2100',
+    },
+    COMPLETED: {
+        backgroundColor: '#dff6dd',
+        borderLeftColor: '#107c10',
+        color: '#0b5a0b',
+    },
+};
+
+function bookingEventState(b: Booking): string {
+    if (b.status === 'ACCEPTED') {
+        return b.escrowStatus === 'FUNDED'
+            ? 'READY_TO_START'
+            : 'WAITING_FOR_FUNDING';
+    }
+    return b.status;
+}
+
+export function bookingToEvent(b: Booking): Event {
     const start = new Date(b.slotStart);
     const end = new Date(start.getTime() + b.durationHours * 60 * 60 * 1000);
     return {
@@ -16,7 +53,27 @@ function bookingToEvent(b: Booking): Event {
         start,
         end,
         data: b,
+        style: BOOKING_EVENT_STYLES[bookingEventState(b)],
     };
+}
+
+export function getBookingStatusMessage(booking: Booking): string | null {
+    if (booking.status === 'ACCEPTED' && booking.escrowStatus !== 'FUNDED') {
+        return 'Waiting for the requester to fund escrow. Start Work will become available once payment is safely held.';
+    }
+    if (booking.status === 'ACCEPTED' && booking.escrowStatus === 'FUNDED') {
+        return 'Payment is funded and safely held in escrow. You can start work when ready.';
+    }
+    if (booking.status === 'IN_PROGRESS') {
+        return 'Work is in progress. Submit proof after the task is finished to request escrow release.';
+    }
+    if (booking.status === 'IMPLEMENTED') {
+        return 'Proof was submitted. Escrow release is being processed.';
+    }
+    if (booking.status === 'COMPLETED') {
+        return 'Escrow was released and this booking is complete.';
+    }
+    return null;
 }
 
 export default function MyCalendar() {
@@ -50,6 +107,12 @@ export default function MyCalendar() {
     if (allowed === false) return <Navigate to="/" replace />;
     if (allowed === null) return <p style={{ padding: '20px' }}>Loading...</p>;
 
+    const updateBooking = (updated: Booking) => {
+        setSelected(updated);
+        setEvents(currentEvents => currentEvents.map(event =>
+            event.id === updated.id ? bookingToEvent(updated) : event));
+    };
+
     return (
         <div style={{ padding: '20px' }}>
             <h2 style={{ marginBottom: '20px' }}>
@@ -63,7 +126,11 @@ export default function MyCalendar() {
             />
 
             {selected && (
-                <BookingDetailsModal booking={selected} onClose={() => setSelected(null)} />
+                <BookingDetailsModal
+                    booking={selected}
+                    onUpdated={updateBooking}
+                    onClose={() => setSelected(null)}
+                />
             )}
         </div>
     );
@@ -79,7 +146,15 @@ function formatSlot(b: Booking): string {
     return `${start.toLocaleString()} → ${endStr}`;
 }
 
-function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: () => void }) {
+function BookingDetailsModal({
+    booking,
+    onUpdated,
+    onClose,
+}: {
+    booking: Booking;
+    onUpdated: (booking: Booking) => void;
+    onClose: () => void;
+}) {
     const navigate = useNavigate();
     const [current, setCurrent] = React.useState(booking);
     const [starting, setStarting] = React.useState(false);
@@ -89,7 +164,10 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
         setStarting(true);
         setStartError(null);
         BookingService.startWork(current.id)
-            .then(setCurrent)
+            .then(updated => {
+                setCurrent(updated);
+                onUpdated(updated);
+            })
             .catch(err => setStartError(err?.response?.data?.error ?? 'Failed to start work.'))
             .finally(() => setStarting(false));
     };
@@ -108,6 +186,10 @@ function BookingDetailsModal({ booking, onClose }: { booking: Booking; onClose: 
                     <Label>Status</Label>
                     <Value><strong>{current.status}</strong></Value>
                 </Field>
+
+                {getBookingStatusMessage(current) && (
+                    <StatusNotice>{getBookingStatusMessage(current)}</StatusNotice>
+                )}
 
                 <Field>
                     <Label>When</Label>
@@ -239,6 +321,16 @@ const Message = styled.div<{ $empty?: boolean }>`
     font-size: 0.92rem;
     white-space: pre-wrap;
     color: ${p => p.$empty ? '#a19f9d' : '#252423'};
+`;
+
+const StatusNotice = styled.div`
+    margin-bottom: 1em;
+    padding: 10px 12px;
+    border-left: 4px solid #f0a500;
+    border-radius: 4px;
+    background: #fff8dc;
+    color: #5c4300;
+    font-size: 0.92rem;
 `;
 
 const Actions = styled.div`

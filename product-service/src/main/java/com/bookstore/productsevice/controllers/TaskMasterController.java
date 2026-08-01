@@ -1,7 +1,6 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.exception.ItemNotFoundException;
-import com.bookstore.productsevice.messaging.CategoryEventPublisher;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.bookstore.productsevice.services.ProductCacheService;
@@ -39,9 +38,6 @@ public class TaskMasterController {
 
     @Autowired
     private TaskMasterSearchService taskMasterSearchService;
-
-    @Autowired
-    private CategoryEventPublisher categoryEventPublisher;
 
     @Autowired
     private ProductCacheService productCacheService;
@@ -114,12 +110,6 @@ public class TaskMasterController {
         log.info("[TaskMasterController] Saved successfully, id='{}'", response.getId());
 
         productCacheService.evictOnCreate();
-
-        try {
-            categoryEventPublisher.publishCategoriesUpdated();
-        } catch (Exception e) {
-            log.warn("[TaskMasterController] Kafka publish failed (non-fatal): {}", e.getMessage());
-        }
 
         return new ResponseEntity<>(response, HttpStatus.OK);
     }

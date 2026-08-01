@@ -339,6 +339,10 @@ namespace calendar_service.Tests
         {
             var service = new Mock<IBookingService>();
             var notifications = new Mock<INotificationProducer>();
+            var published = new List<object>();
+            notifications.Setup(n => n.PublishAsync(It.IsAny<object>()))
+                .Callback<object>(published.Add)
+                .Returns(Task.CompletedTask);
 
             var accepted = new Booking
             {
@@ -370,6 +374,19 @@ namespace calendar_service.Tests
             Assert.Same(accepted, ok.Value);
             // One notification to the accepted requester + one per auto-declined sibling.
             notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Exactly(2));
+            var acceptedNotification = System.Text.Json.JsonSerializer.Serialize(
+                published[0]);
+            using var document = System.Text.Json.JsonDocument.Parse(
+                acceptedNotification);
+            Assert.Equal(
+                "VIEW_PAYMENT_REQUEST",
+                document.RootElement.GetProperty("actionType").GetString());
+            Assert.Equal(
+                "bk-1",
+                document.RootElement
+                    .GetProperty("actionPayload")
+                    .GetProperty("bookingId")
+                    .GetString());
         }
 
         [Fact]

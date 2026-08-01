@@ -35,6 +35,20 @@ function operationLabel(operation?: PaymentOperation): string {
     }
 }
 
+function formatCardNumber(value: string): string {
+    return value
+        .replace(/\D/g, '')
+        .slice(0, 16)
+        .replace(/(\d{4})(?=\d)/g, '$1 ');
+}
+
+function formatExpiryDate(value: string): string {
+    const digits = value.replace(/\D/g, '').slice(0, 4);
+    return digits.length > 2
+        ? `${digits.slice(0, 2)}/${digits.slice(2)}`
+        : digits;
+}
+
 export default function PayBooking() {
     const { username } = useContext(UserContext);
     const { id } = useParams<{ id: string }>();
@@ -142,7 +156,10 @@ export default function PayBooking() {
 
         setSubmitting(true);
         try {
-            const result = await BookingService.pay(booking.id, card);
+            const result = await BookingService.pay(booking.id, {
+                ...card,
+                cardNumber: card.cardNumber.replace(/\s/g, ''),
+            });
             if (isAcceptedPayment(result)) {
                 setPaymentStatus({
                     sagaId: result.sagaId,
@@ -266,11 +283,39 @@ export default function PayBooking() {
                 </div>
                 <div className="user-input-row">
                     <label htmlFor="payment-card-number">Card Number *</label>
-                    <input id="payment-card-number" type="text" name="cardNumber" value={card.cardNumber} onChange={e => setCard({ ...card, cardNumber: e.target.value })} required />
+                    <input
+                        id="payment-card-number"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="cc-number"
+                        maxLength={19}
+                        name="cardNumber"
+                        value={card.cardNumber}
+                        placeholder="Test card: 4242 4242 4242 4242"
+                        onChange={e => setCard({
+                            ...card,
+                            cardNumber: formatCardNumber(e.target.value),
+                        })}
+                        required
+                    />
                 </div>
                 <div className="user-input-row">
                     <label htmlFor="payment-expiry-date">Expiry Date *</label>
-                    <input id="payment-expiry-date" type="text" name="expiryDate" value={card.expiryDate} onChange={e => setCard({ ...card, expiryDate: e.target.value })} required placeholder="MM/YY" />
+                    <input
+                        id="payment-expiry-date"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="cc-exp"
+                        maxLength={5}
+                        name="expiryDate"
+                        value={card.expiryDate}
+                        onChange={e => setCard({
+                            ...card,
+                            expiryDate: formatExpiryDate(e.target.value),
+                        })}
+                        required
+                        placeholder="MM/YY"
+                    />
                 </div>
                 <div className="user-input-row">
                     <label htmlFor="payment-cvv">CVV *</label>

@@ -48,7 +48,9 @@ function baseBooking(overrides: Partial<Booking> = {}): Booking {
 async function fillCardAndSubmit() {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/Cardholder Name/i), 'Alice');
-    await user.type(screen.getByLabelText(/Card Number/i), '4111111111111111');
+    const cardNumber = screen.getByLabelText(/Card Number/i);
+    await user.clear(cardNumber);
+    await user.type(cardNumber, '4111111111111111');
     await user.type(screen.getByLabelText(/Expiry Date/i), '12/30');
     await user.type(screen.getByLabelText(/CVV/i), '123');
     await user.click(screen.getByRole('button', { name: /Pay \$100\.00/i }));
@@ -58,6 +60,32 @@ describe('PayBooking escrow lifecycle', () => {
     afterEach(() => {
         jest.clearAllMocks();
         jest.useRealTimers();
+    });
+
+    test('shows the test-only card number as a placeholder', async () => {
+        (BookingService.get as jest.Mock).mockResolvedValue(baseBooking());
+
+        renderAt();
+
+        expect(await screen.findByLabelText(/Card Number/i))
+            .toHaveAttribute('placeholder', 'Test card: 4242 4242 4242 4242');
+        expect(screen.getByLabelText(/Card Number/i)).toHaveValue('');
+    });
+
+    test('formats card and expiry fields while typing', async () => {
+        (BookingService.get as jest.Mock).mockResolvedValue(baseBooking());
+        const user = userEvent.setup();
+
+        renderAt();
+        await user.type(
+            await screen.findByLabelText(/Card Number/i),
+            '4242424242424242',
+        );
+        await user.type(screen.getByLabelText(/Expiry Date/i), '1230');
+
+        expect(screen.getByLabelText(/Card Number/i))
+            .toHaveValue('4242 4242 4242 4242');
+        expect(screen.getByLabelText(/Expiry Date/i)).toHaveValue('12/30');
     });
 
     test('funds an accepted booking and shows durable pending state from the 202 response', async () => {

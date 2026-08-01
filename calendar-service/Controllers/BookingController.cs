@@ -271,8 +271,8 @@ namespace calendar_service.Controllers
                 {
                     type = "BOOKING_REQUEST_ACCEPTED",
                     recipientUsername = result.Accepted.RequesterUsername,
-                    message = $"Your booking from {result.Accepted.SlotStart:yyyy-MM-dd HH:mm} to {result.Accepted.SlotEnd:HH:mm} UTC was accepted.",
-                    actionType = "VIEW_OUTGOING_BOOKING_REQUEST",
+                    message = $"Your booking from {result.Accepted.SlotStart:yyyy-MM-dd HH:mm} to {result.Accepted.SlotEnd:HH:mm} UTC was accepted. Fund escrow to confirm the work.",
+                    actionType = "VIEW_PAYMENT_REQUEST",
                     actionPayload = new Dictionary<string, string>
                     {
                         { "bookingId", result.Accepted.Id ?? string.Empty },

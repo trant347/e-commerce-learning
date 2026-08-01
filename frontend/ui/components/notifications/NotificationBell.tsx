@@ -11,6 +11,29 @@ interface NotificationBellProps {
     onMarkAsRead?: (notificationId: string) => void;
 }
 
+export function resolveNotificationActionUrl(
+    actionType: string | undefined,
+    payload: Record<string, string> | undefined,
+    notificationType?: string,
+): string | null {
+    const p = payload ?? {};
+    // Existing acceptance notifications used the generic outgoing-booking action. Route those
+    // records to payment as well so users are not stranded by notifications created pre-fix.
+    if (notificationType === 'BOOKING_REQUEST_ACCEPTED' && p.bookingId) {
+        return `/booking/${p.bookingId}/pay`;
+    }
+    if (!actionType) return null;
+    switch (actionType) {
+        case 'VIEW_MY_APPLICATION':    return '/my-application';
+        case 'VIEW_ADMIN_APPLICATION': return `/admin/applications/${p.applicationId}`;
+        case 'VIEW_TASKMASTER':        return `/product/${p.taskMasterId}`;
+        case 'VIEW_INCOMING_BOOKING_REQUEST': return '/bookings/incoming';
+        case 'VIEW_OUTGOING_BOOKING_REQUEST': return p.taskMasterId ? `/booking/${p.taskMasterId}` : '/';
+        case 'VIEW_PAYMENT_REQUEST': return p.bookingId ? `/booking/${p.bookingId}/pay` : '/';
+        default: return null;
+    }
+}
+
 export const NotificationBell: React.FC<NotificationBellProps> = ({
     notifications,
     unreadCount,
@@ -18,19 +41,6 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
 }) => {
     const navigate = useNavigate();
 
-    const resolveActionUrl = (actionType: string | undefined, payload: Record<string, string> | undefined): string | null => {
-        if (!actionType) return null;
-        const p = payload ?? {};
-        switch (actionType) {
-            case 'VIEW_MY_APPLICATION':    return '/my-application';
-            case 'VIEW_ADMIN_APPLICATION': return `/admin/applications/${p.applicationId}`;
-            case 'VIEW_TASKMASTER':        return `/product/${p.taskMasterId}`;
-            case 'VIEW_INCOMING_BOOKING_REQUEST': return '/bookings/incoming';
-            case 'VIEW_OUTGOING_BOOKING_REQUEST': return p.taskMasterId ? `/booking/${p.taskMasterId}` : '/';
-            case 'VIEW_PAYMENT_REQUEST': return p.bookingId ? `/booking/${p.bookingId}/pay` : '/';
-            default: return null;
-        }
-    };
     const getNotificationIcon = (type: string) => {
         switch (type.toLowerCase()) {
             case 'booking_confirmed':
@@ -107,10 +117,13 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
                         <List.Item 
                             key={notification.id}
                             className={notification.notificationStatus === 'Pending' ? 'unread' : 'read'}
-                            style={resolveActionUrl(notification.actionType, notification.actionPayload) ? { cursor: 'pointer' } : undefined}
+                            style={resolveNotificationActionUrl(notification.actionType, notification.actionPayload, notification.type) ? { cursor: 'pointer' } : undefined}
                             onClick={() => {
                                 if (onMarkAsRead) onMarkAsRead(notification.id);
-                                const url = resolveActionUrl(notification.actionType, notification.actionPayload);
+                                const url = resolveNotificationActionUrl(
+                                    notification.actionType,
+                                    notification.actionPayload,
+                                    notification.type);
                                 if (url) navigate(url);
                             }}
                         >

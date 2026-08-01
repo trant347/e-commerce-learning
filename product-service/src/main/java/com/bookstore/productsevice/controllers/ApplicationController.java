@@ -1,7 +1,6 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.messaging.ApplicationEventPublisher;
-import com.bookstore.productsevice.messaging.CategoryEventPublisher;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.model.TaskMasterApplication;
 import com.bookstore.productsevice.model.TaskMasterApplication.ApplicationStatus;
@@ -41,18 +40,15 @@ public class ApplicationController {
     private final TaskMasterRepository taskMasterRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final ProductCacheService productCacheService;
-    private final CategoryEventPublisher categoryEventPublisher;
 
     public ApplicationController(ApplicationRepository applicationRepository,
                                  TaskMasterRepository taskMasterRepository,
                                  ApplicationEventPublisher eventPublisher,
-                                 ProductCacheService productCacheService,
-                                 CategoryEventPublisher categoryEventPublisher) {
+                                 ProductCacheService productCacheService) {
         this.applicationRepository = applicationRepository;
         this.taskMasterRepository = taskMasterRepository;
         this.eventPublisher = eventPublisher;
         this.productCacheService = productCacheService;
-        this.categoryEventPublisher = categoryEventPublisher;
     }
 
     // -------------------------------------------------------------------------
@@ -163,12 +159,6 @@ public class ApplicationController {
                     saved.getId(), application.getApplicantUsername());
 
             productCacheService.evictOnCreate();
-
-            try {
-                categoryEventPublisher.publishCategoriesUpdated();
-            } catch (Exception e) {
-                log.warn("[ApplicationController] Kafka publish failed (non-fatal): {}", e.getMessage());
-            }
 
             application.setStatus(ApplicationStatus.ACCEPTED)
                        .setCreatedTaskMasterId(saved.getId());

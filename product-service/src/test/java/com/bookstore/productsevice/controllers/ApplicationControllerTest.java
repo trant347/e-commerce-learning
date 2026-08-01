@@ -1,7 +1,6 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.messaging.ApplicationEventPublisher;
-import com.bookstore.productsevice.messaging.CategoryEventPublisher;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.model.TaskMasterApplication;
 import com.bookstore.productsevice.model.TaskMasterApplication.ApplicationStatus;
@@ -34,7 +33,6 @@ public class ApplicationControllerTest {
     private TaskMasterRepository taskMasterRepository;
     private ApplicationEventPublisher eventPublisher;
     private ProductCacheService productCacheService;
-    private CategoryEventPublisher categoryEventPublisher;
     private HttpServletRequest request;
 
     private ApplicationController controller;
@@ -45,19 +43,17 @@ public class ApplicationControllerTest {
         taskMasterRepository = mock(TaskMasterRepository.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         productCacheService = mock(ProductCacheService.class);
-        categoryEventPublisher = mock(CategoryEventPublisher.class);
         request = mock(HttpServletRequest.class);
 
         controller = new ApplicationController(
                 applicationRepository,
                 taskMasterRepository,
                 eventPublisher,
-                productCacheService,
-                categoryEventPublisher);
+                productCacheService);
     }
 
     @Test
-    public void acceptApplication_evictsCacheAndPublishesEventsAfterSavingTaskMaster() {
+    public void acceptApplication_evictsCacheAfterSavingTaskMaster() {
         givenAdmin();
 
         TaskMasterApplication pending = new TaskMasterApplication()
@@ -86,39 +82,13 @@ public class ApplicationControllerTest {
 
         // Cache eviction must happen after the TaskMaster is saved, otherwise the list endpoint
         // can repopulate the cache from a snapshot taken before the insert.
-        InOrder inOrder = inOrder(taskMasterRepository, productCacheService, categoryEventPublisher);
+        InOrder inOrder = inOrder(taskMasterRepository, productCacheService);
         inOrder.verify(taskMasterRepository).save(any(TaskMaster.class));
         inOrder.verify(productCacheService).evictOnCreate();
-        inOrder.verify(categoryEventPublisher).publishCategoriesUpdated();
 
         verify(eventPublisher).publishApplicationAccepted("panda", "tm-1");
         assertThat(pending.getStatus()).isEqualTo(ApplicationStatus.ACCEPTED);
         assertThat(pending.getCreatedTaskMasterId()).isEqualTo("tm-1");
-    }
-
-    @Test
-    public void acceptApplication_kafkaFailureDoesNotBlockResponseButCacheStillEvicted() {
-        givenAdmin();
-
-        TaskMasterApplication pending = new TaskMasterApplication()
-                .setApplicantUsername("panda")
-                .setStatus(ApplicationStatus.PENDING);
-        pending.setId("app-2");
-        when(applicationRepository.findById("app-2")).thenReturn(Optional.of(pending));
-
-        TaskMaster persisted = new TaskMaster();
-        persisted.setId("tm-2");
-        when(taskMasterRepository.save(any(TaskMaster.class))).thenReturn(persisted);
-        when(applicationRepository.save(any(TaskMasterApplication.class)))
-                .thenAnswer(inv -> inv.getArgument(0));
-        doThrow(new RuntimeException("kafka down"))
-                .when(categoryEventPublisher).publishCategoriesUpdated();
-
-        ResponseEntity<?> response = controller.acceptApplication("app-2", request);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(productCacheService).evictOnCreate();
-        verify(eventPublisher).publishApplicationAccepted("panda", "tm-2");
     }
 
     @Test
@@ -136,7 +106,6 @@ public class ApplicationControllerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         verifyNoInteractions(taskMasterRepository);
         verifyNoInteractions(productCacheService);
-        verifyNoInteractions(categoryEventPublisher);
         verifyNoInteractions(eventPublisher);
     }
 
@@ -151,7 +120,6 @@ public class ApplicationControllerTest {
         verifyNoInteractions(applicationRepository);
         verifyNoInteractions(taskMasterRepository);
         verifyNoInteractions(productCacheService);
-        verifyNoInteractions(categoryEventPublisher);
     }
 
     private void givenAdmin() {
