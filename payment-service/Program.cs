@@ -1,6 +1,9 @@
 using Consul;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using payment_service.Data;
 using payment_service.MessageQueue;
 using payment_service.Services;
@@ -8,6 +11,24 @@ using payment_service.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+var otelServiceName =
+    builder.Configuration["OTEL_SERVICE_NAME"] ?? "payment-service";
+var otelEndpoint =
+    builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]
+    ?? "http://otel-collector:4317";
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(otelServiceName))
+    .WithTracing(tracing => tracing
+        .AddSource("Kafka.Producer")
+        .AddSource("Kafka.Consumer")
+        .AddAspNetCoreInstrumentation()
+        .AddOtlpExporter(options =>
+            options.Endpoint = new Uri(otelEndpoint)))
+    .WithMetrics(metrics => metrics
+        .AddMeter(payment_service.Observability.PaymentSagaMetrics.MeterName)
+        .AddAspNetCoreInstrumentation()
+        .AddOtlpExporter(options =>
+            options.Endpoint = new Uri(otelEndpoint)));
 
 builder.Services.AddControllers();
 
@@ -34,10 +55,12 @@ builder.Services.AddScoped<IPaymentResultOutboxStore, PaymentResultOutboxStore>(
 builder.Services.Configure<PaymentResultProducerOptions>(
     builder.Configuration.GetSection("PaymentResultProducer"));
 builder.Services.AddSingleton<IPaymentResultProducer, PaymentResultProducer>();
+builder.Services.AddSingleton<IKafkaDeadLetterProducer, KafkaDeadLetterProducer>();
 builder.Services.AddHostedService<PaymentMethodTokenCleanupWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.PaymentRequestConsumerWorker>();
 builder.Services.AddHostedService<PaymentResultOutboxWorker>();
+builder.Services.AddHostedService<CustodyReconciliationWorker>();
 
 // Consul service discovery
 builder.Services.Configure<payment_service.ConsulConfig.ConsulConfig>(builder.Configuration.GetSection("ConsulConfig"));

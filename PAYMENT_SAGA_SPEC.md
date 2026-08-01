@@ -287,8 +287,9 @@ sum of all `FUNDED` escrow rows.
 | Escrow ledger | payment-service PostgreSQL | **Implemented (Task 3).** Per-booking source of truth with guarded funding/release/refund transitions. |
 | Booking escrow lifecycle | `calendar-service/Model/Booking.cs`, `BookingService` | **Implemented (Task 3).** Fixes price, projects escrow state, gates work/proof, and enforces cancellation rules. |
 | Saga command outbox | calendar-service MongoDB | **Implemented (Task 4).** Atomically stores STARTED saga state, command payload, dispatch state, retry metadata, and tracing context. |
-| Kafka workers/results | both services | **Planned (Tasks 6–10).** Execute commands and apply results idempotently. |
-| Async status UI | calendar-service/frontend | **Planned (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
+| Kafka workers/results | both services | **Implemented (Tasks 6–10).** Execute commands and apply results idempotently through transactional outboxes. |
+| Async status UI | calendar-service/frontend | **Implemented (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
+| Recovery and operations | both services | **Implemented (Task 12).** Distinguishes dispatch stages, dead-letters poison messages, exports saga metrics, and reconciles custody balances. |
 
 Tasks 1–4 establish the safe contracts, token boundary, escrow ledger, booking lifecycle, and
 durable command outbox.
@@ -670,18 +671,41 @@ Implementation details:
 
 ### Task 12 — Harden recovery and operations
 
-- [ ] Update reconciliation to distinguish requests that were never dispatched from requests
+- [x] Update reconciliation to distinguish requests that were never dispatched from requests
       dispatched but not yet completed.
-- [ ] Do not mark a saga failed merely because Kafka or payment-service is temporarily
+- [x] Do not mark a saga failed merely because Kafka or payment-service is temporarily
       unavailable.
-- [ ] Add retry limits and dead-letter topics for permanently invalid request/result messages.
-- [ ] Add structured logs and metrics for pending saga age, outbox backlog, retries, DLQ count,
+- [x] Add retry limits and dead-letter topics for permanently invalid request/result messages.
+- [x] Add structured logs and metrics for pending saga age, outbox backlog, retries, DLQ count,
       processing duration, escrow age/value by state, and Kafka consumer lag.
-- [ ] Reconcile aggregate custody-wallet balances against the sum of all funded, unreleased
+- [x] Reconcile aggregate custody-wallet balances against the sum of all funded, unreleased
       escrow records and alert on any mismatch.
-- [ ] Add crash-recovery tests for failures before request publication, during payment
+- [x] Add crash-recovery tests for failures before request publication, during payment
       processing, before result publication, during calendar result application, and between
       proof persistence and release publication.
+
+Implementation details:
+
+1. Reconciliation now sweeps both legacy and escrow sagas. Legacy synchronous rows retain the
+   transaction-lookup recovery path; escrow rows are classified as undispatched or dispatched
+   and left `STARTED` for their durable request/result workers instead of being failed because a
+   dependency is unavailable or a result is delayed.
+2. Payment request and result consumers count permanently invalid deliveries, publish the
+   original keyed payload and diagnostic headers to `<source-topic>.dlq`, and commit the source
+   offset only after Kafka persists the DLQ copy. Retryable ordering/provisioning failures keep
+   rewinding, and a DLQ outage also retains the source offset rather than stopping the worker.
+3. Both services export OpenTelemetry payment-saga meters and structured logs for pending age,
+   request/result outbox backlog, retry and DLQ counts, processing duration, escrow age/value,
+   custody mismatch, and consumer lag. Telemetry collection failures do not block dispatch.
+4. `CustodyReconciliationWorker` reads the configured custody wallet and escrow ledger from one
+   repeatable-read snapshot, compares the wallet balance with all `FUNDED` escrow value, and emits
+   a critical structured alert plus mismatch metric when they differ.
+5. Recovery coverage exercises undispatched and dispatched pending sagas, poison-message retry
+   and DLQ behavior, transaction rollback during payment processing, result-outbox republication,
+   retryable calendar application, and the durable proof-before-release enqueue boundary.
+6. The current simulated wallet is single-currency. Custody reconciliation records each escrow's
+   currency but compares one aggregate wallet balance; introducing multi-currency wallets must
+   split this invariant by currency.
 
 ### Task 13 — Configure infrastructure and complete rollout
 

@@ -267,7 +267,7 @@ namespace payment_service.Services
                 }
 
                 wallets[userId] = wallet
-                    ?? throw new KeyNotFoundException(
+                    ?? throw new PaymentRequestRetryableException(
                         $"Wallet for user '{userId}' was not found.");
             }
 

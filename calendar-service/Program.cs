@@ -30,6 +30,7 @@ builder.Services.AddOpenTelemetry()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(opt => opt.Endpoint = new Uri(otelEndpoint)))
     .WithMetrics(metrics => metrics
+        .AddMeter(calendar_service.Observability.PaymentSagaMetrics.MeterName)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(opt => opt.Endpoint = new Uri(otelEndpoint)));
@@ -41,6 +42,7 @@ builder.Services.AddSingleton<IBookingService, BookingService>();
 builder.Services.AddSingleton<ISagaStateService, SagaStateService>();
 builder.Services.AddSingleton<INotificationProducer, NotificationProducer>();
 builder.Services.AddSingleton<IPaymentRequestProducer, PaymentRequestProducer>();
+builder.Services.AddSingleton<IKafkaDeadLetterProducer, KafkaDeadLetterProducer>();
 builder.Services.AddSingleton<IPaymentResultProcessor, PaymentResultProcessor>();
 
 builder.Services.AddOptions<JwtSettings>().Bind(builder.Configuration.GetSection("JwtSettings"));

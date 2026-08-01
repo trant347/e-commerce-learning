@@ -735,6 +735,89 @@ namespace calendar_service.Tests
         }
 
         [Fact]
+        public async Task SubmitProof_AfterOutboxFailure_RetryEnqueuesPersistedRelease()
+        {
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            var escrowId = Guid.NewGuid();
+            var updated = new Booking
+            {
+                Id = "bk-1",
+                TaskMasterUsername = OwnerUsername,
+                RequesterUsername = Caller,
+                EscrowId = escrowId,
+                EscrowStatus = EscrowStatus.Funded,
+                Status = Booking.StatusImplemented,
+                AgreedAmount = 100m,
+                AgreedCurrency = "USD",
+                ProofFileUrl = "proof.jpg",
+                InvoiceAmount = 100m,
+                ReleaseRequestedAt = DateTime.UtcNow
+            };
+            service.Setup(s => s.GetByIdAsync("bk-1"))
+                .ReturnsAsync(new Booking { Id = "bk-1", EscrowId = escrowId });
+            service.Setup(s => s.RequestEscrowReleaseAsync(
+                    "bk-1",
+                    Caller,
+                    "proof.jpg"))
+                .ReturnsAsync(updated);
+            var enqueueAttempts = 0;
+            sagaState.Setup(s => s.EnqueueAsync(
+                    It.IsAny<PaymentRequestedV1>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((
+                    PaymentRequestedV1 request,
+                    string? _,
+                    CancellationToken _) =>
+                {
+                    enqueueAttempts++;
+                    if (enqueueAttempts == 1)
+                    {
+                        throw new SagaOutboxPersistenceException(
+                            "Mongo unavailable",
+                            new TimeoutException());
+                    }
+
+                    return Task.FromResult(new SagaState
+                    {
+                        SagaId = request.SagaId,
+                        EscrowId = request.EscrowId,
+                        BookingId = request.BookingId,
+                        Operation = request.Operation,
+                        Status = SagaState.StatusStarted
+                    });
+                });
+            var controller = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState,
+                configuration: AsyncPaymentConfiguration());
+            var body = new BookingController.SubmitProofDto
+            {
+                ProofFileUrl = "proof.jpg"
+            };
+
+            await Assert.ThrowsAsync<SagaOutboxPersistenceException>(
+                () => controller.SubmitProof("bk-1", body));
+            var retry = await controller.SubmitProof("bk-1", body);
+
+            Assert.IsType<AcceptedResult>(retry);
+            service.Verify(s => s.RequestEscrowReleaseAsync(
+                    "bk-1",
+                    Caller,
+                    "proof.jpg"),
+                Times.Exactly(2));
+            sagaState.Verify(s => s.EnqueueAsync(
+                    It.Is<PaymentRequestedV1>(request =>
+                        request.Operation == PaymentOperation.ReleaseEscrow),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Exactly(2));
+        }
+
+        [Fact]
         public async Task SubmitProof_TerminalEscrow_Returns409WithoutEnqueuing()
         {
             var service = new Mock<IBookingService>();

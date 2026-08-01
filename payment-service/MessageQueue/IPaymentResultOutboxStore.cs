@@ -7,6 +7,9 @@ namespace payment_service.MessageQueue
         Task<int> ReconcileMissingAsync(
             CancellationToken cancellationToken);
 
+        Task<int> GetPendingCountAsync(
+            CancellationToken cancellationToken);
+
         Task<PaymentResultOutbox?> TryClaimNextAsync(
             TimeSpan claimLease,
             CancellationToken cancellationToken);

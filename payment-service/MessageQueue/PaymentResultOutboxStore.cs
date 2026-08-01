@@ -104,6 +104,12 @@ namespace payment_service.MessageQueue
             return missing.Count;
         }
 
+        public Task<int> GetPendingCountAsync(
+            CancellationToken cancellationToken) =>
+            _dbContext.PaymentResultOutbox.CountAsync(
+                row => row.DispatchStatus != PaymentResultOutbox.StatusDispatched,
+                cancellationToken);
+
         public async Task<PaymentResultOutbox?> TryClaimNextAsync(
             TimeSpan claimLease,
             CancellationToken cancellationToken)

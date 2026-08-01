@@ -240,6 +240,21 @@ namespace calendar_service.Services.Implementation
                 cancellationToken);
         }
 
+        public Task<long> GetDispatchBacklogAsync(
+            CancellationToken cancellationToken = default) =>
+            _collection.CountDocumentsAsync(
+                Builders<SagaState>.Filter.And(
+                    Builders<SagaState>.Filter.Eq(
+                        saga => saga.Status,
+                        SagaState.StatusStarted),
+                    Builders<SagaState>.Filter.Ne(
+                        saga => saga.PaymentRequest,
+                        null),
+                    Builders<SagaState>.Filter.Ne(
+                        saga => saga.DispatchStatus,
+                        SagaDispatchStatus.DISPATCHED)),
+                cancellationToken: cancellationToken);
+
         public async Task<bool> MarkDispatchedAsync(
             Guid sagaId,
             DateTime claimTimestamp,
@@ -385,7 +400,6 @@ namespace calendar_service.Services.Implementation
             var cutoff = DateTime.UtcNow - stuckThreshold;
             return _collection.Find(
                     s => s.Status == SagaState.StatusStarted
-                        && s.PaymentRequest == null
                         && s.CreatedAt < cutoff)
                 .ToListAsync();
         }
@@ -402,7 +416,6 @@ namespace calendar_service.Services.Implementation
             var filter = Builders<SagaState>.Filter.And(
                 Builders<SagaState>.Filter.Eq(s => s.SagaId, sagaId),
                 Builders<SagaState>.Filter.Eq(s => s.Status, SagaState.StatusStarted),
-                Builders<SagaState>.Filter.Eq(s => s.PaymentRequest, null),
                 Builders<SagaState>.Filter.Or(
                     Builders<SagaState>.Filter.Eq(s => s.ReconciliationClaimedAt, null),
                     Builders<SagaState>.Filter.Lt(s => s.ReconciliationClaimedAt, claimCutoff)));

@@ -31,6 +31,9 @@ namespace calendar_service.Services.Contracts
             TimeSpan claimLease,
             CancellationToken cancellationToken = default);
 
+        Task<long> GetDispatchBacklogAsync(
+            CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Marks a claimed request dispatched only when the supplied claim timestamp still owns
         /// the lease. Returns false if the lease was lost or the request was already resolved.
@@ -87,8 +90,9 @@ namespace calendar_service.Services.Contracts
         Task<SagaState?> GetLatestByBookingIdAsync(string bookingId);
 
         /// <summary>
-        /// Returns sagas stuck in STARTED for longer than <paramref name="stuckThreshold"/>,
-        /// for the reconciliation job to resolve.
+        /// Returns legacy and escrow sagas stuck in STARTED for longer than
+        /// <paramref name="stuckThreshold"/>. Reconciliation distinguishes undispatched escrow
+        /// requests from dispatched work awaiting a durable result.
         /// </summary>
         Task<List<SagaState>> FindStuckAsync(TimeSpan stuckThreshold);
 

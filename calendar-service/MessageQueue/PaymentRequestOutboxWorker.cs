@@ -1,4 +1,5 @@
 using calendar_service.Services.Contracts;
+using calendar_service.Observability;
 
 namespace calendar_service.MessageQueue
 {
@@ -79,6 +80,22 @@ namespace calendar_service.MessageQueue
 
         public async Task RunOnceAsync(CancellationToken cancellationToken)
         {
+            try
+            {
+                var backlog = await _sagaStateService.GetDispatchBacklogAsync(
+                    cancellationToken);
+                PaymentSagaMetrics.OutboxBacklog.Record(
+                    backlog,
+                    new KeyValuePair<string, object?>(
+                        "outbox",
+                        "payment_requests"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Could not collect payment request outbox backlog; dispatch will continue");
+            }
             for (var processed = 0; processed < _maxBatchSize; processed++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -144,6 +161,11 @@ namespace calendar_service.MessageQueue
                         saga.SagaId,
                         saga.DispatchAttemptCount,
                         nextAttemptAt);
+                    PaymentSagaMetrics.OutboxRetries.Add(
+                        1,
+                        new KeyValuePair<string, object?>(
+                            "outbox",
+                            "payment_requests"));
                 }
             }
         }

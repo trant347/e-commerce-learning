@@ -203,5 +203,79 @@ namespace calendar_service.Tests
             sagaState.Verify(s => s.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
             bookingService.Verify(b => b.CompletePaymentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
+
+        [Theory]
+        [InlineData(SagaDispatchStatus.PENDING)]
+        [InlineData(SagaDispatchStatus.CLAIMED)]
+        public async Task RunOnceAsync_UndispatchedEscrowSaga_LeavesStartedForOutboxRecovery(
+            SagaDispatchStatus dispatchStatus)
+        {
+            var (worker, sagaState, paymentClient, bookingService) = BuildWorker();
+            var saga = NewEscrowSaga(dispatchStatus);
+            sagaState.Setup(s => s.FindStuckAsync(It.IsAny<TimeSpan>()))
+                .ReturnsAsync(new List<SagaState> { saga });
+            sagaState.Setup(s => s.TryClaimAsync(saga.SagaId, It.IsAny<TimeSpan>()))
+                .ReturnsAsync(saga);
+
+            await worker.RunOnceAsync(CancellationToken.None);
+
+            paymentClient.Verify(
+                p => p.GetTransactionBySagaIdAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+            sagaState.Verify(
+                s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task RunOnceAsync_DispatchedEscrowSaga_LeavesStartedForResultRecovery()
+        {
+            var (worker, sagaState, paymentClient, bookingService) = BuildWorker();
+            var saga = NewEscrowSaga(SagaDispatchStatus.DISPATCHED);
+            saga.DispatchedAt = DateTime.UtcNow.AddMinutes(-4);
+            sagaState.Setup(s => s.FindStuckAsync(It.IsAny<TimeSpan>()))
+                .ReturnsAsync(new List<SagaState> { saga });
+            sagaState.Setup(s => s.TryClaimAsync(saga.SagaId, It.IsAny<TimeSpan>()))
+                .ReturnsAsync(saga);
+
+            await worker.RunOnceAsync(CancellationToken.None);
+
+            paymentClient.Verify(
+                p => p.GetTransactionBySagaIdAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+            sagaState.Verify(
+                s => s.FailAsync(It.IsAny<Guid>(), It.IsAny<string>()),
+                Times.Never);
+            sagaState.Verify(
+                s => s.CompleteAsync(It.IsAny<Guid>(), It.IsAny<string>()),
+                Times.Never);
+        }
+
+        private static SagaState NewEscrowSaga(
+            SagaDispatchStatus dispatchStatus)
+        {
+            var saga = NewStuckSaga("bk-escrow", 100m);
+            saga.EscrowId = Guid.NewGuid();
+            saga.Operation = Payment.Contracts.V1.PaymentOperation.FundEscrow;
+            saga.DispatchStatus = dispatchStatus;
+            saga.PaymentRequest = new PendingPaymentRequest
+            {
+                SagaId = saga.SagaId,
+                EscrowId = saga.EscrowId.Value,
+                BookingId = saga.BookingId,
+                Operation = saga.Operation,
+                Amount = saga.RequestedAmount,
+                Currency = "USD",
+                PayerUserId = "requester",
+                PayeeUserId = "admin-custody",
+                TaskMasterUserId = "taskmaster",
+                PaymentMethodToken = "pmt_token"
+            };
+            return saga;
+        }
     }
 }

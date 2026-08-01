@@ -2,6 +2,7 @@ using System.Text.Json;
 using Payment.Contracts;
 using Payment.Contracts.V1;
 using payment_service.Models;
+using payment_service.Observability;
 
 namespace payment_service.MessageQueue
 {
@@ -96,6 +97,18 @@ namespace payment_service.MessageQueue
 
         public async Task RunOnceAsync(CancellationToken cancellationToken)
         {
+            try
+            {
+                var backlog = await WithStoreAsync(
+                    store => store.GetPendingCountAsync(cancellationToken));
+                PaymentSagaMetrics.OutboxBacklog.Record(backlog);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Could not collect payment result outbox backlog; dispatch will continue");
+            }
             var reconciled = await WithStoreAsync(
                 store => store.ReconcileMissingAsync(cancellationToken));
             if (reconciled > 0)
@@ -122,6 +135,7 @@ namespace payment_service.MessageQueue
                 }
 
                 var claimTimestamp = row.DispatchClaimedAt.Value;
+                var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
                     var result = JsonSerializer.Deserialize<PaymentResultV1>(
@@ -151,6 +165,12 @@ namespace payment_service.MessageQueue
                             "Published payment result sagaId={SagaId}, but its dispatch lease was no longer current",
                             row.SagaId);
                     }
+                    PaymentSagaMetrics.ProcessingDuration.Record(
+                        System.Diagnostics.Stopwatch.GetElapsedTime(startedAt)
+                            .TotalMilliseconds,
+                        new KeyValuePair<string, object?>(
+                            "stage",
+                            "result_publication"));
                 }
                 catch (OperationCanceledException)
                     when (cancellationToken.IsCancellationRequested)
@@ -183,6 +203,11 @@ namespace payment_service.MessageQueue
                         row.SagaId,
                         row.DispatchAttemptCount,
                         nextAttemptAt);
+                    PaymentSagaMetrics.OutboxRetries.Add(
+                        1,
+                        new KeyValuePair<string, object?>(
+                            "outbox",
+                            "payment_results"));
                 }
             }
         }

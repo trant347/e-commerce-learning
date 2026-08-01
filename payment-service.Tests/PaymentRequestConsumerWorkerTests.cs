@@ -142,9 +142,80 @@ namespace payment_service.Tests
                 Times.Once);
         }
 
+        [Fact]
+        public async Task HandleFailureAsync_PermanentlyInvalidRequest_DeadLettersAndCommits()
+        {
+            var processor = new Mock<IPaymentRequestProcessor>();
+            var deadLetter = new Mock<IKafkaDeadLetterProducer>();
+            deadLetter.Setup(producer => producer.PublishAsync(
+                    It.IsAny<ConsumeResult<string, string>>(),
+                    It.IsAny<Exception>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            var worker = BuildWorker(
+                processor,
+                deadLetterProducer: deadLetter,
+                maxInvalidMessageAttempts: 1);
+            var consumeResult = ConsumeResultFor(FundingRequest());
+            var consumer = Consumer();
+            var exception = new ArgumentException("unsupported schema");
+
+            await worker.HandleFailureAsync(
+                consumer.Object,
+                consumeResult,
+                exception,
+                CancellationToken.None);
+
+            deadLetter.Verify(producer => producer.PublishAsync(
+                    consumeResult,
+                    exception,
+                    1,
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+            consumer.Verify(kafka => kafka.Commit(consumeResult), Times.Once);
+            consumer.Verify(
+                kafka => kafka.Seek(It.IsAny<TopicPartitionOffset>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task HandleFailureAsync_RetryableWalletRace_RewindsWithoutDeadLetter()
+        {
+            var processor = new Mock<IPaymentRequestProcessor>();
+            var deadLetter = new Mock<IKafkaDeadLetterProducer>();
+            var worker = BuildWorker(
+                processor,
+                failureRetryDelaySeconds: 1,
+                deadLetterProducer: deadLetter,
+                maxInvalidMessageAttempts: 1);
+            var consumeResult = ConsumeResultFor(FundingRequest());
+            var consumer = Consumer();
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(2));
+
+            await worker.HandleFailureAsync(
+                consumer.Object,
+                consumeResult,
+                new PaymentRequestRetryableException(
+                    "wallet is not available yet"),
+                cancellation.Token);
+
+            consumer.Verify(
+                kafka => kafka.Seek(consumeResult.TopicPartitionOffset),
+                Times.Once);
+            deadLetter.VerifyNoOtherCalls();
+            consumer.Verify(
+                kafka => kafka.Commit(
+                    It.IsAny<ConsumeResult<string, string>>()),
+                Times.Never);
+        }
+
         private static PaymentRequestConsumerWorker BuildWorker(
             Mock<IPaymentRequestProcessor> processor,
-            int failureRetryDelaySeconds = 5)
+            int failureRetryDelaySeconds = 5,
+            Mock<IKafkaDeadLetterProducer>? deadLetterProducer = null,
+            int maxInvalidMessageAttempts = 3)
         {
             var services = new ServiceCollection();
             services.AddSingleton(processor.Object);
@@ -157,12 +228,16 @@ namespace payment_service.Tests
                     ["KafkaConsumerConfig:PaymentRequestGroupId"] =
                         "payment-service-payment-requests-tests",
                     ["KafkaConsumerConfig:PaymentRequestFailureRetryDelaySeconds"] =
-                        failureRetryDelaySeconds.ToString()
+                        failureRetryDelaySeconds.ToString(),
+                    ["KafkaConsumerConfig:PaymentRequestMaxInvalidMessageAttempts"] =
+                        maxInvalidMessageAttempts.ToString()
                 })
                 .Build();
+            deadLetterProducer ??= new Mock<IKafkaDeadLetterProducer>();
             return new PaymentRequestConsumerWorker(
                 NullLogger<PaymentRequestConsumerWorker>.Instance,
                 provider,
+                deadLetterProducer.Object,
                 configuration);
         }
 

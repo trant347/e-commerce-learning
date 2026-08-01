@@ -1,4 +1,5 @@
 using calendar_service.Model;
+using calendar_service.Observability;
 using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
 
@@ -79,6 +80,11 @@ namespace calendar_service.SagaReconciliation
             foreach (var saga in stuck)
             {
                 ct.ThrowIfCancellationRequested();
+                PaymentSagaMetrics.PendingSagaAge.Record(
+                    Math.Max(0, (DateTime.UtcNow - saga.CreatedAt).TotalSeconds),
+                    new KeyValuePair<string, object?>(
+                        "dispatch_status",
+                        saga.DispatchStatus?.ToString() ?? "LEGACY"));
                 await ReconcileAsync(saga, sagaStateService, paymentClient, bookingService);
             }
         }
@@ -97,6 +103,28 @@ namespace calendar_service.SagaReconciliation
             if (claimed == null)
             {
                 _logger.LogDebug("Saga reconciliation: sagaId={SagaId} already claimed by another instance; skipping this pass", saga.SagaId);
+                return;
+            }
+
+            if (claimed.PaymentRequest != null)
+            {
+                if (claimed.DispatchStatus != SagaDispatchStatus.DISPATCHED)
+                {
+                    _logger.LogWarning(
+                        "Saga reconciliation: escrow sagaId={SagaId} bookingId={BookingId} was never dispatched; outboxStatus={DispatchStatus} attempts={Attempts} nextAttemptAt={NextAttemptAt}. Leaving STARTED for outbox recovery",
+                        claimed.SagaId,
+                        claimed.BookingId,
+                        claimed.DispatchStatus,
+                        claimed.DispatchAttemptCount,
+                        claimed.NextDispatchAttemptAt);
+                    return;
+                }
+
+                _logger.LogWarning(
+                    "Saga reconciliation: escrow sagaId={SagaId} bookingId={BookingId} was dispatched at {DispatchedAt} but has no applied result yet. Leaving STARTED while payment processing/result publication recovers",
+                    claimed.SagaId,
+                    claimed.BookingId,
+                    claimed.DispatchedAt);
                 return;
             }
 
