@@ -285,6 +285,7 @@ sum of all `FUNDED` escrow rows.
 | Token vault table | `payment_method_tokens` | **Implemented (Task 2).** Stores only token hash, masked metadata, simulation flag, expiry, and redemption time. |
 | Token cleanup | `PaymentMethodTokenCleanupWorker` | **Implemented (Task 2).** Removes expired/redeemed token records after retention. |
 | Escrow ledger | payment-service PostgreSQL | **Implemented (Task 3).** Per-booking source of truth with guarded funding/release/refund transitions. |
+| Double-entry wallet journal | `DOUBLE_ENTRY_LEDGER_SPEC.md` | **Proposed.** Replaces mutable wallet balances as the financial source of truth with immutable balanced entries and rebuildable balance projections. |
 | Booking escrow lifecycle | `calendar-service/Model/Booking.cs`, `BookingService` | **Implemented (Task 3).** Fixes price, projects escrow state, gates work/proof, and enforces cancellation rules. |
 | Saga command outbox | calendar-service MongoDB | **Implemented (Task 4).** Atomically stores STARTED saga state, command payload, dispatch state, retry metadata, and tracing context. |
 | Kafka workers/results | both services | **Implemented (Tasks 6–10).** Execute commands and apply results idempotently through transactional outboxes. |
