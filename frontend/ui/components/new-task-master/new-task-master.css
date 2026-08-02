@@ -126,6 +126,49 @@
     cursor: not-allowed;
 }
 
+.booking-status-content {
+    padding: 1.5rem;
+}
+
+.booking-status-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 0 1.5rem;
+}
+
+.new-taskmaster-page .booking-status-actions .submit-btn {
+    width: 100%;
+    margin-top: 0;
+    box-sizing: border-box;
+}
+
+.new-taskmaster-page .booking-status-actions .submit-btn:only-child {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: calc(50% - 6px);
+}
+
+.new-taskmaster-page .booking-status-refund-btn {
+    background: #fff;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
+}
+
+.new-taskmaster-page .booking-status-refund-btn:hover {
+    background: #ffebee;
+}
+
+@media (max-width: 600px) {
+    .booking-status-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .new-taskmaster-page .booking-status-actions .submit-btn:only-child {
+        width: 100%;
+    }
+}
+
 .form-feedback {
     margin-top: 16px;
     padding: 12px;

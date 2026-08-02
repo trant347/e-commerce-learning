@@ -232,14 +232,22 @@ export default function PayBooking() {
 
     if (booking.escrowStatus === 'FUNDED' && booking.status === 'ACCEPTED') {
         return (
-            <StatusPage>
+            <StatusPage
+                action={(
+                    <button
+                        type="button"
+                        className="submit-btn booking-status-refund-btn"
+                        onClick={requestRefund}
+                        disabled={cancelling}
+                    >
+                        {cancelling ? 'Requesting refund...' : 'Cancel Booking & Request Refund'}
+                    </button>
+                )}
+            >
                 <div className="form-feedback success">
                     Payment is safely held in escrow. The TaskMaster can now start work.
                 </div>
                 {feedback && <div className="form-feedback error">{feedback}</div>}
-                <button className="submit-btn" onClick={requestRefund} disabled={cancelling}>
-                    {cancelling ? 'Requesting refund...' : 'Cancel Booking & Request Refund'}
-                </button>
             </StatusPage>
         );
     }
@@ -337,15 +345,18 @@ export default function PayBooking() {
     );
 }
 
-function StatusPage({ children }: { children: React.ReactNode }) {
+function StatusPage({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
     const navigate = useNavigate();
     return (
         <div className="new-taskmaster-page">
             <h1><i className="credit card icon" /> Booking Payment</h1>
-            <div style={{ padding: '1.5rem' }}>{children}</div>
-            <button className="submit-btn" style={{ marginTop: '1rem' }} onClick={() => navigate('/')}>
-                Back to Home
-            </button>
+            <div className="booking-status-content">{children}</div>
+            <div className="booking-status-actions">
+                {action}
+                <button type="button" className="submit-btn" onClick={() => navigate('/')}>
+                    Back to Home
+                </button>
+            </div>
         </div>
     );
 }
