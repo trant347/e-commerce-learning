@@ -151,31 +151,6 @@ namespace calendar_service.Tests
         }
 
         [Fact]
-        public async Task StartAsync_InsertsStartedSagaWithGivenFields()
-        {
-            var (svc, col) = BuildService();
-            var sagaId = Guid.NewGuid();
-            SagaState? inserted = null;
-            col.Setup(c => c.InsertOneAsync(
-                    It.IsAny<SagaState>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()))
-                .Callback<SagaState, InsertOneOptions, CancellationToken>((s, _, _) => inserted = s)
-                .Returns(Task.CompletedTask);
-
-            var saga = await svc.StartAsync("booking-1", sagaId, 42.50m);
-
-            Assert.Equal(SagaState.StatusStarted, saga.Status);
-            Assert.Equal("booking-1", saga.BookingId);
-            Assert.Equal(sagaId, saga.SagaId);
-            Assert.Equal(42.50m, saga.RequestedAmount);
-
-            Assert.NotNull(inserted);
-            Assert.Same(saga, inserted);
-            col.Verify(c => c.InsertOneAsync(
-                It.IsAny<SagaState>(), It.IsAny<InsertOneOptions>(), It.IsAny<CancellationToken>()),
-                Times.Once);
-        }
-
-        [Fact]
         public async Task EnqueueAsync_InsertsStartedSagaAndPendingRequestAsOneDocument()
         {
             var (svc, col) = BuildService();

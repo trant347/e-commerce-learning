@@ -22,7 +22,6 @@ export default function SubmitProof() {
     const [loadError, setLoadError] = useState<string | null>(null);
 
     const [file, setFile] = useState<File | null>(null);
-    const [invoiceAmount, setInvoiceAmount] = useState<string>('');
     const [submitting, setSubmitting] = useState(false);
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const [successOpen, setSuccessOpen] = useState(false);
@@ -33,12 +32,6 @@ export default function SubmitProof() {
         BookingService.get(id)
             .then(b => {
                 setBooking(b);
-                setInvoiceAmount(
-                    b.agreedAmount != null
-                        ? b.agreedAmount.toFixed(2)
-                        : b.offeredTotalAmount != null
-                            ? b.offeredTotalAmount.toFixed(2)
-                            : '');
                 setLoading(false);
             })
             .catch(() => {
@@ -141,12 +134,6 @@ export default function SubmitProof() {
             setFeedback({ type: 'error', message: 'File exceeds the maximum allowed size of 2MB.' });
             return;
         }
-        const amount = parseFloat(invoiceAmount);
-        if (!invoiceAmount.trim() || isNaN(amount) || amount <= 0) {
-            setFeedback({ type: 'error', message: 'Please enter a valid invoice amount greater than 0.' });
-            return;
-        }
-
         setSubmitting(true);
         try {
             const token = localStorage.getItem('token');
@@ -161,12 +148,8 @@ export default function SubmitProof() {
             const filename: string = uploadRes.data;
             const proofFileUrl = `/products/image/${filename}`;
 
-            const result = await BookingService.submitProof(booking.id, proofFileUrl, amount);
-            if ('sagaId' in result) {
-                setReleaseRequest(result);
-            } else {
-                setSuccessOpen(true);
-            }
+            const result = await BookingService.submitProof(booking.id, proofFileUrl);
+            setReleaseRequest(result);
         } catch (err: any) {
             const msg = err?.response?.data?.error || err?.response?.data?.message || 'Failed to submit proof of job. Please try again.';
             setFeedback({ type: 'error', message: msg });
@@ -189,20 +172,6 @@ export default function SubmitProof() {
                     <input type="file" accept=".png,.jpg,.jpeg,.pdf" onChange={handleFileChange} required />
                 </div>
 
-                <div className="user-input-row">
-                    <label>Invoice Amount (USD) *</label>
-                    <input
-                        type="number"
-                        min={0.01}
-                        step="0.01"
-                        value={invoiceAmount}
-                        onChange={e => setInvoiceAmount(e.target.value)}
-                        required
-                        disabled={booking.agreedAmount != null}
-                        placeholder="e.g. 45.00"
-                    />
-                </div>
-
                 {feedback && (
                     <div className={`form-feedback ${feedback.type}`}>{feedback.message}</div>
                 )}
@@ -213,7 +182,7 @@ export default function SubmitProof() {
                 )}
 
                 <button type="submit" className="submit-btn" disabled={submitting || releaseRequest != null}>
-                    {submitting ? 'Submitting...' : 'Submit Proof & Send Invoice'}
+                    {submitting ? 'Submitting...' : 'Submit Proof & Request Release'}
                 </button>
             </form>
 

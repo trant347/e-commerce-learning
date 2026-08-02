@@ -262,7 +262,7 @@ function BookingDetailsModal({
                     )}
                     {current.status === 'IN_PROGRESS' && (
                         <SecondaryButton onClick={() => navigate(`/booking/${current.id}/submit-proof`)}>
-                            <i className="file alternate icon" /> Submit Proof &amp; Send Invoice
+                            <i className="file alternate icon" /> Submit Proof &amp; Request Release
                         </SecondaryButton>
                     )}
                     <PrimaryButton onClick={onClose}>Close</PrimaryButton>

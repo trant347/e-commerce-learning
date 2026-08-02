@@ -737,49 +737,6 @@ namespace calendar_service.Services.Implementation
         }
 
         /// <summary>
-        /// TaskMaster owner submits proof of the completed job (a file/image URL) plus the
-        /// invoice amount. Moves the booking from ACCEPTED to IMPLEMENTED.
-        /// </summary>
-        public async Task<Booking> SubmitProofAsync(string bookingId, string callerUsername, string proofFileUrl, decimal invoiceAmount)
-        {
-            callerUsername = NormalizeUsername(callerUsername);
-
-            var existing = await _collection.Find(b => b.Id == bookingId).FirstOrDefaultAsync()
-                ?? throw new KeyNotFoundException("Booking not found");
-
-            if (existing.TaskMasterUsername != callerUsername)
-            {
-                throw new UnauthorizedAccessException("Only the TaskMaster can submit proof for this booking");
-            }
-            if (existing.EscrowId.HasValue)
-            {
-                throw new InvalidOperationException(
-                    "Escrow-funded bookings must submit proof as an escrow release request");
-            }
-            if (existing.Status != Booking.StatusAccepted)
-            {
-                throw new InvalidOperationException($"Booking is {existing.Status} and cannot be marked implemented");
-            }
-            if (string.IsNullOrWhiteSpace(proofFileUrl))
-            {
-                throw new InvalidOperationException("Proof file is required");
-            }
-            if (invoiceAmount <= 0)
-            {
-                throw new InvalidOperationException("Invoice amount must be greater than 0");
-            }
-
-            var update = Builders<Booking>.Update
-                .Set(b => b.Status, Booking.StatusImplemented)
-                .Set(b => b.ProofFileUrl, proofFileUrl)
-                .Set(b => b.InvoiceAmount, invoiceAmount)
-                .Set(b => b.ImplementedAt, DateTime.UtcNow);
-            await _collection.UpdateOneAsync(
-                b => b.Id == bookingId && b.Status == Booking.StatusAccepted, update);
-            return await _collection.Find(b => b.Id == bookingId).FirstAsync();
-        }
-
-        /// <summary>
         /// Requester confirms payment (already processed by payment-service) with the resulting
         /// transaction id. Moves the booking from IMPLEMENTED to COMPLETED.
         /// </summary>

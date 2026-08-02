@@ -82,15 +82,6 @@ namespace calendar_service.Services.Contracts
         Task<Booking> RequestCancellationAsync(string bookingId, string callerUsername);
 
         /// <summary>
-        /// TaskMaster owner submits proof of the completed job (a file/image URL) plus the
-        /// invoice amount. Moves the booking from ACCEPTED to IMPLEMENTED.
-        /// </summary>
-        /// <exception cref="KeyNotFoundException">No booking with the given id.</exception>
-        /// <exception cref="UnauthorizedAccessException">Caller is not the TaskMaster owner.</exception>
-        /// <exception cref="InvalidOperationException">Booking is not ACCEPTED, or invoiceAmount &lt;= 0.</exception>
-        Task<Booking> SubmitProofAsync(string bookingId, string callerUsername, string proofFileUrl, decimal invoiceAmount);
-
-        /// <summary>
         /// Requester confirms payment (already processed by payment-service) with the resulting
         /// transaction id. Moves the booking from IMPLEMENTED to COMPLETED.
         /// </summary>

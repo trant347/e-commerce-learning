@@ -143,15 +143,15 @@ export const BookingService = {
     },
 
     /** TaskMaster submits proof and, for escrow bookings, durably requests release. */
-    submitProof(id: string, proofFileUrl: string, invoiceAmount: number): Promise<Booking | PaymentAcceptedResponse> {
+    submitProof(id: string, proofFileUrl: string): Promise<PaymentAcceptedResponse> {
         return axios.post(
             `${BASE}/${encodeURIComponent(id)}/submit-proof`,
-            { proofFileUrl, invoiceAmount },
+            { proofFileUrl },
             { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },
 
-    async pay(id: string, card: { cardNumber: string; expiryDate: string; cvv: string; ownerName: string }): Promise<Booking | PaymentAcceptedResponse> {
+    async pay(id: string, card: { cardNumber: string; expiryDate: string; cvv: string; ownerName: string }): Promise<PaymentAcceptedResponse> {
         const tokenResponse = await axios.post(
             '/payment-service/api/payment/tokenize',
             card,
@@ -159,7 +159,7 @@ export const BookingService = {
         );
         return axios.post(
             `${BASE}/${encodeURIComponent(id)}/pay`,
-            { ...card, paymentMethodToken: tokenResponse.data.paymentMethodToken },
+            { paymentMethodToken: tokenResponse.data.paymentMethodToken },
             { headers: { ...authHeader(), 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },

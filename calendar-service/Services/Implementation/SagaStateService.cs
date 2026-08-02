@@ -97,24 +97,6 @@ namespace calendar_service.Services.Implementation
             }
         }
 
-        public async Task<SagaState> StartAsync(string bookingId, Guid sagaId, decimal requestedAmount)
-        {
-            var now = DateTime.UtcNow;
-            var saga = new SagaState
-            {
-                SagaId = sagaId,
-                BookingId = bookingId,
-                Status = SagaState.StatusStarted,
-                RequestedAmount = requestedAmount,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            await _collection.InsertOneAsync(saga);
-            _logger.LogInformation("SagaState STARTED sagaId={SagaId} bookingId={BookingId} amount={Amount}",
-                sagaId, bookingId, requestedAmount);
-            return saga;
-        }
-
         public async Task<SagaState> EnqueueAsync(
             PaymentRequestedV1 request,
             string? traceParent = null,

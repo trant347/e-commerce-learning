@@ -1,6 +1,7 @@
-# Booking Payment & Invoice Workflow — Specification
+# Booking Payment & Invoice Workflow - Superseded Specification
 
-> Status: **Implemented.** Lives in `calendar-service` (orchestrator), `payment-service` (payment processor), `product-service` (proof-of-job file storage), `notification-service` (notifications), and the frontend (`SubmitProof.tsx`, `PayBooking.tsx`, `MyCalendar.tsx`, `IncomingBookings.tsx`).
+> Status: **Superseded.** This document describes the former synchronous invoice-payment flow.
+> New booking payments use the asynchronous escrow workflow in `PAYMENT_SAGA_SPEC.md`.
 
 ## Overview
 

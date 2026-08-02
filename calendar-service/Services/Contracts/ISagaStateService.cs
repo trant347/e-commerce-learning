@@ -4,16 +4,12 @@ using Payment.Contracts.V1;
 namespace calendar_service.Services.Contracts
 {
     /// <summary>
-    /// Durable saga-state tracking for the booking-payment flow (see PAYMENT_SAGA_SPEC.md).
-    /// A row is written STARTED before calling out to payment-service and resolved to
-    /// COMPLETED/FAILED afterwards, so a crash mid-flight can be recovered by the
-    /// reconciliation job instead of leaving a silent inconsistency.
+    /// Durable saga-state and command-outbox tracking for the booking-payment flow (see
+    /// PAYMENT_SAGA_SPEC.md). A STARTED row and its payment request are persisted atomically
+    /// before dispatch and resolved to COMPLETED/FAILED after a durable payment result.
     /// </summary>
     public interface ISagaStateService
     {
-        /// <summary>Writes a new STARTED saga row before the payment-service call is made.</summary>
-        Task<SagaState> StartAsync(string bookingId, Guid sagaId, decimal requestedAmount);
-
         /// <summary>
         /// Atomically inserts a STARTED saga and its pending escrow command. A partial unique
         /// index rejects a second active saga for the same booking and operation.

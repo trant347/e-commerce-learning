@@ -10,7 +10,6 @@ import {
     PaymentOperation,
     PaymentStatusResponse,
 } from '../api/bookingServices';
-import Dialog from '../components/dialog/dialog';
 
 import '../components/new-task-master/new-task-master.css';
 
@@ -52,7 +51,6 @@ function formatExpiryDate(value: string): string {
 export default function PayBooking() {
     const { username } = useContext(UserContext);
     const { id } = useParams<{ id: string }>();
-    const navigate = useNavigate();
 
     const [booking, setBooking] = useState<Booking | null>(null);
     const [loading, setLoading] = useState(true);
@@ -68,7 +66,6 @@ export default function PayBooking() {
     const [submitting, setSubmitting] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const [feedback, setFeedback] = useState<string | null>(null);
-    const [successOpen, setSuccessOpen] = useState(false);
 
     const loadBooking = React.useCallback(async () => {
         if (!id) return;
@@ -139,11 +136,10 @@ export default function PayBooking() {
 
     const operation = paymentStatus?.operation ?? booking.latestPaymentOperation;
     const status = paymentStatus?.status ?? booking.latestPaymentStatus;
-    const amountDue = booking.agreedAmount ?? booking.invoiceAmount ?? 0;
+    const amountDue = booking.agreedAmount ?? 0;
     const fundingEligible = booking.status === 'ACCEPTED'
         && booking.escrowStatus !== 'FUNDED'
         && status !== 'PENDING';
-    const legacyEligible = booking.status === 'IMPLEMENTED' && !booking.escrowId;
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -160,19 +156,15 @@ export default function PayBooking() {
                 ...card,
                 cardNumber: card.cardNumber.replace(/\s/g, ''),
             });
-            if (isAcceptedPayment(result)) {
-                setPaymentStatus({
-                    sagaId: result.sagaId,
-                    bookingId: booking.id,
-                    escrowId: result.escrowId,
-                    operation: 'FUND_ESCROW',
-                    status: result.status,
-                    escrowStatus: booking.escrowStatus,
-                    updatedAt: new Date().toISOString(),
-                });
-            } else {
-                setSuccessOpen(true);
-            }
+            setPaymentStatus({
+                sagaId: result.sagaId,
+                bookingId: booking.id,
+                escrowId: result.escrowId,
+                operation: 'FUND_ESCROW',
+                status: result.status,
+                escrowStatus: booking.escrowStatus,
+                updatedAt: new Date().toISOString(),
+            });
         } catch (err: any) {
             setFeedback(err?.response?.data?.error || err?.response?.data?.message || 'Payment failed. Please try again.');
         } finally {
@@ -260,7 +252,7 @@ export default function PayBooking() {
         return <StatusPage><div className="form-feedback success">Escrow funds were refunded to you.</div></StatusPage>;
     }
 
-    if (!fundingEligible && !legacyEligible) {
+    if (!fundingEligible) {
         return (
             <StatusPage>
                 <div className="form-feedback error">
@@ -334,13 +326,6 @@ export default function PayBooking() {
                     {submitting ? 'Submitting...' : `Pay $${amountDue.toFixed(2)}`}
                 </button>
             </form>
-            {successOpen && (
-                <Dialog
-                    title="Payment successful"
-                    message="Your payment was processed successfully."
-                    onClose={() => navigate('/')}
-                />
-            )}
         </div>
     );
 }

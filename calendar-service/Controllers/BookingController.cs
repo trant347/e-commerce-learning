@@ -16,27 +16,21 @@ namespace calendar_service.Controllers
     {
         private readonly IBookingService _service;
         private readonly ITaskMasterApiClient _taskMasterClient;
-        private readonly IPaymentApiClient _paymentClient;
         private readonly ISagaStateService _sagaStateService;
         private readonly INotificationProducer _notifications;
-        private readonly ILogger<BookingController> _logger;
         private readonly IConfiguration _configuration;
 
         public BookingController(
             IBookingService service,
             ITaskMasterApiClient taskMasterClient,
-            IPaymentApiClient paymentClient,
             ISagaStateService sagaStateService,
             INotificationProducer notifications,
-            ILogger<BookingController> logger,
             IConfiguration configuration)
         {
             _service = service;
             _taskMasterClient = taskMasterClient;
-            _paymentClient = paymentClient;
             _sagaStateService = sagaStateService;
             _notifications = notifications;
-            _logger = logger;
             _configuration = configuration;
         }
 
@@ -57,15 +51,10 @@ namespace calendar_service.Controllers
         public class SubmitProofDto
         {
             public string ProofFileUrl { get; set; } = string.Empty;
-            public decimal InvoiceAmount { get; set; }
         }
 
         public class PayDto
         {
-            public string CardNumber { get; set; } = string.Empty;
-            public string ExpiryDate { get; set; } = string.Empty;
-            public string CVV { get; set; } = string.Empty;
-            public string OwnerName { get; set; } = string.Empty;
             public string PaymentMethodToken { get; set; } = string.Empty;
         }
 
@@ -341,11 +330,10 @@ namespace calendar_service.Controllers
 
         /// <summary>
         /// POST <c>/api/booking/{id}/submit-proof</c> — TaskMaster owner submits proof of the
-        /// completed job. Escrow-funded bookings request release of the already-fixed amount;
-        /// legacy bookings continue to submit an invoice until the async flow is fully enabled.
+        /// completed job and requests release of the already-fixed escrow amount.
         /// </summary>
-        /// <response code="200">The updated booking.</response>
-        /// <response code="400">Missing proof file URL or invoice amount &lt;= 0.</response>
+        /// <response code="202">Proof was saved and escrow release was durably enqueued.</response>
+        /// <response code="400">The proof file URL is missing.</response>
         /// <response code="401">No authenticated caller.</response>
         /// <response code="403">Caller is not the TaskMaster owner.</response>
         /// <response code="404">No booking with that id.</response>
@@ -364,10 +352,14 @@ namespace calendar_service.Controllers
             {
                 var booking = await _service.GetByIdAsync(id);
                 if (booking == null) return NotFound();
-
-                var isEscrowBooking = booking.EscrowId.HasValue;
-                if (isEscrowBooking
-                    && await HasActiveOperationAsync(
+                if (!booking.EscrowId.HasValue)
+                {
+                    return Conflict(new
+                    {
+                        error = "Proof submission requires an escrow-funded booking"
+                    });
+                }
+                if (await HasActiveOperationAsync(
                         id,
                         PaymentOperation.ReleaseEscrow))
                 {
@@ -377,44 +369,14 @@ namespace calendar_service.Controllers
                     });
                 }
 
-                var updated = isEscrowBooking
-                    ? await _service.RequestEscrowReleaseAsync(
-                        id,
-                        caller,
-                        body.ProofFileUrl)
-                    : await _service.SubmitProofAsync(
-                        id,
-                        caller,
-                        body.ProofFileUrl,
-                        body.InvoiceAmount);
-
-                PaymentAcceptedResponseV1? accepted = null;
-                if (isEscrowBooking)
-                {
-                    accepted = await EnqueueEscrowTransferAsync(
-                        updated,
-                        PaymentOperation.ReleaseEscrow);
-                }
-
-                if (!isEscrowBooking)
-                {
-                    await _notifications.PublishAsync(new
-                    {
-                        type = "BOOKING_PAYMENT_REQUIRED",
-                        recipientUsername = updated.RequesterUsername,
-                        message = $"{updated.TaskMasterUsername} submitted proof of the completed job. " +
-                                  $"Please pay ${updated.InvoiceAmount:0.00} to complete this booking.",
-                        actionType = "VIEW_PAYMENT_REQUEST",
-                        actionPayload = new Dictionary<string, string>
-                        {
-                            { "bookingId", updated.Id ?? string.Empty },
-                            { "taskMasterId", updated.TaskMasterId }
-                        }
-                    });
-                }
-                return accepted == null
-                    ? Ok(updated)
-                    : Accepted(accepted.StatusUrl, accepted);
+                var updated = await _service.RequestEscrowReleaseAsync(
+                    id,
+                    caller,
+                    body.ProofFileUrl);
+                var accepted = await EnqueueEscrowTransferAsync(
+                    updated,
+                    PaymentOperation.ReleaseEscrow);
+                return Accepted(accepted.StatusUrl, accepted);
             }
             catch (ActivePaymentSagaException ex)
             {
@@ -508,16 +470,12 @@ namespace calendar_service.Controllers
         }
 
         /// <summary>
-        /// POST <c>/api/booking/{id}/pay</c> — when asynchronous payments are enabled, the
-        /// requester supplies a payment-method token for an ACCEPTED booking and receives a
-        /// durable escrow-funding saga response immediately. During rollout, disabling the
-        /// feature retains the legacy IMPLEMENTED-booking card-payment flow.
+        /// POST <c>/api/booking/{id}/pay</c> — the requester supplies a payment-method token for
+        /// an ACCEPTED booking and receives a durable escrow-funding saga response immediately.
         /// </summary>
-        /// <response code="200">The updated booking from the legacy synchronous flow.</response>
         /// <response code="202">Escrow funding was durably enqueued.</response>
-        /// <response code="400">Required token or legacy card details are missing.</response>
+        /// <response code="400">The payment-method token is missing.</response>
         /// <response code="401">No authenticated caller.</response>
-        /// <response code="402">Payment was declined or payment-service could not be reached.</response>
         /// <response code="403">Caller is not the requester.</response>
         /// <response code="404">No booking with that id.</response>
         /// <response code="409">Booking is ineligible or payment is already active.</response>
@@ -529,167 +487,7 @@ namespace calendar_service.Controllers
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
             if (body == null) return BadRequest("Payment details are required");
 
-            if (_configuration.GetValue("AsyncPaymentsEnabled", false))
-            {
-                return await EnqueueEscrowFundingAsync(id, body, caller);
-            }
-
-            if (string.IsNullOrWhiteSpace(body.CardNumber) || string.IsNullOrWhiteSpace(body.CVV)
-                || string.IsNullOrWhiteSpace(body.ExpiryDate) || string.IsNullOrWhiteSpace(body.OwnerName))
-            {
-                return BadRequest("cardNumber, expiryDate, cvv and ownerName are required");
-            }
-
-            var booking = await _service.GetByIdAsync(id);
-            if (booking == null) return NotFound();
-            if (!string.Equals(booking.RequesterUsername, caller, StringComparison.OrdinalIgnoreCase)) return Forbid();
-            if (booking.EscrowId.HasValue)
-            {
-                return Conflict(new
-                {
-                    error = "Escrow-backed bookings cannot use the legacy card-payment endpoint"
-                });
-            }
-            if (booking.Status != Booking.StatusImplemented)
-            {
-                return Conflict(new { error = $"Booking is {booking.Status} and cannot be paid" });
-            }
-            if (booking.InvoiceAmount == null || booking.InvoiceAmount <= 0)
-            {
-                return BadRequest("Booking has no invoice amount to pay");
-            }
-
-            // Defense-in-depth: reject a new payment attempt if one is already ambiguously
-            // in-flight for this booking (most recent saga still STARTED). This is the
-            // server-side backstop for the frontend's "payment is being processed" block — it
-            // protects against double-submission even if the UI check is stale, bypassed, or the
-            // user has two tabs open, so we never mint a second concurrent charge attempt for
-            // the same booking. See PAYMENT_SAGA_SPEC.md.
-            var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(id);
-            if (latestSaga != null && latestSaga.Status == SagaState.StatusStarted)
-            {
-                return Conflict(new
-                {
-                    error = "A payment for this booking is already being processed. Please wait for it to complete before trying again."
-                });
-            }
-
-            var card = new CreditCardInfo
-            {
-                CardNumber = body.CardNumber.Trim(),
-                ExpiryDate = body.ExpiryDate.Trim(),
-                CVV = body.CVV.Trim(),
-                OwnerName = body.OwnerName.Trim()
-            };
-
-            // Write a durable STARTED saga row BEFORE calling out to payment-service, so a
-            // crash between the charge succeeding and the booking being marked COMPLETED
-            // leaves a recoverable trail instead of a silent inconsistency (see
-            // PAYMENT_SAGA_SPEC.md). The sagaId doubles as the idempotency key sent to
-            // payment-service, so a retried call can't double-charge.
-            // If the saga store itself is unavailable, fail closed here — before any card is
-            // charged — rather than let payment-service be called with no durable record of it.
-            SagaState saga;
-            try
-            {
-                saga = await _sagaStateService.StartAsync(id, Guid.NewGuid(), booking.InvoiceAmount.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to write saga STARTED state for booking {BookingId}; not attempting payment", id);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Payment cannot be processed right now, please try again" });
-            }
-
-            PaymentTransactionResult transaction;
-            try
-            {
-                transaction = await _paymentClient.ProcessPaymentAsync(card, booking.InvoiceAmount.Value, HttpContext.RequestAborted, saga.SagaId,
-                    payerUserId: caller, payeeUserId: booking.TaskMasterUsername);
-            }
-            catch (PaymentServiceUnavailableException ex)
-            {
-                // We genuinely don't know whether the charge went through (e.g. payment-service
-                // processed it but the connection dropped before the response arrived), so the
-                // saga is deliberately left STARTED rather than marked FAILED — marking it FAILED
-                // here could wrongly tell the caller "you weren't charged" when money may already
-                // have been taken. SagaReconciliationWorker will resolve it authoritatively via
-                // GET /api/payment/transaction/{sagaId} within StuckThresholdSeconds (default 30s)
-                // of payment-service becoming reachable again. See PAYMENT_SAGA_SPEC.md.
-                _logger.LogWarning(ex, "Could not confirm payment outcome for booking {BookingId} (sagaId={SagaId}); leaving saga STARTED for reconciliation",
-                    id, saga.SagaId);
-                return StatusCode(StatusCodes.Status502BadGateway, new
-                {
-                    error = "We could not confirm whether your payment succeeded because payment-service could not be reached. " +
-                        "Do not retry or resubmit the payment — this will be verified and resolved automatically within about a minute. " +
-                        "Refresh this booking shortly to see its final status."
-                });
-            }
-            if (!string.Equals(transaction.Status, PaymentTransactionResult.StatusApproved, StringComparison.OrdinalIgnoreCase))
-            {
-                var declineMessage = string.IsNullOrWhiteSpace(transaction.DeclineReason)
-                    ? "Payment was declined"
-                    : $"Payment was declined: {transaction.DeclineReason}";
-                await _sagaStateService.FailAsync(saga.SagaId, declineMessage);
-                return StatusCode(402, new { error = declineMessage });
-            }
-            if (transaction.Amount != booking.InvoiceAmount.Value)
-            {
-                _logger.LogWarning("Payment amount {PaymentAmount} did not match invoice amount {InvoiceAmount} for booking {BookingId}",
-                    transaction.Amount, booking.InvoiceAmount.Value, id);
-                await _sagaStateService.FailAsync(saga.SagaId, "Payment amount does not match invoice amount");
-                return StatusCode(402, new { error = "Payment amount does not match invoice amount" });
-            }
-
-            // Dev/testing-only fault injection: simulates a crash between the charge
-            // succeeding and the saga/booking being marked COMPLETED (the specific gap
-            // reconciliation exists to recover from — see PAYMENT_SAGA_SPEC.md). Gated behind
-            // config so it can be toggled on for a manual test run (e.g. via the
-            // Faults__SimulatePostChargeCrash=true env var) without a debugger, and MUST remain
-            // false in production. Left uncaught deliberately, so it surfaces the same way a
-            // real crash would (no response ever reaches the caller) instead of being absorbed
-            // by the catch blocks below.
-            if (_configuration.GetValue("Faults:SimulatePostChargeCrash", false))
-            {
-                _logger.LogWarning("Faults:SimulatePostChargeCrash is enabled; simulating a crash for booking {BookingId} " +
-                    "(sagaId={SagaId}) after the charge succeeded but before completing the saga", id, saga.SagaId);
-                throw new SimulatedPostChargeCrashException(id, saga.SagaId);
-            }
-
-            try
-            {
-                var updated = await _service.CompletePaymentAsync(id, caller, transaction.Id);
-                await _sagaStateService.CompleteAsync(saga.SagaId, transaction.Id);
-
-                await _notifications.PublishAsync(new
-                {
-                    type = "BOOKING_PAYMENT_RECEIVED",
-                    recipientUsername = updated.TaskMasterUsername,
-                    message = $"{updated.RequesterUsername} paid ${updated.InvoiceAmount:0.00} for the booking from " +
-                              $"{updated.SlotStart:yyyy-MM-dd HH:mm} to {updated.SlotEnd:HH:mm} UTC.",
-                    actionType = "VIEW_INCOMING_BOOKING_REQUEST",
-                    actionPayload = new Dictionary<string, string>
-                    {
-                        { "bookingId", updated.Id ?? string.Empty },
-                        { "taskMasterId", updated.TaskMasterId }
-                    }
-                });
-                return Ok(updated);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
-                return Forbid();
-            }
-            catch (KeyNotFoundException ex)
-            {
-                LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
-                return NotFound();
-            }
-            catch (InvalidOperationException ex)
-            {
-                LogChargeSucceededButCompletionFailed(ex, id, saga.SagaId);
-                return Conflict(new { error = ex.Message });
-            }
+            return await EnqueueEscrowFundingAsync(id, body, caller);
         }
 
         private async Task<IActionResult> EnqueueEscrowFundingAsync(
@@ -876,16 +674,6 @@ namespace calendar_service.Controllers
         }
 
         /// <summary>
-        /// The charge already succeeded at this point, so the saga is deliberately left STARTED
-        /// (not FAILED) rather than swallowing money already taken: the reconciliation job (see
-        /// PAYMENT_SAGA_SPEC.md) will find it via GET /api/payment/transaction/{sagaId} and
-        /// finish the booking transition.
-        /// </summary>
-        private void LogChargeSucceededButCompletionFailed(Exception ex, string bookingId, Guid sagaId) =>
-            _logger.LogError(ex, "Payment for booking {BookingId} succeeded (sagaId={SagaId}) but completing the " +
-                "booking failed; leaving saga STARTED for reconciliation", bookingId, sagaId);
-
-        /// <summary>
         /// Exposes the latest durable saga so the frontend can resume status polling after a page
         /// reload instead of relying on transient client state.
         /// </summary>
@@ -907,20 +695,6 @@ namespace calendar_service.Controllers
                 : latestSaga.Status;
             booking.LatestPaymentOperation = latestSaga.Operation;
             booking.LatestPaymentFailureReason = latestSaga.FailureReason;
-        }
-
-        /// <summary>
-        /// Thrown only when <c>Faults:SimulatePostChargeCrash</c> is explicitly enabled, to
-        /// simulate a process crash after a charge succeeds but before the saga/booking are
-        /// completed — the exact recovery scenario the reconciliation job exists for. See
-        /// PAYMENT_SAGA_SPEC.md.
-        /// </summary>
-        public class SimulatedPostChargeCrashException : Exception
-        {
-            public SimulatedPostChargeCrashException(string bookingId, Guid sagaId)
-                : base($"Simulated crash for booking {bookingId} (sagaId={sagaId}) after charge succeeded, before saga completion")
-            {
-            }
         }
 
         private string? CurrentUsername() =>

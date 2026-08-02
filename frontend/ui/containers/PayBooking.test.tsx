@@ -192,7 +192,7 @@ describe('PayBooking escrow lifecycle', () => {
         expect(screen.getByRole('button', { name: /Pay \$100\.00/i })).toBeInTheDocument();
     });
 
-    test('blocks duplicate legacy payment while reconciliation is pending without polling escrow status', async () => {
+    test('blocks a historical synchronous payment while reconciliation is pending', async () => {
         (BookingService.get as jest.Mock).mockResolvedValue(baseBooking({
             status: 'IMPLEMENTED',
             agreedAmount: undefined,

@@ -1,21 +1,26 @@
-# Booking Payment — Durable Orchestration (Proposed)
+# Booking Payment - Durable Orchestration
 
-> Status: **Proposed / not implemented.** Extends `BOOKING_PAYMENT_SPEC.md`, which documents the current fully-synchronous, no-durable-state HTTP flow.
+> Status: **Implemented.** The asynchronous Kafka escrow flow is the only supported path for new
+> booking payments. The synchronous design sections below are retained as historical context for
+> legacy saga reconciliation.
 >
-> **Recommendation: keep the call to payment-service synchronous (HTTP), but add a durable saga/outbox record around it.** Full async, Kafka-mediated orchestration is documented in the Appendix as the natural next step *if* scale/reliability needs later demand it — not adopted now.
+> `BOOKING_PAYMENT_SPEC.md` documents the superseded pre-escrow workflow.
 
 ---
 
-## Why change anything at all
+## Historical synchronous design and motivation
 
-Today, `POST /api/booking/{id}/pay` calls payment-service synchronously over HTTP and blocks until it responds (see `BOOKING_PAYMENT_SPEC.md`, "Architecture"). The gap isn't the synchronous call itself — it's that there is **no durable record of "a payment attempt is in flight"**. If calendar-service crashes after payment-service approves the charge but before the booking is written as `COMPLETED`, money moved but the booking silently never reflects it, with nothing to reconcile against.
+Before the async escrow migration, `POST /api/booking/{id}/pay` called payment-service
+synchronously over HTTP and blocked until it responded. The gap was not the synchronous call
+itself; it was the absence of a durable record that a payment attempt was in flight.
 
 A synchronous call and a durable saga are independent decisions:
 - **Orchestration vs. choreography** — who decides the next step. (Already decided: calendar-service orchestrates, per `BOOKING_PAYMENT_SPEC.md`'s existing "owner of the state machine owns orchestration" principle.)
 - **Sync vs. async transport** — how each step call is made.
 - **Durable vs. in-memory saga state** — whether "attempt in progress" survives a crash.
 
-This spec's recommendation only changes the third: add durable saga state. It deliberately leaves the transport synchronous.
+The original recommendation changed only the third item by adding durable saga state while
+leaving transport synchronous. That intermediate design has since been superseded.
 
 ---
 
@@ -41,7 +46,8 @@ Frontend            calendar-service (orchestrator)              payment-service
    |<------------------------|                                        |
 ```
 
-This is almost exactly today's flow, plus step 2 (write saga state **before** calling out) and a recovery job that reconciles any `SagaState` left `STARTED` after a crash.
+This was the intermediate synchronous flow, plus step 2 (write saga state **before** calling out)
+and a recovery job for any `SagaState` left `STARTED` after a crash.
 
 ### New components (recommendation)
 
@@ -54,7 +60,8 @@ This is almost exactly today's flow, plus step 2 (write saga state **before** ca
 
 ### Why this is the right starting point
 - Solves the actual gap (crash recovery, idempotency) without adding a message bus, new topics, or consumers.
-- No frontend change — `/pay` keeps returning `200`/`402`/`502` synchronously, so `PayBooking.tsx` is untouched.
+- No frontend change was required at that stage because `/pay` still returned synchronous
+  `200`/`402`/`502` responses.
 - The `SagaState` record and `sagaId` concept are **exactly** what a future Kafka-based saga needs too — this isn't throwaway work, it's the foundation (see Appendix migration path).
 
 ### Pros / cons
@@ -62,17 +69,19 @@ This is almost exactly today's flow, plus step 2 (write saga state **before** ca
 **Pros**
 1. Small, targeted change — days not weeks; no new infrastructure (no Kafka topics/consumers for this flow).
 2. Closes the real gap: crash mid-flight is now recoverable via reconciliation instead of silently lost.
-3. Idempotency key prevents double-charging on retries, closing a gap the current spec explicitly called out as unaddressed.
+3. An idempotency key prevented double-charging on retries.
 4. Zero frontend/UX impact.
 5. Forward-compatible: the saga state and idempotency key carry over unchanged if you later move to Kafka.
 
 **Cons**
 1. Still blocks a request thread on payment-service's response time — doesn't help if payment-service becomes slow/high-latency at scale.
 2. Reconciliation job adds a bit of operational surface (needs monitoring, but far less than a full message bus).
-3. Doesn't solve availability decoupling — if payment-service is down, the caller still gets an immediate failure rather than a durably queued retry.
+3. It did not solve availability decoupling; payment-service outages still caused immediate
+   request failures rather than durable queued retries.
 4. Requires a new payment-service endpoint (`GET /transaction/{sagaId}`) that doesn't exist today.
-5. If calendar-service's own saga store (Mongo) is unavailable when writing the initial `STARTED` row, `/pay` fails closed with `503` before any charge is attempted (see `BookingController.Pay`) — correct behavior, but it is itself a dependency the flow can't operate without.
-6. `SagaState` currently has no TTL/archival, so the collection grows unbounded (terminal `COMPLETED`/`FAILED` rows are never pruned) — deferred hardening, tracked as a follow-up (TTL index on `updatedAt`, partial filter on terminal statuses). **Implemented**: see below.
+5. If Mongo was unavailable when writing the initial `STARTED` row, the synchronous `/pay` path
+   failed closed before attempting a charge.
+6. The first version had no TTL/archival. Terminal-row retention was added later.
 
 ### Reconciliation job hardening: claim-based lock + Mongo topology sanity check
 
@@ -85,37 +94,41 @@ Once calendar-service is horizontally scaled, every replica runs its own `SagaRe
 
 To keep the `SagaState` collection from growing unboundedly, `SagaStateService` creates a partial TTL index on `updatedAt` that only matches terminal rows (`Status` in `COMPLETED`/`FAILED`); MongoDB's background TTL monitor removes matching documents once they're older than the configured retention window (`SagaState:RetentionDays`, default 90). `STARTED` rows are explicitly excluded from the filter — they're either actively in-flight or the reconciliation job's responsibility, never something we want Mongo to delete out from under it. If a prior deploy already created this index with different options, Mongo rejects the conflicting `CreateOne` call; `SagaStateService` catches and logs that (`MongoCommandException`) rather than crashing calendar-service's startup, so an operator can resolve the index-options mismatch manually without an outage.
 
-### Manually testing failure/recovery scenarios
+### Historical synchronous failure hooks
 
-Two deterministic, debugger-free hooks exist for exercising the failure paths above via ordinary HTTP requests:
-
-- **Simulated decline**: submit card number `4000000000000002` (`PaymentService.SimulatedDeclineCardNumber`) to `/api/payment/process` (directly, or via `/pay`). payment-service returns a `DECLINED` transaction instead of always approving, exercising `BookingController.Pay`'s decline branch and (if the saga is later force-stuck) the reconciliation job's declined/mismatch handling.
-- **Simulated post-charge crash**: set `Faults:SimulatePostChargeCrash=true` (e.g. env var `Faults__SimulatePostChargeCrash=true`) on calendar-service. After a charge succeeds but before the saga/booking are completed, `BookingController.Pay` throws `SimulatedPostChargeCrashException` — deliberately uncaught, so no response ever reaches the caller (mirroring a real crash) and the saga is left `STARTED` for `SagaReconciliationWorker` to pick up on its next pass. **Must remain `false` in production** — it is a test-only fault injector, not a production feature flag.
-- **Simulated payment-service outage**: `docker compose stop payment-service` (or `docker kill`) while calling `/pay` exercises the "unreachable" paths (503 from calendar-service if it happens before `StartAsync`'s payment call returns; reconciliation's "unreachable → leave STARTED, retry" branch if triggered during the reconciliation job's own lookup) — no code change needed.
+The former synchronous flow supported direct `/api/payment/process` decline tests and a
+`Faults:SimulatePostChargeCrash` calendar-service hook. The booking `/pay` fallback, raw-card
+forwarding, `StartAsync`, and post-charge crash hook have now been removed. Current failure
+testing targets Kafka dispatch, payment-request processing, result-outbox publication, and
+calendar result application as described in Tasks 6-12.
 
 ### Bug fix: MongoDB.Driver 3.x Guid serialization
 
 Manually testing the above surfaced a real bug: writing the first `SagaState` row against a live MongoDB instance threw `BsonSerializationException: GuidSerializer cannot serialize a Guid when GuidRepresentation is Unspecified`. MongoDB.Driver 3.x removed the implicit "Unspecified" Guid representation and deprecated the old per-property `[BsonGuidRepresentation]` attribute fix from 2.x — the correct 3.x fix is a single global serializer registration (`BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard))`), done once via `MongoDbGuidSupport.Register()` at the very top of calendar-service's `Program.cs`, before any Mongo document is (de)serialized. This affects every `Guid` property in the app (currently just `SagaState.SagaId`), not only the one that first surfaced it. Covered by a regression test (`MongoDBServiceTests.RegisteredGuidSerializer_RoundTripsSagaStateSagaId`) that serializes/deserializes a `SagaState` directly — no live Mongo connection needed to catch this class of bug in future.
 
-### Bug fix: initial payment call ambiguity swallowed by immediate FAILED
+### Historical bug fix: initial synchronous payment ambiguity
 
 Manually stopping payment-service mid-request to test recovery surfaced a second, more serious bug: `PaymentApiClient.ProcessPaymentAsync` (the *initial* charge call from `BookingController.Pay`) collapsed "definitely unreachable" and "confirmed no charge" into the same `null` return value. `BookingController.Pay` then immediately called `FailAsync` on any `null` and returned — so the saga was marked `FAILED` right away instead of being left `STARTED`, meaning:
 1. The reconciliation job never got a chance to see it (it only sweeps `STARTED` sagas), so testing showed 0 stuck sagas even though a real failure had just occurred.
 2. Worse, if payment-service actually processed the charge but the response was lost in transit (e.g. it crashed right after replying), the saga would be wrongly marked `FAILED` while money was already taken — a real correctness bug, not just a UX issue.
 
-This was inconsistent with `GetTransactionBySagaIdAsync` (used by reconciliation), which already correctly distinguished "unreachable/error" (`PaymentServiceUnavailableException`, ambiguous) from "confirmed 404" (safe to mark `FAILED`). **Fix**: `ProcessPaymentAsync` now throws the same `PaymentServiceUnavailableException` on any connection failure or non-success response, instead of returning `null`. `BookingController.Pay` catches it, does **not** call `FailAsync`, and leaves the saga `STARTED` — exactly like the "unreachable" branch during reconciliation lookups — so `SagaReconciliationWorker` resolves it authoritatively (via the sagaId lookup) once payment-service is reachable again, within `StuckThresholdSeconds` (default 30s).
+The historical fix made `ProcessPaymentAsync` throw `PaymentServiceUnavailableException` for an
+ambiguous response and left the legacy saga `STARTED` for transaction-lookup reconciliation.
+That synchronous client method and controller branch have since been removed.
 
-**Client guidance (also reflected in the 502 response body)**: if you see this error, **do not retry the payment**. Each `/pay` call mints a brand-new `sagaId`, so an immediate retry is a genuinely distinct charge attempt — payment-service's dedupe only protects against the *same* sagaId being replayed, not against two different sagaIds for the same booking. If the original ambiguous attempt actually succeeded, retrying would cause a real double charge. Instead, wait ~30–60s and refresh the booking: it will resolve automatically to either `COMPLETED` (the reconciliation job confirmed the charge went through) or back to `IMPLEMENTED`/payable-again (confirmed no charge was ever recorded) — only then is it safe to pay again if still unpaid.
+The old client guidance was to avoid retrying an ambiguous synchronous charge. New async
+payments instead expose a durable saga status and reject concurrent active funding operations.
 
-### Frontend: persistent "payment pending" guard (survives page reload)
+### Historical frontend guard for synchronous pending payments
 
 The 502 response above tells the user not to retry, but that guidance previously lived only in transient React state — if the user closed and reopened the browser (or the tab), the warning was gone and the Pay button was enabled again, with nothing stopping a second (genuinely risky) charge attempt.
 
 **Fix — server-derived signal instead of client-only state:**
 - `ISagaStateService.GetLatestByBookingIdAsync(bookingId)` (backed by a new `(BookingId, CreatedAt desc)` Mongo index) returns the most recently created saga for a booking, if any.
-- `BookingController.Get(id)` now populates a transient `Booking.PaymentPending` field (`[BsonIgnore]`, not persisted) — `true` only when the booking is `IMPLEMENTED` **and** its latest saga is still `STARTED` (i.e. genuinely ambiguous/in-flight, not resolved). This costs one extra Mongo lookup only for `IMPLEMENTED` bookings, not every booking read.
-- The frontend (`PayBooking.tsx`) checks `booking.paymentPending` on every load — including a fresh mount after closing/reopening the browser — and if true, hides the payment form entirely and shows a persistent "Your payment is being processed... do not submit another payment" message instead, with a link back home. Because this is derived from server state on every `GET`, it survives reloads and multiple devices/tabs, unlike the old submit-time-only message.
-- **Server-side backstop**: `BookingController.Pay` also now checks `GetLatestByBookingIdAsync` itself, *before* starting a new saga, and returns `409 Conflict` ("A payment for this booking is already being processed...") if the latest saga is still `STARTED`. This protects against a genuine double-charge attempt even if the frontend check is stale, bypassed, or the user has two tabs/devices open — the check that gates the UI is the same one enforced server-side, so there's no way to race past it from the client.
+- `BookingController.Get(id)` populated a transient `Booking.PaymentPending` field for historical
+  synchronous sagas.
+- The frontend continues to hide payment controls while such a historical saga is unresolved.
+- New async funding uses operation-aware active-saga checks and durable status polling instead.
 
 ---
 
@@ -148,7 +161,7 @@ Frontend            calendar-service (orchestrator)         payment-service     
 |---|---|
 | `payment-requests` / `payment-results` Kafka topics | Async request/response, mirrors `NotificationProducer`/`UserEventConsumerWorker` conventions already in `calendar-service/MessageQueue` |
 | `PaymentRequestProducer`, `PaymentResultConsumerWorker` (calendar-service) | Same JSON-camelCase + `traceparent` propagation pattern as existing producers/consumers |
-| `PaymentRequestConsumerWorker` (payment-service) | New — payment-service is currently REST-only, gains its first Kafka consumer |
+| `PaymentRequestConsumerWorker` (payment-service) | Added the payment-service Kafka consumer |
 | Saga timeout watchdog | Replaces simple reconciliation-on-restart with continuous scanning for stuck sagas |
 
 ### Migration cost from the recommended design to this appendix
@@ -159,19 +172,21 @@ Because `SagaState` and the `sagaId` idempotency key already exist from the reco
 |---|---|
 | Replace HTTP call with `PaymentRequestProducer.PublishAsync` | Small — hours |
 | Add `PaymentResultConsumerWorker` in calendar-service | Small-medium — ~1 day incl. tests, mirrors existing worker |
-| Add Kafka consumer in payment-service (net-new capability) | Medium — new infra in a currently REST-only service |
+| Add Kafka consumer in payment-service (net-new capability) | Medium - new infrastructure |
 | Flip `/pay` from sync 200/402 to `202 Accepted` | Small on backend |
 | **Frontend**: `PayBooking.tsx` from "await response" to "poll or await notification" | **Largest cost** — real UX rewrite: loading/pending states, polling or websocket, retry messaging |
 | Saga timeout watchdog (upgrade from restart-time reconciliation) | Small-medium |
 | Ops: topic lag monitoring, DLQ handling | Medium, recurring operational cost |
 
-**Bottom line on cost to scale up later**: moderate, and concentrated in the frontend UX change (sync feedback → async feedback) plus new operational monitoring — not in redoing the core business/idempotency logic, which is why building the recommended sync+outbox design first is the cheaper overall path rather than jumping straight to Kafka.
+The estimated migration cost was moderate and concentrated in asynchronous frontend feedback,
+Kafka workers, and operational monitoring.
 
 ---
 
 ## Security note (carried over, still applies either way)
 
-Raw card details (`cardNumber`, `cvv`) currently pass over plain HTTP calendar-service → payment-service. If the appendix's Kafka path is ever adopted, do **not** put raw card data on a Kafka topic — tokenize first (a lightweight synchronous exchange for a short-lived token) and only publish the token. This applies regardless of which transport is used for the charge step itself.
+The former synchronous path forwarded raw card fields from calendar-service to payment-service.
+The implemented async flow tokenizes first and never places raw card data on Kafka.
 
 ---
 
@@ -192,11 +207,10 @@ Each step below is only considered done once its own automated test(s) are added
 5. Add the reconciliation job (startup pass first; periodic timer if needed per open question #3).
 6. **Only if/when scale demands it**: follow the Appendix's migration path to Kafka-mediated orchestration.
 
-## TODO: migrate `/pay` to asynchronous Kafka orchestration
+## Implemented migration: asynchronous Kafka orchestration
 
-Implement these tasks in order. Keep the current synchronous HTTP flow available behind an
-`AsyncPaymentsEnabled` feature flag until the asynchronous flow has been verified end to end.
-Every task must include at least one automated test before it is considered complete.
+The migration tasks below were implemented in order. New `/pay` requests always use the durable
+escrow flow; there is no synchronous feature-flag fallback.
 
 The target business flow is now **pay before work**:
 
@@ -291,13 +305,12 @@ sum of all `FUNDED` escrow rows.
 | Kafka workers/results | both services | **Implemented (Tasks 6–10).** Execute commands and apply results idempotently through transactional outboxes. |
 | Async status UI | calendar-service/frontend | **Implemented (Task 11).** Shows token/funding/release/refund progress without duplicate submissions. |
 | Recovery and operations | both services | **Implemented (Task 12).** Distinguishes dispatch stages, dead-letters poison messages, exports saga metrics, and reconciles custody balances. |
-| Infrastructure and rollout | Docker Compose/both services | **Implemented (Task 13).** Provisions topics, configures workers and custody, and enables async escrow by default with an explicit rollback gate. |
+| Infrastructure and rollout | Docker Compose/both services | **Implemented (Task 13).** Provisions topics, configures workers and custody, and runs booking payments through async escrow only. |
 
 Tasks 1–4 establish the safe contracts, token boundary, escrow ledger, booking lifecycle, and
 durable command outbox.
-Legacy non-escrow bookings retain the synchronous `/pay` flow. Escrow-backed bookings cannot use
-that endpoint until Tasks 5–11 connect the funding endpoint, Kafka workers, result handling, and
-frontend.
+Historical synchronous saga records remain recoverable, but new non-escrow synchronous payments
+cannot be created.
 
 ### Task 1 — Define escrow-aware message and HTTP contracts
 
@@ -441,19 +454,17 @@ Implementation details:
 
 ### Task 5 — Change `/pay` to enqueue escrow funding and return immediately
 
-- [x] When `AsyncPaymentsEnabled` is true, validate the accepted booking and token, create the
-      escrow plus durable `FUND_ESCROW` saga request, and return `202 Accepted` without calling
-      `IPaymentApiClient.ProcessPaymentAsync`.
+- [x] Validate the accepted booking and token, create the escrow plus durable `FUND_ESCROW` saga
+      request, and return `202 Accepted` without a synchronous payment-service call.
 - [x] Preserve ownership checks and reject unpaid-price changes, duplicate funding, work already
       started, and bookings that are not eligible for funding.
-- [x] Keep the synchronous implementation as the disabled-feature fallback during rollout.
 - [x] Add controller tests proving `/pay` returns saga/escrow ids and does not wait for or call
       payment-service directly.
 
 Implementation details:
 
-1. The async request accepts only `paymentMethodToken`; raw card fields remain limited to the
-   disabled-feature legacy path and are never copied into the saga/outbox request.
+1. The request accepts only `paymentMethodToken`; raw card fields are never accepted by
+   calendar-service or copied into the saga/outbox request.
 2. Funding requires the requester-owned booking to remain `ACCEPTED` with its immutable amount
    and currency fixed. Started work, funded/terminal escrows, and active saga duplicates return
    `409`.
@@ -464,8 +475,8 @@ Implementation details:
    `Escrow:CustodyUserId`; the TaskMaster remains the escrow beneficiary for the later release.
 5. Successful enqueue returns `PaymentAcceptedResponseV1` with `202 Accepted`, a `Location`
    header, saga/escrow ids, `PENDING`, and the future Task 11 payment-status URL.
-6. `AsyncPaymentsEnabled` defaults to `false`, preserving the existing synchronous
-   `IMPLEMENTED`-booking payment path during rollout.
+6. The previous `AsyncPaymentsEnabled` flag and synchronous `IMPLEMENTED`-booking fallback were
+   removed after rollout stabilization.
 
 ### Task 6 — Publish pending escrow commands from calendar-service
 
@@ -660,8 +671,8 @@ Implementation details:
    returns terminal `COMPLETED`/`FAILED` state with the booking's current escrow projection, and
    allows only the requester, TaskMaster, or an administrator to read it.
 2. Single-booking reads expose the latest asynchronous saga id, operation, status, and failure
-   reason. The frontend reconstructs pending state from this server projection after reload;
-   legacy synchronous pending payments remain blocked without polling the escrow-only endpoint.
+   reason. The frontend reconstructs pending state from this server projection after reload.
+   Historical synchronous pending records remain blocked while reconciliation resolves them.
 3. Card details are exchanged for a short-lived payment-method token before `/pay` creates the
    durable funding saga. The requester sees queued, funded, declined, released, and refunded
    states, with bounded polling and a durable timeout message rather than an unsafe retry.
@@ -712,13 +723,13 @@ Implementation details:
 ### Task 13 — Configure infrastructure and complete rollout
 
 - [x] Add `payment-requests`, `payment-results`, and their DLQ topics to `kafka-init`.
-- [x] Add topic, consumer group, retry, polling, and feature-flag configuration to both services
-      and `docker-compose.yml`.
+- [x] Add topic, consumer group, retry, and polling configuration to both services and
+      `docker-compose.yml`.
 - [x] Configure the admin custody account explicitly; never infer it from the first admin user.
 - [x] Verify funding, release, refund, multiple service replicas, and duplicate event delivery.
-- [x] Enable asynchronous payments by default after the new path is stable.
-- [x] Retain the synchronous payment-processing path only as an explicit rollback option; remove
-      it and obsolete `IPaymentApiClient` methods once rollback support is no longer required.
+- [x] Enable asynchronous payments after the new path is stable.
+- [x] Remove the synchronous booking-payment fallback, feature flag, raw-card calendar DTO
+      fields, and obsolete `IPaymentApiClient.ProcessPaymentAsync` method.
 
 Implementation details:
 
@@ -727,9 +738,9 @@ Implementation details:
    Broker auto-creation is disabled so misspelled topic names fail instead of silently creating
    unmonitored streams.
 2. Docker Compose supplies both services with their request/result topics, DLQ topics, consumer
-   groups, retry limits, producer timeouts, outbox polling/lease/backoff settings, reconciliation
-   intervals, and the async-payment feature flag. The checked-in appsettings contain the same
-   defaults for non-container startup.
+   groups, retry limits, producer timeouts, outbox polling/lease/backoff settings, and
+   reconciliation intervals. The checked-in appsettings contain the same defaults for
+   non-container startup.
 3. `PAYMENT_CUSTODY_USER_ID` identifies the dedicated internal custody account. Payment-service
    initializes that exact wallet at zero balance before consumers start; it never selects an
    administrator or receives the simulated user starting balance. Initialization is idempotent
@@ -739,7 +750,7 @@ Implementation details:
    restart recovery, and repeated custody initialization are covered by the calendar-service and
    payment-service suites. Kafka consumer groups and database/Mongo claim leases distribute work
    safely when service replicas are scaled out.
-5. `AsyncPaymentsEnabled` now defaults to `true` in calendar-service and Docker Compose. Setting
-   it to `false` remains the documented rollback switch during the stabilization window; the
-   synchronous HTTP client and processing endpoint are intentionally removed only after operators
-   no longer require that rollback.
+5. Calendar-service now has no synchronous booking-payment branch. `POST /api/booking/{id}/pay`
+   always validates a payment-method token and durably enqueues `FUND_ESCROW`. The transaction
+   lookup client remains temporarily available only to reconcile historical synchronous sagas
+   that were already `STARTED` before cleanup.
