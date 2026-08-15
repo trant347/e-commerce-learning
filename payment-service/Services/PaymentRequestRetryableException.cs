@@ -9,5 +9,12 @@ namespace payment_service.Services
             : base(message)
         {
         }
+
+        public PaymentRequestRetryableException(
+            string message,
+            Exception innerException)
+            : base(message, innerException)
+        {
+        }
     }
 }

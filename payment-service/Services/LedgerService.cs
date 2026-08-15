@@ -193,7 +193,7 @@ namespace payment_service.Services
             foreach (var accountId in accountIds)
             {
                 LedgerAccount account;
-                if (_dbContext.Database.IsRelational())
+                if (UsesPostgres())
                 {
                     account = await _dbContext.LedgerAccounts
                         .FromSqlInterpolated(
@@ -227,7 +227,7 @@ namespace payment_service.Services
                 }
 
                 UserWallet? projection;
-                if (_dbContext.Database.IsRelational())
+                if (UsesPostgres())
                 {
                     projection = await _dbContext.Wallets
                         .FromSqlInterpolated(
@@ -243,7 +243,7 @@ namespace payment_service.Services
 
                 if (projection == null)
                 {
-                    throw new InvalidOperationException(
+                    throw new LedgerAccountUnavailableException(
                         $"Ledger account '{account.Id}' has no wallet projection.");
                 }
 
@@ -253,17 +253,23 @@ namespace payment_service.Services
             return projections;
         }
 
-        private Task<LedgerAccount> FindAccountAsync(
+        private async Task<LedgerAccount> FindAccountAsync(
             NormalizedAccountReference reference,
             string currency,
-            CancellationToken cancellationToken) =>
-            _dbContext.LedgerAccounts
+            CancellationToken cancellationToken)
+        {
+            var account = await _dbContext.LedgerAccounts
                 .AsNoTracking()
-                .SingleAsync(
+                .SingleOrDefaultAsync(
                     account => account.OwnerUserId == reference.OwnerUserId
                                && account.AccountType == reference.AccountType
                                && account.Currency == currency,
                     cancellationToken);
+            return account
+                ?? throw new LedgerAccountUnavailableException(
+                    $"Ledger account type '{reference.AccountType}' for owner " +
+                    $"'{reference.OwnerUserId ?? "<system>"}' and currency '{currency}' was not found.");
+        }
 
         private Task<JournalEntry?> FindPostingAsync(
             string idempotencyKey,
@@ -567,6 +573,10 @@ namespace payment_service.Services
             {
                 SqlState: PostgresErrorCodes.UniqueViolation
             };
+
+        private bool UsesPostgres() =>
+            _dbContext.Database.ProviderName
+                == "Npgsql.EntityFrameworkCore.PostgreSQL";
 
         private sealed record NormalizedAccountReference(
             string? OwnerUserId,

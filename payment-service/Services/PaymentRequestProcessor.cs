@@ -13,17 +13,20 @@ namespace payment_service.Services
     {
         private readonly PaymentDbContext _dbContext;
         private readonly IPaymentMethodTokenService _paymentMethodTokens;
+        private readonly ILedgerService _ledger;
         private readonly TimeProvider _timeProvider;
         private readonly ILogger<PaymentRequestProcessor> _logger;
 
         public PaymentRequestProcessor(
             PaymentDbContext dbContext,
             IPaymentMethodTokenService paymentMethodTokens,
+            ILedgerService ledger,
             TimeProvider timeProvider,
             ILogger<PaymentRequestProcessor> logger)
         {
             _dbContext = dbContext;
             _paymentMethodTokens = paymentMethodTokens;
+            _ledger = ledger;
             _timeProvider = timeProvider;
             _logger = logger;
         }
@@ -64,7 +67,16 @@ namespace payment_service.Services
 
                 return result;
             }
-            catch (DbUpdateException)
+            catch (OperationCanceledException)
+            {
+                if (dbTransaction != null)
+                {
+                    await dbTransaction.RollbackAsync(cancellationToken);
+                }
+
+                throw;
+            }
+            catch (Exception)
             {
                 if (dbTransaction != null)
                 {
@@ -88,15 +100,6 @@ namespace payment_service.Services
                     request.SagaId,
                     duplicate.Id);
                 return ToResult(duplicate);
-            }
-            catch
-            {
-                if (dbTransaction != null)
-                {
-                    await dbTransaction.RollbackAsync(cancellationToken);
-                }
-
-                throw;
             }
             finally
             {
@@ -158,32 +161,32 @@ namespace payment_service.Services
                 ValidateTransferParties(escrow, request);
             }
 
-            var wallets = await LockWalletsAsync(
-                request.PayerUserId,
-                request.PayeeUserId,
-                cancellationToken);
-            var payer = wallets[request.PayerUserId];
-            var payee = wallets[request.PayeeUserId];
-            if (payer.Balance < request.Amount)
+            transaction.Status = PaymentTransaction.StatusApproved;
+            _dbContext.Transactions.Add(transaction);
+            try
+            {
+                await _ledger.PostTransferAsync(
+                    CreateLedgerTransfer(request, transaction.Id),
+                    cancellationToken);
+            }
+            catch (InsufficientLedgerFundsException exception)
             {
                 Decline(
                     transaction,
                     $"Insufficient balance for {request.PayerUserId}: "
-                    + $"{payer.Balance:F2} {request.Currency} available, "
+                    + $"{exception.AvailableBalance:F2} {request.Currency} available, "
                     + $"{request.Amount:F2} {request.Currency} required.");
-                _dbContext.Transactions.Add(transaction);
                 return ToResult(transaction);
+            }
+            catch (LedgerAccountUnavailableException exception)
+            {
+                throw new PaymentRequestRetryableException(
+                    exception.Message,
+                    exception);
             }
 
             var now = UtcNow();
-            payer.Balance -= request.Amount;
-            payer.UpdatedAt = now;
-            payee.Balance += request.Amount;
-            payee.UpdatedAt = now;
             ApplyEscrowTransition(escrow, transaction.Id, request.Operation, now);
-
-            transaction.Status = PaymentTransaction.StatusApproved;
-            _dbContext.Transactions.Add(transaction);
             return ToResult(transaction);
         }
 
@@ -240,39 +243,30 @@ namespace payment_service.Services
                 cancellationToken);
         }
 
-        private async Task<Dictionary<string, UserWallet>> LockWalletsAsync(
-            string payerUserId,
-            string payeeUserId,
-            CancellationToken cancellationToken)
+        private static LedgerTransfer CreateLedgerTransfer(
+            PaymentRequestedV1 request,
+            Guid paymentTransactionId) => new()
         {
-            var wallets = new Dictionary<string, UserWallet>(
-                StringComparer.OrdinalIgnoreCase);
-            foreach (var userId in new[] { payerUserId, payeeUserId }
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(userId => userId, StringComparer.Ordinal))
-            {
-                UserWallet? wallet;
-                if (UsesPostgres())
-                {
-                    wallet = await _dbContext.Wallets
-                        .FromSqlInterpolated(
-                            $"SELECT * FROM user_wallets WHERE \"UserId\" = {userId} FOR UPDATE")
-                        .SingleOrDefaultAsync(cancellationToken);
-                }
-                else
-                {
-                    wallet = await _dbContext.Wallets.SingleOrDefaultAsync(
-                        candidate => candidate.UserId == userId,
-                        cancellationToken);
-                }
-
-                wallets[userId] = wallet
-                    ?? throw new PaymentRequestRetryableException(
-                        $"Wallet for user '{userId}' was not found.");
-            }
-
-            return wallets;
-        }
+            IdempotencyKey = $"{request.Operation}:{request.SagaId:D}",
+            PaymentTransactionId = paymentTransactionId,
+            SagaId = request.SagaId,
+            EscrowId = request.EscrowId,
+            BookingId = request.BookingId,
+            Operation = request.Operation,
+            Currency = request.Currency,
+            Amount = request.Amount,
+            DebitAccount = new LedgerAccountReference(
+                request.PayerUserId,
+                request.Operation == PaymentOperation.FundEscrow
+                    ? LedgerAccount.TypeUserWallet
+                    : LedgerAccount.TypeEscrowCustody),
+            CreditAccount = new LedgerAccountReference(
+                request.PayeeUserId,
+                request.Operation == PaymentOperation.FundEscrow
+                    ? LedgerAccount.TypeEscrowCustody
+                    : LedgerAccount.TypeUserWallet),
+            Description = $"Escrow {request.Operation} for booking {request.BookingId}"
+        };
 
         private static void ValidateEscrowTerms(
             EscrowRecord escrow,

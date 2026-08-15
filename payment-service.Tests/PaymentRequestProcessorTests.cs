@@ -41,6 +41,12 @@ namespace payment_service.Tests
             Assert.Equal(request.SagaId, transaction.SagaId);
             Assert.Equal(request.EscrowId, transaction.EscrowId);
             Assert.Equal(PaymentOperation.FundEscrow, transaction.Operation);
+            var journal = await dbContext.JournalEntries
+                .Include(entry => entry.Lines)
+                .SingleAsync();
+            Assert.Equal(transaction.Id, journal.PaymentTransactionId);
+            Assert.Equal(PaymentOperation.FundEscrow, journal.Operation);
+            Assert.Equal(2, journal.Lines.Count);
             var outbox = await dbContext.PaymentResultOutbox.SingleAsync();
             Assert.Equal(request.SagaId, outbox.SagaId);
             Assert.Equal(result.TransactionId, outbox.TransactionId);
@@ -69,6 +75,9 @@ namespace payment_service.Tests
             var escrow = await dbContext.Escrows.SingleAsync();
             Assert.Equal(EscrowRecord.StatusReleased, escrow.Status);
             Assert.Equal(result.TransactionId, escrow.ReleaseTransactionId);
+            Assert.Equal(
+                PaymentOperation.ReleaseEscrow,
+                (await dbContext.JournalEntries.SingleAsync()).Operation);
         }
 
         [Fact]
@@ -94,6 +103,9 @@ namespace payment_service.Tests
             var escrow = await dbContext.Escrows.SingleAsync();
             Assert.Equal(EscrowRecord.StatusRefunded, escrow.Status);
             Assert.Equal(result.TransactionId, escrow.RefundTransactionId);
+            Assert.Equal(
+                PaymentOperation.RefundEscrow,
+                (await dbContext.JournalEntries.SingleAsync()).Operation);
         }
 
         [Fact]
@@ -123,6 +135,7 @@ namespace payment_service.Tests
                 (await dbContext.Escrows.SingleAsync()).Status);
             Assert.Single(dbContext.Transactions);
             Assert.Single(dbContext.PaymentResultOutbox);
+            Assert.Empty(dbContext.JournalEntries);
         }
 
         [Fact]
@@ -170,6 +183,7 @@ namespace payment_service.Tests
             Assert.Equal(200m, WalletBalance(dbContext, "admin-custody"));
             Assert.Single(dbContext.Transactions);
             Assert.Single(dbContext.PaymentResultOutbox);
+            Assert.Single(dbContext.JournalEntries);
             tokenService.Verify(
                 service => service.RedeemAsync(
                     request.PaymentMethodToken!,
@@ -236,6 +250,7 @@ namespace payment_service.Tests
             Assert.Empty(verification.Escrows);
             Assert.Empty(verification.Transactions);
             Assert.Empty(verification.PaymentResultOutbox);
+            Assert.Empty(verification.JournalEntries);
         }
 
         private static PaymentDbContext NewContext()
@@ -248,12 +263,20 @@ namespace payment_service.Tests
 
         private static PaymentRequestProcessor NewProcessor(
             PaymentDbContext dbContext,
-            IPaymentMethodTokenService tokenService) =>
-            new(
+            IPaymentMethodTokenService tokenService)
+        {
+            var timeProvider = new FixedTimeProvider(Now);
+            var ledger = new LedgerService(
+                dbContext,
+                timeProvider,
+                NullLogger<LedgerService>.Instance);
+            return new PaymentRequestProcessor(
                 dbContext,
                 tokenService,
-                new FixedTimeProvider(Now),
+                ledger,
+                timeProvider,
                 NullLogger<PaymentRequestProcessor>.Instance);
+        }
 
         private static Mock<IPaymentMethodTokenService> ValidTokenService()
         {
@@ -312,13 +335,27 @@ namespace payment_service.Tests
             PaymentDbContext dbContext,
             params (string UserId, decimal Balance)[] wallets)
         {
-            dbContext.Wallets.AddRange(wallets.Select(wallet => new UserWallet
+            foreach (var wallet in wallets)
             {
-                UserId = wallet.UserId,
-                Balance = wallet.Balance,
-                CreatedAt = Now.UtcDateTime,
-                UpdatedAt = Now.UtcDateTime
-            }));
+                var account = new LedgerAccount
+                {
+                    OwnerUserId = wallet.UserId,
+                    AccountType = wallet.UserId == "admin-custody"
+                        ? LedgerAccount.TypeEscrowCustody
+                        : LedgerAccount.TypeUserWallet,
+                    Currency = "USD",
+                    CreatedAt = Now.UtcDateTime
+                };
+                dbContext.LedgerAccounts.Add(account);
+                dbContext.Wallets.Add(new UserWallet
+                {
+                    UserId = wallet.UserId,
+                    Balance = wallet.Balance,
+                    LedgerAccountId = account.Id,
+                    CreatedAt = Now.UtcDateTime,
+                    UpdatedAt = Now.UtcDateTime
+                });
+            }
             dbContext.SaveChanges();
         }
 

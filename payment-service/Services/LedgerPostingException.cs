@@ -29,4 +29,12 @@ namespace payment_service.Services
 
         public decimal RequestedAmount { get; }
     }
+
+    public sealed class LedgerAccountUnavailableException : InvalidOperationException
+    {
+        public LedgerAccountUnavailableException(string message)
+            : base(message)
+        {
+        }
+    }
 }
