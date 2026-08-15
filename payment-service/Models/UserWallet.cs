@@ -29,8 +29,18 @@ namespace payment_service.Models
         [Column(TypeName = "numeric(18,2)")]
         public decimal Balance { get; set; } = DefaultStartingBalance;
 
+        public Guid? LedgerAccountId { get; set; }
+
+        public long ProjectionVersion { get; set; }
+
+        public Guid? LastJournalEntryId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        public LedgerAccount? LedgerAccount { get; set; }
+
+        public JournalEntry? LastJournalEntry { get; set; }
     }
 }

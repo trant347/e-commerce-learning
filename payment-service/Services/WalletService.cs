@@ -7,43 +7,27 @@ namespace payment_service.Services
     public class WalletService : IWalletService
     {
         private readonly PaymentDbContext _dbContext;
+        private readonly ILedgerAccountService _ledgerAccounts;
         private readonly ILogger<WalletService> _logger;
 
-        public WalletService(PaymentDbContext dbContext, ILogger<WalletService> logger)
+        public WalletService(
+            PaymentDbContext dbContext,
+            ILedgerAccountService ledgerAccounts,
+            ILogger<WalletService> logger)
         {
             _dbContext = dbContext;
+            _ledgerAccounts = ledgerAccounts;
             _logger = logger;
         }
 
         public async Task<UserWallet> CreateWalletAsync(string userId, CancellationToken ct = default)
         {
-            var existing = await _dbContext.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, ct);
-            if (existing != null)
-            {
-                _logger.LogInformation("Wallet already exists for user {UserId}; ignoring duplicate creation request", userId);
-                return existing;
-            }
+            await _ledgerAccounts.EnsureUserWalletAccountAsync(userId, cancellationToken: ct);
+            var wallet = await _dbContext.Wallets.SingleAsync(
+                candidate => candidate.UserId == userId,
+                ct);
 
-            var wallet = new UserWallet { UserId = userId };
-            _dbContext.Wallets.Add(wallet);
-            try
-            {
-                await _dbContext.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateException)
-            {
-                // Two concurrent creation requests (e.g. a retried USER_REGISTERED event) raced
-                // past the earlier existence check; the primary key rejected the second insert.
-                // Return the wallet the other request just committed instead of surfacing an error.
-                var winner = await _dbContext.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, ct);
-                if (winner != null)
-                {
-                    return winner;
-                }
-                throw;
-            }
-
-            _logger.LogInformation("Created wallet for user {UserId} with starting balance {Balance}",
+            _logger.LogInformation("Wallet ensured for user {UserId} with balance {Balance}",
                 userId, wallet.Balance);
             return wallet;
         }

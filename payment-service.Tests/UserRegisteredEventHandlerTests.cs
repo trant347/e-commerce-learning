@@ -29,7 +29,7 @@ namespace payment_service.Tests
         public async Task HandleAsync_UserRegisteredEvent_CreatesWalletForUsername()
         {
             await using var dbContext = NewInMemoryContext();
-            var wallets = new WalletService(dbContext, NullLogger<WalletService>.Instance);
+            var wallets = NewWalletService(dbContext);
             var payload = "{\"type\":\"USER_REGISTERED\",\"username\":\"carol\"}";
 
             await UserRegisteredEventHandler.HandleAsync(payload, wallets, NullLogger.Instance);
@@ -43,7 +43,7 @@ namespace payment_service.Tests
         public async Task HandleAsync_OtherEventType_IsIgnored()
         {
             await using var dbContext = NewInMemoryContext();
-            var wallets = new WalletService(dbContext, NullLogger<WalletService>.Instance);
+            var wallets = NewWalletService(dbContext);
             var payload = "{\"type\":\"USER_DELETED\",\"username\":\"dave\"}";
 
             await UserRegisteredEventHandler.HandleAsync(payload, wallets, NullLogger.Instance);
@@ -55,12 +55,24 @@ namespace payment_service.Tests
         public async Task HandleAsync_MissingUsername_IsIgnored()
         {
             await using var dbContext = NewInMemoryContext();
-            var wallets = new WalletService(dbContext, NullLogger<WalletService>.Instance);
+            var wallets = NewWalletService(dbContext);
             var payload = "{\"type\":\"USER_REGISTERED\"}";
 
             await UserRegisteredEventHandler.HandleAsync(payload, wallets, NullLogger.Instance);
 
             Assert.Equal(0, await dbContext.Wallets.CountAsync());
+        }
+
+        private static WalletService NewWalletService(PaymentDbContext dbContext)
+        {
+            var ledgerAccounts = new LedgerAccountService(
+                dbContext,
+                TimeProvider.System,
+                NullLogger<LedgerAccountService>.Instance);
+            return new WalletService(
+                dbContext,
+                ledgerAccounts,
+                NullLogger<WalletService>.Instance);
         }
     }
 }

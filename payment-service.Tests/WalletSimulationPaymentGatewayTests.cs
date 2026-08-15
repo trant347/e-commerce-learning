@@ -119,6 +119,8 @@ namespace payment_service.Tests
             Assert.Equal(PaymentTransaction.StatusApproved, result.Status);
             var wallet = await dbContext.Wallets.SingleAsync(w => w.UserId == "newuser");
             Assert.Equal(UserWallet.DefaultStartingBalance - 200m, wallet.Balance);
+            Assert.NotNull(wallet.LedgerAccountId);
+            Assert.Equal(1, await dbContext.JournalEntries.CountAsync());
         }
     }
 }

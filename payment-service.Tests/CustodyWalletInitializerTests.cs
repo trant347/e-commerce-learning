@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using payment_service.Data;
+using payment_service.Models;
 using payment_service.Services;
 using Xunit;
 
@@ -21,6 +22,9 @@ namespace payment_service.Tests
             services.AddDbContext<PaymentDbContext>(options =>
                 options.UseInMemoryDatabase(
                     nameof(StartAsync_RepeatedInitialization_CreatesOneZeroBalanceWallet)));
+            services.AddSingleton(TimeProvider.System);
+            services.AddLogging();
+            services.AddScoped<ILedgerAccountService, LedgerAccountService>();
             using var provider = services.BuildServiceProvider();
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
@@ -40,6 +44,9 @@ namespace payment_service.Tests
             var wallet = await dbContext.Wallets.SingleAsync();
             Assert.Equal("configured-custody", wallet.UserId);
             Assert.Equal(0m, wallet.Balance);
+            var account = await dbContext.LedgerAccounts.SingleAsync();
+            Assert.Equal(account.Id, wallet.LedgerAccountId);
+            Assert.Equal(LedgerAccount.TypeEscrowCustody, account.AccountType);
         }
 
         private static CustodyWalletInitializer NewInitializer(

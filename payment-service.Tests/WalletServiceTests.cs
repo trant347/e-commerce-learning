@@ -28,7 +28,7 @@ namespace payment_service.Tests
         public async Task CreateWalletAsync_NewUser_CreatesWalletWithDefaultBalance()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new WalletService(dbContext, NullLogger<WalletService>.Instance);
+            var service = NewService(dbContext);
 
             var wallet = await service.CreateWalletAsync("alice");
 
@@ -41,7 +41,7 @@ namespace payment_service.Tests
         public async Task CreateWalletAsync_CalledTwiceForSameUser_DoesNotGrantExtraCredit()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new WalletService(dbContext, NullLogger<WalletService>.Instance);
+            var service = NewService(dbContext);
 
             var first = await service.CreateWalletAsync("bob");
             var second = await service.CreateWalletAsync("bob");
@@ -55,11 +55,23 @@ namespace payment_service.Tests
         public async Task GetWalletAsync_UnknownUser_ReturnsNull()
         {
             await using var dbContext = NewInMemoryContext();
-            var service = new WalletService(dbContext, NullLogger<WalletService>.Instance);
+            var service = NewService(dbContext);
 
             var wallet = await service.GetWalletAsync("nobody");
 
             Assert.Null(wallet);
+        }
+
+        private static WalletService NewService(PaymentDbContext dbContext)
+        {
+            var ledgerAccounts = new LedgerAccountService(
+                dbContext,
+                TimeProvider.System,
+                NullLogger<LedgerAccountService>.Instance);
+            return new WalletService(
+                dbContext,
+                ledgerAccounts,
+                NullLogger<WalletService>.Instance);
         }
     }
 }

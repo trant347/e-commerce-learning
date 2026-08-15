@@ -43,6 +43,18 @@ namespace payment_service.Data
                 entity.ToTable("user_wallets");
                 entity.HasKey(w => w.UserId);
                 entity.Property(w => w.Balance).HasColumnType("numeric(18,2)");
+                entity.HasIndex(w => w.LedgerAccountId)
+                    .IsUnique()
+                    .HasFilter("\"LedgerAccountId\" IS NOT NULL")
+                    .HasDatabaseName("IX_user_wallets_ledger_account_id");
+                entity.HasOne(w => w.LedgerAccount)
+                    .WithOne()
+                    .HasForeignKey<UserWallet>(w => w.LedgerAccountId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne(w => w.LastJournalEntry)
+                    .WithMany()
+                    .HasForeignKey(w => w.LastJournalEntryId)
+                    .OnDelete(DeleteBehavior.Restrict);
                 // Enforce non-negative balances at the database level as well as in app code —
                 // a wallet must never be driven below zero by a race between concurrent charges.
                 entity.ToTable(t => t.HasCheckConstraint("CK_user_wallets_balance_non_negative", "\"Balance\" >= 0"));

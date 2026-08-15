@@ -1,7 +1,3 @@
-using Microsoft.EntityFrameworkCore;
-using payment_service.Data;
-using payment_service.Models;
-
 namespace payment_service.Services
 {
     /// <summary>
@@ -34,50 +30,15 @@ namespace payment_service.Services
             }
 
             using var scope = _serviceProvider.CreateScope();
-            var dbContext =
-                scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
-            var existing = await dbContext.Wallets
-                .AsNoTracking()
-                .SingleOrDefaultAsync(
-                    wallet => wallet.UserId == custodyUserId,
-                    cancellationToken);
-            if (existing != null)
-            {
-                _logger.LogInformation(
-                    "Using configured escrow custody wallet userId={CustodyUserId} balance={Balance}",
-                    custodyUserId,
-                    existing.Balance);
-                return;
-            }
-
-            dbContext.Wallets.Add(new UserWallet
-            {
-                UserId = custodyUserId,
-                Balance = 0m
-            });
-            try
-            {
-                await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation(
-                    "Created configured escrow custody wallet userId={CustodyUserId} with zero balance",
-                    custodyUserId);
-            }
-            catch (DbUpdateException)
-            {
-                dbContext.ChangeTracker.Clear();
-                if (!await dbContext.Wallets
-                    .AsNoTracking()
-                    .AnyAsync(
-                        wallet => wallet.UserId == custodyUserId,
-                        cancellationToken))
-                {
-                    throw;
-                }
-
-                _logger.LogInformation(
-                    "Another payment-service replica created escrow custody wallet userId={CustodyUserId}",
-                    custodyUserId);
-            }
+            var ledgerAccounts =
+                scope.ServiceProvider.GetRequiredService<ILedgerAccountService>();
+            var account = await ledgerAccounts.EnsureCustodyAccountAsync(
+                custodyUserId,
+                cancellationToken: cancellationToken);
+            _logger.LogInformation(
+                "Configured escrow custody account ensured userId={CustodyUserId} accountId={AccountId}",
+                custodyUserId,
+                account.Id);
         }
 
         public Task StopAsync(CancellationToken cancellationToken) =>

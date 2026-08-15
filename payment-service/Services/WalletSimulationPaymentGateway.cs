@@ -28,12 +28,30 @@ namespace payment_service.Services
         public const string SimulatedDeclineCardNumber = "4000000000000002";
 
         private readonly PaymentDbContext _dbContext;
+        private readonly ILedgerAccountService _ledgerAccounts;
         private readonly ILogger<WalletSimulationPaymentGateway> _logger;
 
-        public WalletSimulationPaymentGateway(PaymentDbContext dbContext, ILogger<WalletSimulationPaymentGateway> logger)
+        public WalletSimulationPaymentGateway(
+            PaymentDbContext dbContext,
+            ILedgerAccountService ledgerAccounts,
+            ILogger<WalletSimulationPaymentGateway> logger)
         {
             _dbContext = dbContext;
+            _ledgerAccounts = ledgerAccounts;
             _logger = logger;
+        }
+
+        public WalletSimulationPaymentGateway(
+            PaymentDbContext dbContext,
+            ILogger<WalletSimulationPaymentGateway> logger)
+            : this(
+                dbContext,
+                new LedgerAccountService(
+                    dbContext,
+                    TimeProvider.System,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<LedgerAccountService>.Instance),
+                logger)
+        {
         }
 
         public async Task<PaymentGatewayResult> ChargeAsync(PaymentRequest request, CancellationToken ct = default)
@@ -120,9 +138,12 @@ namespace payment_service.Services
             _logger.LogWarning(
                 "No wallet found for user {UserId}; lazily creating one with the default starting balance",
                 userId);
-            wallet = new UserWallet { UserId = userId };
-            _dbContext.Wallets.Add(wallet);
-            return wallet;
+            await _ledgerAccounts.EnsureUserWalletAccountAsync(
+                userId,
+                cancellationToken: ct);
+            return await _dbContext.Wallets.SingleAsync(
+                candidate => candidate.UserId == userId,
+                ct);
         }
 
         private static bool IsSimulatedDeclineCard(string cardNumber) => cardNumber == SimulatedDeclineCardNumber;
