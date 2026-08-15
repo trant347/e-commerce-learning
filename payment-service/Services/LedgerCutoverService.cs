@@ -74,7 +74,8 @@ namespace payment_service.Services
                     .EnsureSystemIssuanceAccountAsync(
                         currency,
                         cancellationToken);
-
+                var walletAccounts = new Dictionary<string, LedgerAccount>(
+                    StringComparer.OrdinalIgnoreCase);
                 foreach (var wallet in wallets)
                 {
                     var account = string.Equals(
@@ -89,6 +90,12 @@ namespace payment_service.Services
                             wallet.UserId,
                             currency,
                             cancellationToken);
+                    walletAccounts.Add(wallet.UserId, account);
+                }
+
+                foreach (var wallet in wallets)
+                {
+                    var account = walletAccounts[wallet.UserId];
                     var journalBalance = await CalculateBalanceAsync(
                         account.Id,
                         cancellationToken);
@@ -125,6 +132,7 @@ namespace payment_service.Services
                     WalletCount = wallets.Count
                 };
                 _dbContext.LedgerCutoverStates.Add(state);
+                await EnableProjectionWriteAsync(cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 await VerifyTrackedBalancesAsync(
                     wallets,
@@ -339,6 +347,19 @@ namespace payment_service.Services
             }
 
             return await _dbContext.Database.BeginTransactionAsync(
+                cancellationToken);
+        }
+
+        private Task EnableProjectionWriteAsync(
+            CancellationToken cancellationToken)
+        {
+            if (!UsesPostgres())
+            {
+                return Task.CompletedTask;
+            }
+
+            return _dbContext.Database.ExecuteSqlRawAsync(
+                "SELECT set_config('payment_service.allow_projection_update', 'on', true)",
                 cancellationToken);
         }
 

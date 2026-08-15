@@ -5,7 +5,7 @@
 1. Stop payment consumers and synchronous payment writers.
 2. Back up PostgreSQL.
 3. Apply EF Core migrations with a database-owner deployment credential.
-4. Set `LedgerCutover:Enabled` to `true`.
+4. Confirm `LedgerCutover:Enabled` is `true`.
 5. Start one payment-service instance. Startup creates opening entries, records
    `LedgerEpochAt`, and blocks if wallet or custody reconciliation fails.
 6. Start the remaining instances. They verify the existing cutover instead of repeating it.
@@ -13,6 +13,8 @@
 
 Leave `LedgerCutover:Enabled` enabled during the rollout so every restart verifies the cutover.
 The operation is idempotent and must never be repaired by editing or deleting journal rows.
+Keep `LegacyPayments:AllowUnledgeredPaymentsWithoutParties` set to `false`; requests without
+both wallet identities must not bypass the journal after cutover.
 
 ## Runtime database role
 
@@ -72,4 +74,3 @@ or logs.
 5. Correct an erroneous posting with a new reversal and corrected entry. Never update or delete
    posted journal history.
 6. Resume traffic only after reconciliation and the ledger health check are healthy.
-

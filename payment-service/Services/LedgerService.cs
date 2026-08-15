@@ -120,6 +120,7 @@ namespace payment_service.Services
 
                 try
                 {
+                    await EnableProjectionWriteAsync(cancellationToken);
                     await _dbContext.SaveChangesAsync(cancellationToken);
                 }
                 catch (DbUpdateException exception)
@@ -446,6 +447,19 @@ namespace payment_service.Services
             }
 
             return await _dbContext.Database.BeginTransactionAsync(
+                cancellationToken);
+        }
+
+        private Task EnableProjectionWriteAsync(
+            CancellationToken cancellationToken)
+        {
+            if (!UsesPostgres())
+            {
+                return Task.CompletedTask;
+            }
+
+            return _dbContext.Database.ExecuteSqlRawAsync(
+                "SELECT set_config('payment_service.allow_projection_update', 'on', true)",
                 cancellationToken);
         }
 
