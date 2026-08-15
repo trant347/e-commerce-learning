@@ -82,5 +82,45 @@ namespace payment_service.Tests
             Assert.NotEqual(first.Id, second.Id);
             Assert.Equal(2, await dbContext.Transactions.CountAsync());
         }
+
+        [Fact]
+        public async Task ProcessPaymentAsync_RetriedWalletTransfer_PostsLedgerOnce()
+        {
+            await using var dbContext = NewInMemoryContext();
+            var service = NewService(dbContext);
+            var sagaId = Guid.NewGuid();
+            var request = NewRequest(75m, sagaId);
+            request.PayerUserId = "alice";
+            request.PayeeUserId = "bob";
+            var retryRequest = NewRequest(75m, sagaId);
+            retryRequest.PayerUserId = "alice";
+            retryRequest.PayeeUserId = "bob";
+
+            var first = await service.ProcessPaymentAsync(request);
+            var retry = await service.ProcessPaymentAsync(retryRequest);
+
+            Assert.Equal(first.Id, retry.Id);
+            Assert.Equal(3, await dbContext.JournalEntries.CountAsync());
+            Assert.Equal(
+                925m,
+                (await dbContext.Wallets.SingleAsync(
+                    wallet => wallet.UserId == "alice")).Balance);
+            Assert.Equal(
+                1075m,
+                (await dbContext.Wallets.SingleAsync(
+                    wallet => wallet.UserId == "bob")).Balance);
+        }
+
+        [Fact]
+        public async Task ProcessPaymentAsync_ReusedSagaWithDifferentTerms_IsRejected()
+        {
+            await using var dbContext = NewInMemoryContext();
+            var service = NewService(dbContext);
+            var sagaId = Guid.NewGuid();
+            await service.ProcessPaymentAsync(NewRequest(75m, sagaId));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ProcessPaymentAsync(NewRequest(76m, sagaId)));
+        }
     }
 }

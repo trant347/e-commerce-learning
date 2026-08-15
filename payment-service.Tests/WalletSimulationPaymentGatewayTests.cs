@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using payment_service.Contracts;
 using payment_service.Data;
 using payment_service.Models;
@@ -55,6 +56,7 @@ namespace payment_service.Tests
             Assert.Equal(PaymentTransaction.StatusApproved, result.Status);
             Assert.Equal(700m, (await dbContext.Wallets.SingleAsync(w => w.UserId == "alice")).Balance);
             Assert.Equal(1300m, (await dbContext.Wallets.SingleAsync(w => w.UserId == "bob")).Balance);
+            Assert.Single(dbContext.JournalEntries);
         }
 
         [Fact]
@@ -75,6 +77,7 @@ namespace payment_service.Tests
             Assert.NotNull(result.DeclineReason);
             Assert.Contains("100.00", result.DeclineReason);
             Assert.Contains("300.00", result.DeclineReason);
+            Assert.Empty(dbContext.JournalEntries);
         }
 
         [Fact]
@@ -113,14 +116,46 @@ namespace payment_service.Tests
             await using var dbContext = NewInMemoryContext();
             var gateway = new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance);
 
-            var result = await gateway.ChargeAsync(NewRequest(200m, payerUserId: "newuser"));
+            var result = await gateway.ChargeAsync(NewRequest(
+                200m,
+                payerUserId: "newuser",
+                payeeUserId: "newpayee"));
             await dbContext.SaveChangesAsync();
 
             Assert.Equal(PaymentTransaction.StatusApproved, result.Status);
             var wallet = await dbContext.Wallets.SingleAsync(w => w.UserId == "newuser");
             Assert.Equal(UserWallet.DefaultStartingBalance - 200m, wallet.Balance);
             Assert.NotNull(wallet.LedgerAccountId);
-            Assert.Equal(1, await dbContext.JournalEntries.CountAsync());
+            Assert.Equal(3, await dbContext.JournalEntries.CountAsync());
+        }
+
+        [Fact]
+        public async Task ChargeAsync_MissingPartiesAndCompatibilityDisabled_Declines()
+        {
+            await using var dbContext = NewInMemoryContext();
+            var ledgerAccounts = new LedgerAccountService(
+                dbContext,
+                TimeProvider.System,
+                NullLogger<LedgerAccountService>.Instance);
+            var ledger = new LedgerService(
+                dbContext,
+                TimeProvider.System,
+                NullLogger<LedgerService>.Instance);
+            var gateway = new WalletSimulationPaymentGateway(
+                ledgerAccounts,
+                ledger,
+                Options.Create(new LegacyPaymentOptions()),
+                NullLogger<WalletSimulationPaymentGateway>.Instance);
+
+            var result = await gateway.ChargeAsync(
+                NewRequest(100m),
+                new PaymentGatewayContext(
+                    Guid.NewGuid(),
+                    "compatibility-disabled"));
+
+            Assert.Equal(PaymentTransaction.StatusDeclined, result.Status);
+            Assert.Contains("required", result.DeclineReason);
+            Assert.Empty(dbContext.JournalEntries);
         }
     }
 }

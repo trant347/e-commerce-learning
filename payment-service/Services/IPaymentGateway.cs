@@ -14,6 +14,10 @@ namespace payment_service.Services
         public string? DeclineReason { get; set; }
     }
 
+    public sealed record PaymentGatewayContext(
+        Guid PaymentTransactionId,
+        string IdempotencyKey);
+
     /// <summary>
     /// Decides whether a charge is approved or declined, and (for approved charges) moves
     /// money between payer and payee. This is the one seam PaymentService depends on for "did
@@ -23,6 +27,9 @@ namespace payment_service.Services
     /// </summary>
     public interface IPaymentGateway
     {
-        Task<PaymentGatewayResult> ChargeAsync(PaymentRequest request, CancellationToken ct = default);
+        Task<PaymentGatewayResult> ChargeAsync(
+            PaymentRequest request,
+            PaymentGatewayContext context,
+            CancellationToken ct = default);
     }
 }

@@ -1,6 +1,5 @@
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using payment_service.Contracts;
-using payment_service.Data;
 using payment_service.Models;
 
 namespace payment_service.Services
@@ -27,34 +26,47 @@ namespace payment_service.Services
         /// </summary>
         public const string SimulatedDeclineCardNumber = "4000000000000002";
 
-        private readonly PaymentDbContext _dbContext;
         private readonly ILedgerAccountService _ledgerAccounts;
+        private readonly ILedgerService _ledger;
+        private readonly LegacyPaymentOptions _options;
         private readonly ILogger<WalletSimulationPaymentGateway> _logger;
 
         public WalletSimulationPaymentGateway(
-            PaymentDbContext dbContext,
             ILedgerAccountService ledgerAccounts,
+            ILedgerService ledger,
+            IOptions<LegacyPaymentOptions> options,
             ILogger<WalletSimulationPaymentGateway> logger)
         {
-            _dbContext = dbContext;
             _ledgerAccounts = ledgerAccounts;
+            _ledger = ledger;
+            _options = options.Value;
             _logger = logger;
         }
 
         public WalletSimulationPaymentGateway(
-            PaymentDbContext dbContext,
+            payment_service.Data.PaymentDbContext dbContext,
             ILogger<WalletSimulationPaymentGateway> logger)
             : this(
-                dbContext,
                 new LedgerAccountService(
                     dbContext,
                     TimeProvider.System,
                     Microsoft.Extensions.Logging.Abstractions.NullLogger<LedgerAccountService>.Instance),
+                new LedgerService(
+                    dbContext,
+                    TimeProvider.System,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<LedgerService>.Instance),
+                Options.Create(new LegacyPaymentOptions
+                {
+                    AllowUnledgeredPaymentsWithoutParties = true
+                }),
                 logger)
         {
         }
 
-        public async Task<PaymentGatewayResult> ChargeAsync(PaymentRequest request, CancellationToken ct = default)
+        public async Task<PaymentGatewayResult> ChargeAsync(
+            PaymentRequest request,
+            PaymentGatewayContext context,
+            CancellationToken ct = default)
         {
             if (IsSimulatedDeclineCard(request.CreditCard.CardNumber))
             {
@@ -65,84 +77,87 @@ namespace payment_service.Services
                 };
             }
 
-            // Backward-compatible: callers that don't supply a PayerUserId (e.g. older tests, or
-            // flows that haven't been updated to pass one yet) skip the wallet-balance check
-            // entirely and are approved as before.
-            if (string.IsNullOrWhiteSpace(request.PayerUserId))
+            if (string.IsNullOrWhiteSpace(request.PayerUserId)
+                || string.IsNullOrWhiteSpace(request.PayeeUserId))
             {
-                return new PaymentGatewayResult { Status = PaymentTransaction.StatusApproved };
-            }
+                if (_options.AllowUnledgeredPaymentsWithoutParties)
+                {
+                    _logger.LogWarning(
+                        "Approving legacy payment transactionId={TransactionId} outside the ledger because payer or payee is missing",
+                        context.PaymentTransactionId);
+                    return new PaymentGatewayResult
+                    {
+                        Status = PaymentTransaction.StatusApproved
+                    };
+                }
 
-            var payerWallet = await GetOrCreateWalletAsync(request.PayerUserId, ct);
-            if (request.Amount > payerWallet.Balance)
-            {
-                _logger.LogInformation(
-                    "Declining payment of {Amount} for user {UserId}: balance is only {Balance}",
-                    request.Amount, request.PayerUserId, payerWallet.Balance);
                 return new PaymentGatewayResult
                 {
                     Status = PaymentTransaction.StatusDeclined,
-                    DeclineReason = $"Insufficient balance (your balance is {payerWallet.Balance:F2} {request.Currency}, " +
-                        $"but the charge is {request.Amount:F2} {request.Currency})"
+                    DeclineReason =
+                        "PayerUserId and PayeeUserId are required for wallet payments."
                 };
             }
 
-            payerWallet.Balance -= request.Amount;
-            payerWallet.UpdatedAt = DateTime.UtcNow;
+            await _ledgerAccounts.EnsureUserWalletAccountAsync(
+                request.PayerUserId,
+                request.Currency,
+                ct);
+            await _ledgerAccounts.EnsureUserWalletAccountAsync(
+                request.PayeeUserId,
+                request.Currency,
+                ct);
 
-            if (!string.IsNullOrWhiteSpace(request.PayeeUserId))
+            try
             {
-                var payeeWallet = await GetOrCreateWalletAsync(request.PayeeUserId, ct);
-                payeeWallet.Balance += request.Amount;
-                payeeWallet.UpdatedAt = DateTime.UtcNow;
+                await _ledger.PostTransferAsync(
+                    new LedgerTransfer
+                    {
+                        IdempotencyKey = context.IdempotencyKey,
+                        PaymentTransactionId = context.PaymentTransactionId,
+                        SagaId = request.SagaId,
+                        Operation = JournalEntry.OperationLegacyPayment,
+                        Currency = request.Currency,
+                        Amount = request.Amount,
+                        DebitAccount = new LedgerAccountReference(
+                            request.PayerUserId,
+                            LedgerAccount.TypeUserWallet),
+                        CreditAccount = new LedgerAccountReference(
+                            request.PayeeUserId,
+                            LedgerAccount.TypeUserWallet),
+                        Description = "Legacy synchronous wallet payment"
+                    },
+                    ct);
+            }
+            catch (InsufficientLedgerFundsException exception)
+            {
+                _logger.LogInformation(
+                    "Declining payment of {Amount} for user {UserId}: balance is only {Balance}",
+                    request.Amount,
+                    request.PayerUserId,
+                    exception.AvailableBalance);
+                return new PaymentGatewayResult
+                {
+                    Status = PaymentTransaction.StatusDeclined,
+                    DeclineReason =
+                        $"Insufficient balance (your balance is {exception.AvailableBalance:F2} " +
+                        $"{request.Currency}, but the charge is {request.Amount:F2} {request.Currency})"
+                };
             }
 
             return new PaymentGatewayResult { Status = PaymentTransaction.StatusApproved };
         }
 
-        private async Task<UserWallet> GetOrCreateWalletAsync(string userId, CancellationToken ct)
+        public Task<PaymentGatewayResult> ChargeAsync(
+            PaymentRequest request,
+            CancellationToken ct = default)
         {
-            UserWallet? wallet;
-            if (_dbContext.Database.IsRelational())
-            {
-                // Pessimistic row lock: SELECT ... FOR UPDATE blocks any other transaction from
-                // reading-for-update or writing this same wallet row until PaymentService's
-                // surrounding transaction commits or rolls back. Without this, two concurrent
-                // charges against the same wallet could both read the same balance, both pass
-                // the "can afford it" check below, and both deduct — driving the balance
-                // negative (or worse, racing each other's writes). Requires an ambient
-                // transaction to actually hold the lock across statements; see
-                // PaymentService.ProcessPaymentAsync, which begins one before calling the
-                // gateway.
-                wallet = await _dbContext.Wallets
-                    .FromSqlInterpolated($"SELECT * FROM user_wallets WHERE \"UserId\" = {userId} FOR UPDATE")
-                    .SingleOrDefaultAsync(ct);
-            }
-            else
-            {
-                // The in-memory provider (used by unit tests) doesn't support raw SQL/row
-                // locking; tests don't exercise concurrent requests against the same DbContext
-                // anyway, so a plain read is sufficient there.
-                wallet = await _dbContext.Wallets.FirstOrDefaultAsync(w => w.UserId == userId, ct);
-            }
-
-            if (wallet != null)
-            {
-                return wallet;
-            }
-
-            // Safety net: in production a wallet should already exist from the USER_REGISTERED
-            // Kafka event (see UserRegisteredConsumerWorker), but lazily create one here so a
-            // user who somehow has no wallet on record (e.g. pre-existing/seeded test data) isn't
-            // unfairly blocked from ever transacting.
-            _logger.LogWarning(
-                "No wallet found for user {UserId}; lazily creating one with the default starting balance",
-                userId);
-            await _ledgerAccounts.EnsureUserWalletAccountAsync(
-                userId,
-                cancellationToken: ct);
-            return await _dbContext.Wallets.SingleAsync(
-                candidate => candidate.UserId == userId,
+            var transactionId = Guid.NewGuid();
+            return ChargeAsync(
+                request,
+                new PaymentGatewayContext(
+                    transactionId,
+                    $"{JournalEntry.OperationLegacyPayment}:{transactionId:D}"),
                 ct);
         }
 
