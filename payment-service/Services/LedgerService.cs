@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using System.Diagnostics;
 using payment_service.Data;
 using payment_service.Models;
+using payment_service.Observability;
 
 namespace payment_service.Services
 {
@@ -44,6 +46,7 @@ namespace payment_service.Services
             LedgerTransfer transfer,
             CancellationToken cancellationToken = default)
         {
+            var stopwatch = Stopwatch.StartNew();
             var normalized = ValidateAndNormalize(transfer);
             await using var ownedTransaction = await BeginOwnedTransactionAsync(
                 cancellationToken);
@@ -70,6 +73,10 @@ namespace payment_service.Services
                     await CommitOwnedTransactionAsync(
                         ownedTransaction,
                         cancellationToken);
+                    RecordPostingDuration(
+                        stopwatch,
+                        normalized,
+                        "duplicate");
                     return new LedgerPostingResult(existing, WasAlreadyPosted: true);
                 }
 
@@ -142,6 +149,10 @@ namespace payment_service.Services
                     await CommitOwnedTransactionAsync(
                         ownedTransaction,
                         cancellationToken);
+                    RecordPostingDuration(
+                        stopwatch,
+                        normalized,
+                        "duplicate");
                     return new LedgerPostingResult(winner, WasAlreadyPosted: true);
                 }
 
@@ -154,17 +165,54 @@ namespace payment_service.Services
                     entry.Operation,
                     normalized.Amount,
                     normalized.Currency);
+                PaymentSagaMetrics.LedgerPostings.Add(
+                    1,
+                    new KeyValuePair<string, object?>(
+                        "operation",
+                        normalized.Operation),
+                    new KeyValuePair<string, object?>(
+                        "currency",
+                        normalized.Currency));
+                RecordPostingDuration(stopwatch, normalized, "posted");
                 return new LedgerPostingResult(entry, WasAlreadyPosted: false);
             }
-            catch
+            catch (Exception exception)
             {
                 if (ownedTransaction != null)
                 {
                     await ownedTransaction.RollbackAsync(cancellationToken);
                 }
 
+                PaymentSagaMetrics.LedgerPostingFailures.Add(
+                    1,
+                    new KeyValuePair<string, object?>(
+                        "operation",
+                        normalized.Operation),
+                    new KeyValuePair<string, object?>(
+                        "currency",
+                        normalized.Currency),
+                    new KeyValuePair<string, object?>(
+                        "reason",
+                        exception.GetType().Name));
+                RecordPostingDuration(stopwatch, normalized, "failed");
                 throw;
             }
+        }
+
+        private static void RecordPostingDuration(
+            Stopwatch stopwatch,
+            NormalizedTransfer transfer,
+            string outcome)
+        {
+            PaymentSagaMetrics.LedgerPostingDuration.Record(
+                stopwatch.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>(
+                    "operation",
+                    transfer.Operation),
+                new KeyValuePair<string, object?>(
+                    "currency",
+                    transfer.Currency),
+                new KeyValuePair<string, object?>("outcome", outcome));
         }
 
         private async Task<AccountPair> ResolveAndLockAccountsAsync(

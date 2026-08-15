@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using payment_service.Data;
 using payment_service.Models;
+using payment_service.Observability;
 using payment_service.Services;
 using Xunit;
 
@@ -155,6 +156,7 @@ namespace payment_service.Tests
                 provider,
                 NullLogger<CustodyReconciliationWorker>.Instance,
                 TimeProvider.System,
+                new LedgerReconciliationHealthState(),
                 configuration);
         }
 

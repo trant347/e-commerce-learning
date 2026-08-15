@@ -55,6 +55,8 @@ builder.Services.Configure<LedgerCutoverOptions>(
     builder.Configuration.GetSection("LedgerCutover"));
 builder.Services.Configure<PaymentMethodTokenOptions>(builder.Configuration.GetSection("PaymentMethodTokens"));
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<
+    payment_service.Observability.LedgerReconciliationHealthState>();
 builder.Services.AddScoped<IPaymentMethodTokenService, PaymentMethodTokenService>();
 builder.Services.AddScoped<IPaymentMethodTokenCleanupService, PaymentMethodTokenCleanupService>();
 builder.Services.AddScoped<IEscrowService, EscrowService>();
@@ -84,7 +86,8 @@ builder.Services.AddSingleton<IConsulClient, ConsulClient>(p =>
 });
 builder.Services.AddHostedService<payment_service.ConsulConfig.ConsulHostedService>();
 
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck<payment_service.Observability.LedgerHealthCheck>("ledger");
 
 var app = builder.Build();
 

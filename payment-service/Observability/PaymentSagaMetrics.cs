@@ -35,5 +35,23 @@ namespace payment_service.Observability
                 "USD");
         public static readonly Histogram<long> LedgerAnomalies =
             s_meter.CreateHistogram<long>("payment_ledger.anomalies");
+        public static readonly Counter<long> LedgerPostings =
+            s_meter.CreateCounter<long>("payment_ledger.postings");
+        public static readonly Counter<long> LedgerPostingFailures =
+            s_meter.CreateCounter<long>("payment_ledger.posting.failures");
+        public static readonly Histogram<double> LedgerPostingDuration =
+            s_meter.CreateHistogram<double>(
+                "payment_ledger.posting.duration",
+                "ms");
+        public static readonly Histogram<long> UnbalancedJournalEntries =
+            s_meter.CreateHistogram<long>(
+                "payment_ledger.reconciliation.unbalanced_entries");
+        public static readonly Histogram<long> MissingJournalLinks =
+            s_meter.CreateHistogram<long>(
+                "payment_ledger.reconciliation.missing_links");
+        public static readonly Histogram<double> OldestUnreconciledEntryAge =
+            s_meter.CreateHistogram<double>(
+                "payment_ledger.reconciliation.oldest_unreconciled_age",
+                "s");
     }
 }

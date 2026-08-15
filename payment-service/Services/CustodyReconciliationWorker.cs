@@ -16,6 +16,7 @@ namespace payment_service.Services
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<CustodyReconciliationWorker> _logger;
         private readonly TimeProvider _timeProvider;
+        private readonly LedgerReconciliationHealthState _healthState;
         private readonly string _custodyUserId;
         private readonly TimeSpan _pollInterval;
 
@@ -23,11 +24,13 @@ namespace payment_service.Services
             IServiceProvider serviceProvider,
             ILogger<CustodyReconciliationWorker> logger,
             TimeProvider timeProvider,
+            LedgerReconciliationHealthState healthState,
             IConfiguration configuration)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
             _timeProvider = timeProvider;
+            _healthState = healthState;
             _custodyUserId = configuration["Escrow:CustodyUserId"]?.Trim()
                 ?? throw new InvalidOperationException(
                     "Escrow:CustodyUserId is required.");
@@ -231,6 +234,25 @@ namespace payment_service.Services
                 + closedAccountPostingCount
                 + appendOnlyProtectionMissingCount;
             PaymentSagaMetrics.LedgerAnomalies.Record(ledgerAnomalyCount);
+            PaymentSagaMetrics.UnbalancedJournalEntries.Record(
+                unbalancedEntryCount);
+            PaymentSagaMetrics.MissingJournalLinks.Record(
+                missingApprovedJournalCount
+                + escrowJournalLinkMismatchCount);
+            var oldestUnreconciledCreatedAt = authoritativeTransactions
+                .Where(payment =>
+                    payment.Status == PaymentTransaction.StatusApproved
+                    && IsMoneyMovement(payment)
+                    && entriesByPaymentTransaction
+                        .GetValueOrDefault(payment.Id)?.Count != 1)
+                .Select(payment => (DateTime?)payment.CreatedAt)
+                .Min();
+            PaymentSagaMetrics.OldestUnreconciledEntryAge.Record(
+                oldestUnreconciledCreatedAt.HasValue
+                    ? Math.Max(
+                        0,
+                        (now - oldestUnreconciledCreatedAt.Value).TotalSeconds)
+                    : 0);
 
             if (mismatch != 0m || ledgerAnomalyCount != 0)
             {
@@ -261,7 +283,7 @@ namespace payment_service.Services
                     fundedEscrows.Count);
             }
 
-            return new CustodyReconciliationResult(
+            var result = new CustodyReconciliationResult(
                 custodyBalance,
                 expectedBalance,
                 fundedEscrows.Count,
@@ -276,6 +298,8 @@ namespace payment_service.Services
                 negativeBalanceCount,
                 closedAccountPostingCount,
                 appendOnlyProtectionMissingCount);
+            _healthState.Update(result, _timeProvider.GetUtcNow());
+            return result;
         }
 
         private static decimal CalculateBalance(
