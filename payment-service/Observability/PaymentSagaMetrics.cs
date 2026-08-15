@@ -29,5 +29,11 @@ namespace payment_service.Observability
             s_meter.CreateHistogram<double>("payment_saga.escrow.value", "USD");
         public static readonly Histogram<double> CustodyMismatch =
             s_meter.CreateHistogram<double>("payment_saga.custody.mismatch", "USD");
+        public static readonly Histogram<double> LedgerProjectionMismatch =
+            s_meter.CreateHistogram<double>(
+                "payment_ledger.projection.mismatch",
+                "USD");
+        public static readonly Histogram<long> LedgerAnomalies =
+            s_meter.CreateHistogram<long>("payment_ledger.anomalies");
     }
 }
