@@ -47,6 +47,7 @@ builder.Services.AddScoped<payment_service.Services.IPaymentGateway, payment_ser
 builder.Services.AddScoped<payment_service.Services.IWalletService, payment_service.Services.WalletService>();
 builder.Services.AddScoped<ILedgerAccountService, LedgerAccountService>();
 builder.Services.AddScoped<ILedgerService, LedgerService>();
+builder.Services.AddScoped<ILedgerQueryService, LedgerQueryService>();
 builder.Services.Configure<LegacyPaymentOptions>(
     builder.Configuration.GetSection("LegacyPayments"));
 builder.Services.Configure<PaymentMethodTokenOptions>(builder.Configuration.GetSection("PaymentMethodTokens"));
