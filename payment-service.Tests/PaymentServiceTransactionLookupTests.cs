@@ -38,7 +38,10 @@ namespace payment_service.Tests
         };
 
         private static PaymentService NewService(PaymentDbContext dbContext) =>
-            new(dbContext, new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance), NullLogger<PaymentService>.Instance);
+            new(
+                dbContext,
+                TestPaymentServices.CreateLegacyGateway(dbContext),
+                NullLogger<PaymentService>.Instance);
 
         [Fact]
         public async Task GetTransactionBySagaIdAsync_KnownSagaId_ReturnsTransaction()

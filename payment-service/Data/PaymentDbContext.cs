@@ -17,6 +17,7 @@ namespace payment_service.Data
         public DbSet<LedgerAccount> LedgerAccounts => Set<LedgerAccount>();
         public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
         public DbSet<JournalLine> JournalLines => Set<JournalLine>();
+        public DbSet<LedgerCutoverState> LedgerCutoverStates => Set<LedgerCutoverState>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -250,6 +251,24 @@ namespace payment_service.Data
                     table.HasCheckConstraint(
                         "CK_journal_lines_amount_positive",
                         "\"Amount\" > 0");
+                });
+            });
+
+            modelBuilder.Entity<LedgerCutoverState>(entity =>
+            {
+                entity.ToTable("ledger_cutover_state");
+                entity.HasKey(state => state.Id);
+                entity.ToTable(table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_ledger_cutover_state_singleton",
+                        "\"Id\" = 1");
+                    table.HasCheckConstraint(
+                        "CK_ledger_cutover_state_currency_valid",
+                        "length(\"Currency\") = 3 AND \"Currency\" = upper(\"Currency\")");
+                    table.HasCheckConstraint(
+                        "CK_ledger_cutover_state_wallet_count_non_negative",
+                        "\"WalletCount\" >= 0");
                 });
             });
         }

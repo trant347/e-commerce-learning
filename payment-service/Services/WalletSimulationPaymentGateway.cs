@@ -43,26 +43,6 @@ namespace payment_service.Services
             _logger = logger;
         }
 
-        public WalletSimulationPaymentGateway(
-            payment_service.Data.PaymentDbContext dbContext,
-            ILogger<WalletSimulationPaymentGateway> logger)
-            : this(
-                new LedgerAccountService(
-                    dbContext,
-                    TimeProvider.System,
-                    Microsoft.Extensions.Logging.Abstractions.NullLogger<LedgerAccountService>.Instance),
-                new LedgerService(
-                    dbContext,
-                    TimeProvider.System,
-                    Microsoft.Extensions.Logging.Abstractions.NullLogger<LedgerService>.Instance),
-                Options.Create(new LegacyPaymentOptions
-                {
-                    AllowUnledgeredPaymentsWithoutParties = true
-                }),
-                logger)
-        {
-        }
-
         public async Task<PaymentGatewayResult> ChargeAsync(
             PaymentRequest request,
             PaymentGatewayContext context,

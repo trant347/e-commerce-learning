@@ -48,7 +48,7 @@ namespace payment_service.Tests
             dbContext.Wallets.Add(new UserWallet { UserId = "alice", Balance = 1000m });
             dbContext.Wallets.Add(new UserWallet { UserId = "bob", Balance = 1000m });
             await dbContext.SaveChangesAsync();
-            var gateway = new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance);
+            var gateway = TestPaymentServices.CreateLegacyGateway(dbContext);
 
             var result = await gateway.ChargeAsync(NewRequest(300m, payerUserId: "alice", payeeUserId: "bob"));
             await dbContext.SaveChangesAsync();
@@ -66,7 +66,7 @@ namespace payment_service.Tests
             dbContext.Wallets.Add(new UserWallet { UserId = "alice", Balance = 100m });
             dbContext.Wallets.Add(new UserWallet { UserId = "bob", Balance = 1000m });
             await dbContext.SaveChangesAsync();
-            var gateway = new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance);
+            var gateway = TestPaymentServices.CreateLegacyGateway(dbContext);
 
             var result = await gateway.ChargeAsync(NewRequest(300m, payerUserId: "alice", payeeUserId: "bob"));
             await dbContext.SaveChangesAsync();
@@ -86,7 +86,7 @@ namespace payment_service.Tests
             await using var dbContext = NewInMemoryContext();
             dbContext.Wallets.Add(new UserWallet { UserId = "alice", Balance = 1000m });
             await dbContext.SaveChangesAsync();
-            var gateway = new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance);
+            var gateway = TestPaymentServices.CreateLegacyGateway(dbContext);
 
             var request = NewRequest(10m, payerUserId: "alice");
             request.CreditCard.CardNumber = WalletSimulationPaymentGateway.SimulatedDeclineCardNumber;
@@ -102,7 +102,7 @@ namespace payment_service.Tests
         public async Task ChargeAsync_NoPayerUserId_SkipsBalanceCheckAndApproves()
         {
             await using var dbContext = NewInMemoryContext();
-            var gateway = new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance);
+            var gateway = TestPaymentServices.CreateLegacyGateway(dbContext);
 
             var result = await gateway.ChargeAsync(NewRequest(1_000_000m));
 
@@ -114,7 +114,7 @@ namespace payment_service.Tests
         public async Task ChargeAsync_PayerWithNoExistingWallet_LazilyCreatesOneWithDefaultBalance()
         {
             await using var dbContext = NewInMemoryContext();
-            var gateway = new WalletSimulationPaymentGateway(dbContext, NullLogger<WalletSimulationPaymentGateway>.Instance);
+            var gateway = TestPaymentServices.CreateLegacyGateway(dbContext);
 
             var result = await gateway.ChargeAsync(NewRequest(
                 200m,

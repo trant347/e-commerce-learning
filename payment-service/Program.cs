@@ -48,8 +48,11 @@ builder.Services.AddScoped<payment_service.Services.IWalletService, payment_serv
 builder.Services.AddScoped<ILedgerAccountService, LedgerAccountService>();
 builder.Services.AddScoped<ILedgerService, LedgerService>();
 builder.Services.AddScoped<ILedgerQueryService, LedgerQueryService>();
+builder.Services.AddScoped<ILedgerCutoverService, LedgerCutoverService>();
 builder.Services.Configure<LegacyPaymentOptions>(
     builder.Configuration.GetSection("LegacyPayments"));
+builder.Services.Configure<LedgerCutoverOptions>(
+    builder.Configuration.GetSection("LedgerCutover"));
 builder.Services.Configure<PaymentMethodTokenOptions>(builder.Configuration.GetSection("PaymentMethodTokens"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IPaymentMethodTokenService, PaymentMethodTokenService>();
@@ -62,6 +65,7 @@ builder.Services.Configure<PaymentResultProducerOptions>(
 builder.Services.AddSingleton<IPaymentResultProducer, PaymentResultProducer>();
 builder.Services.AddSingleton<IKafkaDeadLetterProducer, KafkaDeadLetterProducer>();
 builder.Services.AddHostedService<CustodyWalletInitializer>();
+builder.Services.AddHostedService<LedgerCutoverInitializer>();
 builder.Services.AddHostedService<PaymentMethodTokenCleanupWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.UserRegisteredConsumerWorker>();
 builder.Services.AddHostedService<payment_service.MessageQueue.PaymentRequestConsumerWorker>();
