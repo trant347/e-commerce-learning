@@ -14,6 +14,9 @@ namespace payment_service.Data
         public DbSet<PaymentMethodTokenRecord> PaymentMethodTokens => Set<PaymentMethodTokenRecord>();
         public DbSet<EscrowRecord> Escrows => Set<EscrowRecord>();
         public DbSet<PaymentResultOutbox> PaymentResultOutbox => Set<PaymentResultOutbox>();
+        public DbSet<LedgerAccount> LedgerAccounts => Set<LedgerAccount>();
+        public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
+        public DbSet<JournalLine> JournalLines => Set<JournalLine>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -107,6 +110,135 @@ namespace payment_service.Data
                 entity.ToTable(table => table.HasCheckConstraint(
                     "CK_payment_result_outbox_dispatch_status_valid",
                     "\"DispatchStatus\" IN ('PENDING', 'CLAIMED', 'DISPATCHED')"));
+            });
+
+            modelBuilder.Entity<LedgerAccount>(entity =>
+            {
+                entity.ToTable("ledger_accounts");
+                entity.HasKey(account => account.Id);
+                entity.HasIndex(account => new
+                    {
+                        account.OwnerUserId,
+                        account.AccountType,
+                        account.Currency
+                    })
+                    .IsUnique()
+                    .HasFilter("\"OwnerUserId\" IS NOT NULL")
+                    .HasDatabaseName("IX_ledger_accounts_owner_type_currency");
+                entity.HasIndex(account => account.Currency)
+                    .IsUnique()
+                    .HasFilter("\"AccountType\" = 'SYSTEM_ISSUANCE'")
+                    .HasDatabaseName("IX_ledger_accounts_system_issuance_currency");
+                entity.ToTable(table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_ledger_accounts_account_type_valid",
+                        "\"AccountType\" IN ('USER_WALLET', 'ESCROW_CUSTODY', 'SYSTEM_ISSUANCE')");
+                    table.HasCheckConstraint(
+                        "CK_ledger_accounts_status_valid",
+                        "\"Status\" IN ('ACTIVE', 'CLOSED')");
+                    table.HasCheckConstraint(
+                        "CK_ledger_accounts_currency_valid",
+                        "length(\"Currency\") = 3 AND \"Currency\" = upper(\"Currency\")");
+                    table.HasCheckConstraint(
+                        "CK_ledger_accounts_closed_at_valid",
+                        "(\"Status\" = 'ACTIVE' AND \"ClosedAt\" IS NULL) OR " +
+                        "(\"Status\" = 'CLOSED' AND \"ClosedAt\" IS NOT NULL)");
+                    table.HasCheckConstraint(
+                        "CK_ledger_accounts_owner_valid",
+                        "(\"AccountType\" = 'SYSTEM_ISSUANCE' AND \"OwnerUserId\" IS NULL) OR " +
+                        "(\"AccountType\" <> 'SYSTEM_ISSUANCE' AND \"OwnerUserId\" IS NOT NULL)");
+                });
+            });
+
+            modelBuilder.Entity<JournalEntry>(entity =>
+            {
+                entity.ToTable("journal_entries");
+                entity.HasKey(entry => entry.Id);
+                entity.HasIndex(entry => entry.IdempotencyKey)
+                    .IsUnique()
+                    .HasDatabaseName("IX_journal_entries_idempotency_key");
+                entity.HasIndex(entry => entry.PaymentTransactionId)
+                    .IsUnique()
+                    .HasFilter("\"PaymentTransactionId\" IS NOT NULL")
+                    .HasDatabaseName("IX_journal_entries_payment_transaction_id");
+                entity.HasIndex(entry => entry.SagaId)
+                    .HasFilter("\"SagaId\" IS NOT NULL")
+                    .HasDatabaseName("IX_journal_entries_saga_id");
+                entity.HasIndex(entry => entry.EscrowId)
+                    .HasFilter("\"EscrowId\" IS NOT NULL")
+                    .HasDatabaseName("IX_journal_entries_escrow_id");
+                entity.HasIndex(entry => entry.BookingId)
+                    .HasFilter("\"BookingId\" IS NOT NULL")
+                    .HasDatabaseName("IX_journal_entries_booking_id");
+                entity.HasIndex(entry => entry.ReversesJournalEntryId)
+                    .IsUnique()
+                    .HasFilter("\"ReversesJournalEntryId\" IS NOT NULL")
+                    .HasDatabaseName("IX_journal_entries_reverses_journal_entry_id");
+                entity.HasOne(entry => entry.PaymentTransaction)
+                    .WithOne()
+                    .HasForeignKey<JournalEntry>(entry => entry.PaymentTransactionId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne(entry => entry.ReversesJournalEntry)
+                    .WithOne(entry => entry.ReversalJournalEntry)
+                    .HasForeignKey<JournalEntry>(entry => entry.ReversesJournalEntryId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.ToTable(table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_journal_entries_operation_valid",
+                        "\"Operation\" IN ('OPENING_BALANCE', 'USER_REGISTRATION_CREDIT', " +
+                        "'LEGACY_PAYMENT', 'FUND_ESCROW', 'RELEASE_ESCROW', 'REFUND_ESCROW', " +
+                        "'REVERSAL', 'ADMIN_ADJUSTMENT')");
+                    table.HasCheckConstraint(
+                        "CK_journal_entries_currency_valid",
+                        "length(\"Currency\") = 3 AND \"Currency\" = upper(\"Currency\")");
+                    table.HasCheckConstraint(
+                        "CK_journal_entries_reversal_valid",
+                        "(\"Operation\" = 'REVERSAL' AND \"ReversesJournalEntryId\" IS NOT NULL) OR " +
+                        "(\"Operation\" <> 'REVERSAL' AND \"ReversesJournalEntryId\" IS NULL)");
+                });
+            });
+
+            modelBuilder.Entity<JournalLine>(entity =>
+            {
+                entity.ToTable("journal_lines");
+                entity.HasKey(line => line.Id);
+                entity.Property(line => line.Amount).HasColumnType("numeric(18,2)");
+                entity.HasIndex(line => new
+                    {
+                        line.JournalEntryId,
+                        line.LineNumber
+                    })
+                    .IsUnique()
+                    .HasDatabaseName("IX_journal_lines_entry_line_number");
+                entity.HasIndex(line => new
+                    {
+                        line.AccountId,
+                        line.CreatedAt,
+                        line.Id
+                    })
+                    .HasDatabaseName("IX_journal_lines_account_created_id");
+                entity.HasOne(line => line.JournalEntry)
+                    .WithMany(entry => entry.Lines)
+                    .HasForeignKey(line => line.JournalEntryId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne(line => line.Account)
+                    .WithMany(account => account.JournalLines)
+                    .HasForeignKey(line => line.AccountId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.ToTable(table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_journal_lines_line_number_positive",
+                        "\"LineNumber\" > 0");
+                    table.HasCheckConstraint(
+                        "CK_journal_lines_direction_valid",
+                        "\"Direction\" IN ('DEBIT', 'CREDIT')");
+                    table.HasCheckConstraint(
+                        "CK_journal_lines_amount_positive",
+                        "\"Amount\" > 0");
+                });
             });
         }
     }
