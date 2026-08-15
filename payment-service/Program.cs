@@ -46,6 +46,7 @@ builder.Services.AddScoped<IPaymentService, payment_service.Services.PaymentServ
 builder.Services.AddScoped<payment_service.Services.IPaymentGateway, payment_service.Services.WalletSimulationPaymentGateway>();
 builder.Services.AddScoped<payment_service.Services.IWalletService, payment_service.Services.WalletService>();
 builder.Services.AddScoped<ILedgerAccountService, LedgerAccountService>();
+builder.Services.AddScoped<ILedgerService, LedgerService>();
 builder.Services.Configure<PaymentMethodTokenOptions>(builder.Configuration.GetSection("PaymentMethodTokens"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IPaymentMethodTokenService, PaymentMethodTokenService>();
