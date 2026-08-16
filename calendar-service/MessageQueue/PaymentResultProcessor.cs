@@ -160,6 +160,12 @@ namespace calendar_service.MessageQueue
                         $"Escrow funds of {result.Amount:0.00} {result.Currency} were paid for the completed booking.",
                         "VIEW_INCOMING_BOOKING_REQUEST",
                         actionPayload));
+                    await _notifications.PublishAsync(new BookingNotification(
+                        "BOOKING_COMPLETED",
+                        booking.RequesterUsername,
+                        $"Your booking is complete. Escrow funds of {result.Amount:0.00} {result.Currency} were released to {booking.TaskMasterUsername}.",
+                        "VIEW_BOOKING_DETAILS",
+                        actionPayload));
                     break;
 
                 case PaymentOperation.RefundEscrow:

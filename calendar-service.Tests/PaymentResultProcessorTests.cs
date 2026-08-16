@@ -42,7 +42,7 @@ namespace calendar_service.Tests
         }
 
         [Fact]
-        public async Task ProcessAsync_ApprovedRelease_CompletesBookingAndNotifiesTaskMaster()
+        public async Task ProcessAsync_ApprovedRelease_CompletesBookingAndNotifiesBothParties()
         {
             var context = BuildContext(PaymentOperation.ReleaseEscrow);
             var booking = FinalBooking(
@@ -59,9 +59,24 @@ namespace calendar_service.Tests
             var outcome = await context.Processor.ProcessAsync(context.Result);
 
             Assert.Equal(PaymentResultProcessingOutcome.Applied, outcome);
-            var notification = Assert.Single(context.Published);
-            Assert.Equal("BOOKING_ESCROW_RELEASED", notification.Type);
-            Assert.Equal("taskmaster", notification.RecipientUsername);
+            Assert.Collection(
+                context.Published,
+                notification =>
+                {
+                    Assert.Equal("BOOKING_ESCROW_RELEASED", notification.Type);
+                    Assert.Equal("taskmaster", notification.RecipientUsername);
+                    Assert.Equal(
+                        "VIEW_INCOMING_BOOKING_REQUEST",
+                        notification.ActionType);
+                },
+                notification =>
+                {
+                    Assert.Equal("BOOKING_COMPLETED", notification.Type);
+                    Assert.Equal("requester", notification.RecipientUsername);
+                    Assert.Equal(
+                        "VIEW_BOOKING_DETAILS",
+                        notification.ActionType);
+                });
             VerifyCompleted(context);
         }
 

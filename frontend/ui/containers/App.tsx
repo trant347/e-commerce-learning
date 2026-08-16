@@ -27,6 +27,7 @@ const AsyncIncomingBookings = React.lazy(() => import('./IncomingBookings'));
 const AsyncMyCalendar = React.lazy(() => import('./MyCalendar'));
 const AsyncSubmitProof = React.lazy(() => import('./SubmitProof'));
 const AsyncPayBooking = React.lazy(() => import('./PayBooking'));
+const AsyncBookingDetails = React.lazy(() => import('./BookingDetails'));
 
 export interface IAppContext {
     username: string
@@ -72,6 +73,7 @@ export default class App extends React.Component<{}, IAppContext> {
                                     <Route path="/my-calendar" element={<AsyncMyCalendar />} />
                                     <Route path="/booking/:id/submit-proof" element={<AsyncSubmitProof />} />
                                     <Route path="/booking/:id/pay" element={<AsyncPayBooking />} />
+                                    <Route path="/booking/:id/details" element={<AsyncBookingDetails />} />
                                 </Routes>
                             </React.Suspense>
                         </div>

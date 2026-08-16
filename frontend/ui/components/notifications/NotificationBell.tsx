@@ -22,6 +22,9 @@ export function resolveNotificationActionUrl(
     if (notificationType === 'BOOKING_REQUEST_ACCEPTED' && p.bookingId) {
         return `/booking/${p.bookingId}/pay`;
     }
+    if (notificationType === 'BOOKING_COMPLETED' && p.bookingId) {
+        return `/booking/${p.bookingId}/details`;
+    }
     if (!actionType) return null;
     switch (actionType) {
         case 'VIEW_MY_APPLICATION':    return '/my-application';
@@ -30,6 +33,7 @@ export function resolveNotificationActionUrl(
         case 'VIEW_INCOMING_BOOKING_REQUEST': return '/bookings/incoming';
         case 'VIEW_OUTGOING_BOOKING_REQUEST': return p.taskMasterId ? `/booking/${p.taskMasterId}` : '/';
         case 'VIEW_PAYMENT_REQUEST': return p.bookingId ? `/booking/${p.bookingId}/pay` : '/';
+        case 'VIEW_BOOKING_DETAILS': return p.bookingId ? `/booking/${p.bookingId}/details` : '/';
         default: return null;
     }
 }

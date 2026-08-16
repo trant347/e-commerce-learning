@@ -146,14 +146,16 @@ function formatSlot(b: Booking): string {
     return `${start.toLocaleString()} → ${endStr}`;
 }
 
-function BookingDetailsModal({
+export function BookingDetailsModal({
     booking,
     onUpdated,
     onClose,
+    viewer = 'taskMaster',
 }: {
     booking: Booking;
     onUpdated: (booking: Booking) => void;
     onClose: () => void;
+    viewer?: 'taskMaster' | 'requester';
 }) {
     const navigate = useNavigate();
     const [current, setCurrent] = React.useState(booking);
@@ -178,8 +180,14 @@ function BookingDetailsModal({
                 <Title>Booking details</Title>
 
                 <Field>
-                    <Label>Requested by</Label>
-                    <Value><strong>{booking.requesterUsername}</strong></Value>
+                    <Label>{viewer === 'requester' ? 'Task master' : 'Requested by'}</Label>
+                    <Value>
+                        <strong>
+                            {viewer === 'requester'
+                                ? booking.taskMasterUsername
+                                : booking.requesterUsername}
+                        </strong>
+                    </Value>
                 </Field>
 
                 <Field>
@@ -221,7 +229,7 @@ function BookingDetailsModal({
 
                 {booking.responseMessage && (
                     <Field>
-                        <Label>Your reply</Label>
+                        <Label>{viewer === 'requester' ? 'Task master reply' : 'Your reply'}</Label>
                         <Message style={{ background: '#fff4ce' }}>{booking.responseMessage}</Message>
                     </Field>
                 )}
@@ -255,12 +263,14 @@ function BookingDetailsModal({
 
                 <Actions>
                     {startError && <span style={{ color: '#db2828' }}>{startError}</span>}
-                    {current.status === 'ACCEPTED' && current.escrowStatus === 'FUNDED' && (
+                    {viewer === 'taskMaster'
+                        && current.status === 'ACCEPTED'
+                        && current.escrowStatus === 'FUNDED' && (
                         <SecondaryButton onClick={startWork} disabled={starting}>
                             {starting ? 'Starting...' : 'Start Work'}
                         </SecondaryButton>
                     )}
-                    {current.status === 'IN_PROGRESS' && (
+                    {viewer === 'taskMaster' && current.status === 'IN_PROGRESS' && (
                         <SecondaryButton onClick={() => navigate(`/booking/${current.id}/submit-proof`)}>
                             <i className="file alternate icon" /> Submit Proof &amp; Request Release
                         </SecondaryButton>

@@ -16,4 +16,20 @@ describe('resolveNotificationActionUrl', () => {
             'BOOKING_REQUEST_ACCEPTED',
         )).toBe('/booking/booking-1/pay');
     });
+
+    test('completed booking opens its details', () => {
+        expect(resolveNotificationActionUrl(
+            'VIEW_BOOKING_DETAILS',
+            { bookingId: 'booking-1', taskMasterId: 'taskmaster-1' },
+            'BOOKING_COMPLETED',
+        )).toBe('/booking/booking-1/details');
+    });
+
+    test('legacy completed notification also opens its details', () => {
+        expect(resolveNotificationActionUrl(
+            'VIEW_OUTGOING_BOOKING_REQUEST',
+            { bookingId: 'booking-1', taskMasterId: 'taskmaster-1' },
+            'BOOKING_COMPLETED',
+        )).toBe('/booking/booking-1/details');
+    });
 });
