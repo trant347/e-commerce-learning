@@ -1,8 +1,7 @@
-﻿using System.Diagnostics;
 using System.Security.Claims;
-using calendar_service.MessageQueue;
+using calendar_service.Contracts;
+using calendar_service.Filters;
 using calendar_service.Model;
-using calendar_service.Services;
 using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
 using Microsoft.AspNetCore.Mvc;
@@ -10,28 +9,38 @@ using Payment.Contracts.V1;
 
 namespace calendar_service.Controllers
 {
+    /// <summary>
+    /// HTTP API for creating, viewing, and progressing bookings through their lifecycle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// If an endpoint primarily manages another resource or requires substantial orchestration,
+    /// add it to that resource's controller/service instead of expanding this controller.
+    /// </para>
+    /// </remarks>
     [ApiController]
     [Route("api/booking")]
+    [TypeFilter(typeof(BookingExceptionFilter))]
     public class BookingController : ControllerBase
     {
         private readonly IBookingService _service;
         private readonly ITaskMasterApiClient _taskMasterClient;
         private readonly ISagaStateService _sagaStateService;
-        private readonly INotificationProducer _notifications;
-        private readonly IConfiguration _configuration;
+        private readonly IEscrowPaymentService _escrow;
+        private readonly IBookingNotifier _notifier;
 
         public BookingController(
             IBookingService service,
             ITaskMasterApiClient taskMasterClient,
             ISagaStateService sagaStateService,
-            INotificationProducer notifications,
-            IConfiguration configuration)
+            IEscrowPaymentService escrow,
+            IBookingNotifier notifier)
         {
             _service = service;
             _taskMasterClient = taskMasterClient;
             _sagaStateService = sagaStateService;
-            _notifications = notifications;
-            _configuration = configuration;
+            _escrow = escrow;
+            _notifier = notifier;
         }
 
         public class CreateBookingDto
@@ -72,7 +81,7 @@ namespace calendar_service.Controllers
         public async Task<IActionResult> GetTimetable(string taskMasterId)
         {
             var caller = CurrentUsername();
-            var isAdmin = User.IsInRole("ROLE_ADMIN") || User.IsInRole("ADMIN");
+            var isAdmin = IsAdmin();
 
             var tm = await _taskMasterClient.GetByIdAsync(taskMasterId, BearerFromRequest(), HttpContext.RequestAborted);
             var callerIsOwner = !string.IsNullOrEmpty(caller)
@@ -80,7 +89,7 @@ namespace calendar_service.Controllers
                 && string.Equals(caller, tm!.OwnerUsername, StringComparison.OrdinalIgnoreCase);
 
             var slots = await _service.GetTimetableAsync(taskMasterId, caller, isAdmin, callerIsOwner);
-            return Ok(slots);
+            return Ok(BookingResponse.FromMany(slots));
         }
 
         /// <summary>
@@ -111,30 +120,12 @@ namespace calendar_service.Controllers
                 return BadRequest("This TaskMaster does not have an owner and cannot be booked");
             }
 
-            try
-            {
-                var created = await _service.CreateAsync(
-                    dto.TaskMasterId, tm.OwnerUsername!, caller, dto.SlotStart, dto.DurationHours, dto.Message,
-                    dto.OfferedRatePerHour);
+            var created = await _service.CreateAsync(
+                dto.TaskMasterId, tm.OwnerUsername!, caller, dto.SlotStart, dto.DurationHours, dto.Message,
+                dto.OfferedRatePerHour);
 
-                await _notifications.PublishAsync(new
-                {
-                    type = "BOOKING_REQUEST_SUBMITTED",
-                    recipientUsername = tm.OwnerUsername,
-                    message = $"{caller} requested to book you from {created.SlotStart:yyyy-MM-dd HH:mm} to {created.SlotEnd:HH:mm} UTC.",
-                    actionType = "VIEW_INCOMING_BOOKING_REQUEST",
-                    actionPayload = new Dictionary<string, string>
-                    {
-                        { "bookingId", created.Id ?? string.Empty },
-                        { "taskMasterId", dto.TaskMasterId }
-                    }
-                });
-                return Ok(created);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new { error = ex.Message });
-            }
+            await _notifier.RequestSubmittedAsync(created, tm.OwnerUsername!);
+            return Ok(BookingResponse.From(created));
         }
 
         /// <summary>
@@ -149,7 +140,7 @@ namespace calendar_service.Controllers
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
             var list = await _service.ListIncomingForTaskMasterAsync(caller, status);
-            return Ok(list);
+            return Ok(BookingResponse.FromMany(list));
         }
 
         /// <summary>
@@ -164,21 +155,35 @@ namespace calendar_service.Controllers
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
             var list = await _service.ListOutgoingForRequesterAsync(caller, status);
-            return Ok(list);
+            return Ok(BookingResponse.FromMany(list));
         }
 
         /// <summary>
         /// GET <c>/api/booking/{id}</c> — returns a single booking by id.
         /// </summary>
+        /// <remarks>
+        /// A booking exposes both parties, the agreed price, the proof file and the latest
+        /// payment-saga projection, so it is readable only by the requester, the TaskMaster
+        /// owner, or an administrator. Use the timetable endpoint for public slot visibility.
+        /// </remarks>
         /// <response code="200">The booking.</response>
+        /// <response code="401">No authenticated caller.</response>
+        /// <response code="403">Caller is not a party to the booking.</response>
         /// <response code="404">No booking with that id.</response>
         [HttpGet("{id}")]
         public async Task<IActionResult> Get(string id)
         {
+            var caller = CurrentUsername();
+            if (string.IsNullOrEmpty(caller)) return Unauthorized();
+
             var item = await _service.GetByIdAsync(id);
             if (item == null) return NotFound();
-            await PopulateLatestPaymentAsync(item);
-            return Ok(item);
+            if (!CallerMayViewBooking(item, caller)) return Forbid();
+
+            var latestSaga = item.Id == null
+                ? null
+                : await _sagaStateService.GetLatestByBookingIdAsync(item.Id);
+            return Ok(BookingResponse.From(item).WithLatestPayment(latestSaga));
         }
 
         /// <summary>
@@ -197,20 +202,7 @@ namespace calendar_service.Controllers
             var booking = await _service.GetByIdAsync(saga.BookingId);
             if (booking == null) return NotFound();
 
-            var ownsBooking = string.Equals(
-                    booking.RequesterUsername,
-                    caller,
-                    StringComparison.OrdinalIgnoreCase)
-                || string.Equals(
-                    booking.TaskMasterUsername,
-                    caller,
-                    StringComparison.OrdinalIgnoreCase);
-            if (!ownsBooking
-                && !User.IsInRole("ROLE_ADMIN")
-                && !User.IsInRole("ADMIN"))
-            {
-                return Forbid();
-            }
+            if (!CallerMayViewBooking(booking, caller)) return Forbid();
 
             if (!saga.EscrowId.HasValue || string.IsNullOrWhiteSpace(saga.Operation))
             {
@@ -252,43 +244,15 @@ namespace calendar_service.Controllers
         {
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
-            try
+
+            var result = await _service.AcceptAsync(id, caller, body?.Message);
+
+            await _notifier.RequestAcceptedAsync(result.Accepted);
+            foreach (var declined in result.AutoDeclined)
             {
-                var result = await _service.AcceptAsync(id, caller, body?.Message);
-
-                await _notifications.PublishAsync(new
-                {
-                    type = "BOOKING_REQUEST_ACCEPTED",
-                    recipientUsername = result.Accepted.RequesterUsername,
-                    message = $"Your booking from {result.Accepted.SlotStart:yyyy-MM-dd HH:mm} to {result.Accepted.SlotEnd:HH:mm} UTC was accepted. Fund escrow to confirm the work.",
-                    actionType = "VIEW_PAYMENT_REQUEST",
-                    actionPayload = new Dictionary<string, string>
-                    {
-                        { "bookingId", result.Accepted.Id ?? string.Empty },
-                        { "taskMasterId", result.Accepted.TaskMasterId }
-                    }
-                });
-
-                foreach (var declined in result.AutoDeclined)
-                {
-                    await _notifications.PublishAsync(new
-                    {
-                        type = "BOOKING_REQUEST_DECLINED",
-                        recipientUsername = declined.RequesterUsername,
-                        message = $"Your booking from {declined.SlotStart:yyyy-MM-dd HH:mm} to {declined.SlotEnd:HH:mm} UTC was auto-declined (slot taken).",
-                        actionType = "VIEW_OUTGOING_BOOKING_REQUEST",
-                        actionPayload = new Dictionary<string, string>
-                        {
-                            { "bookingId", declined.Id ?? string.Empty },
-                            { "taskMasterId", declined.TaskMasterId }
-                        }
-                    });
-                }
-                return Ok(result.Accepted);
+                await _notifier.RequestAutoDeclinedAsync(declined);
             }
-            catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (KeyNotFoundException) { return NotFound(); }
-            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+            return Ok(BookingResponse.From(result.Accepted));
         }
 
         /// <summary>
@@ -305,27 +269,12 @@ namespace calendar_service.Controllers
         {
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
-            try
-            {
-                var updated = await _service.DeclineAsync(id, caller, body?.Message);
-                if (updated == null) return NotFound();
 
-                await _notifications.PublishAsync(new
-                {
-                    type = "BOOKING_REQUEST_DECLINED",
-                    recipientUsername = updated.RequesterUsername,
-                    message = $"Your booking from {updated.SlotStart:yyyy-MM-dd HH:mm} to {updated.SlotEnd:HH:mm} UTC was declined.",
-                    actionType = "VIEW_OUTGOING_BOOKING_REQUEST",
-                    actionPayload = new Dictionary<string, string>
-                    {
-                        { "bookingId", updated.Id ?? string.Empty },
-                        { "taskMasterId", updated.TaskMasterId }
-                    }
-                });
-                return Ok(updated);
-            }
-            catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+            var updated = await _service.DeclineAsync(id, caller, body?.Message);
+            if (updated == null) return NotFound();
+
+            await _notifier.RequestDeclinedAsync(updated);
+            return Ok(BookingResponse.From(updated));
         }
 
         /// <summary>
@@ -337,7 +286,7 @@ namespace calendar_service.Controllers
         /// <response code="401">No authenticated caller.</response>
         /// <response code="403">Caller is not the TaskMaster owner.</response>
         /// <response code="404">No booking with that id.</response>
-        /// <response code="409">Booking is not ACCEPTED.</response>
+        /// <response code="409">Booking is not ACCEPTED, or a release is already in flight.</response>
         [HttpPost("{id}/submit-proof")]
         public async Task<IActionResult> SubmitProof(string id, [FromBody] SubmitProofDto body)
         {
@@ -348,43 +297,23 @@ namespace calendar_service.Controllers
                 return BadRequest("proofFileUrl is required");
             }
 
-            try
+            var booking = await _service.GetByIdAsync(id);
+            if (booking == null) return NotFound();
+            if (!booking.EscrowId.HasValue)
             {
-                var booking = await _service.GetByIdAsync(id);
-                if (booking == null) return NotFound();
-                if (!booking.EscrowId.HasValue)
+                return Conflict(new
                 {
-                    return Conflict(new
-                    {
-                        error = "Proof submission requires an escrow-funded booking"
-                    });
-                }
-                if (await HasActiveOperationAsync(
-                        id,
-                        PaymentOperation.ReleaseEscrow))
-                {
-                    return Conflict(new
-                    {
-                        error = "Escrow release for this booking is already being processed"
-                    });
-                }
+                    error = "Proof submission requires an escrow-funded booking"
+                });
+            }
+            await _escrow.EnsureNoActiveOperationAsync(id, PaymentOperation.ReleaseEscrow);
 
-                var updated = await _service.RequestEscrowReleaseAsync(
-                    id,
-                    caller,
-                    body.ProofFileUrl);
-                var accepted = await EnqueueEscrowTransferAsync(
-                    updated,
-                    PaymentOperation.ReleaseEscrow);
-                return Accepted(accepted.StatusUrl, accepted);
-            }
-            catch (ActivePaymentSagaException ex)
-            {
-                return Conflict(new { error = ex.Message });
-            }
-            catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (KeyNotFoundException) { return NotFound(); }
-            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+            var updated = await _service.RequestEscrowReleaseAsync(id, caller, body.ProofFileUrl);
+            var accepted = await _escrow.EnqueueTransferAsync(
+                updated,
+                PaymentOperation.ReleaseEscrow,
+                HttpContext.RequestAborted);
+            return Accepted(accepted.StatusUrl, accepted);
         }
 
         /// <summary>
@@ -396,14 +325,8 @@ namespace calendar_service.Controllers
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
 
-            try
-            {
-                var updated = await _service.StartWorkAsync(id, caller);
-                return Ok(updated);
-            }
-            catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (KeyNotFoundException) { return NotFound(); }
-            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+            var updated = await _service.StartWorkAsync(id, caller);
+            return Ok(BookingResponse.From(updated));
         }
 
         /// <summary>
@@ -416,57 +339,27 @@ namespace calendar_service.Controllers
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
 
-            try
-            {
-                var existing = await _service.GetByIdAsync(id);
-                if (existing == null) return NotFound();
-                if (await HasActiveOperationAsync(
-                        id,
-                        PaymentOperation.RefundEscrow))
-                {
-                    return Conflict(new
-                    {
-                        error = "Escrow refund for this booking is already being processed"
-                    });
-                }
+            var existing = await _service.GetByIdAsync(id);
+            if (existing == null) return NotFound();
+            await _escrow.EnsureNoActiveOperationAsync(id, PaymentOperation.RefundEscrow);
 
-                var updated = await _service.RequestCancellationAsync(id, caller);
-                var refundRequested = updated.RefundRequestedAt.HasValue
-                    && updated.Status != Booking.StatusCancelled;
-                PaymentAcceptedResponseV1? accepted = null;
-                if (refundRequested)
-                {
-                    accepted = await EnqueueEscrowTransferAsync(
-                        updated,
-                        PaymentOperation.RefundEscrow);
-                }
+            var updated = await _service.RequestCancellationAsync(id, caller);
 
-                if (!refundRequested)
-                {
-                    await _notifications.PublishAsync(new
-                    {
-                        type = "BOOKING_CANCELLED",
-                        recipientUsername = updated.TaskMasterUsername,
-                        message = $"{updated.RequesterUsername} cancelled the booking.",
-                        actionType = "VIEW_INCOMING_BOOKING_REQUEST",
-                        actionPayload = new Dictionary<string, string>
-                        {
-                            { "bookingId", updated.Id ?? string.Empty },
-                            { "taskMasterId", updated.TaskMasterId }
-                        }
-                    });
-                }
-                return accepted == null
-                    ? Ok(updated)
-                    : Accepted(accepted.StatusUrl, accepted);
-            }
-            catch (ActivePaymentSagaException ex)
+            // A funded booking can't simply be dropped: the money has to travel back through the
+            // saga, so the caller gets 202 + a status URL instead of the cancelled booking.
+            var refundRequested = updated.RefundRequestedAt.HasValue
+                && updated.Status != Booking.StatusCancelled;
+            if (!refundRequested)
             {
-                return Conflict(new { error = ex.Message });
+                await _notifier.BookingCancelledAsync(updated);
+                return Ok(BookingResponse.From(updated));
             }
-            catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (KeyNotFoundException) { return NotFound(); }
-            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+
+            var accepted = await _escrow.EnqueueTransferAsync(
+                updated,
+                PaymentOperation.RefundEscrow,
+                HttpContext.RequestAborted);
+            return Accepted(accepted.StatusUrl, accepted);
         }
 
         /// <summary>
@@ -486,219 +379,44 @@ namespace calendar_service.Controllers
             var caller = CurrentUsername();
             if (string.IsNullOrEmpty(caller)) return Unauthorized();
             if (body == null) return BadRequest("Payment details are required");
-
-            return await EnqueueEscrowFundingAsync(id, body, caller);
-        }
-
-        private async Task<IActionResult> EnqueueEscrowFundingAsync(
-            string bookingId,
-            PayDto body,
-            string caller)
-        {
             if (string.IsNullOrWhiteSpace(body.PaymentMethodToken))
             {
                 return BadRequest("paymentMethodToken is required");
             }
 
-            var booking = await _service.GetByIdAsync(bookingId);
-            if (booking == null) return NotFound();
-            if (!string.Equals(booking.RequesterUsername, caller, StringComparison.OrdinalIgnoreCase))
-            {
-                return Forbid();
-            }
-            if (booking.Status != Booking.StatusAccepted)
-            {
-                return Conflict(new
-                {
-                    error = $"Booking is {booking.Status} and is not eligible for escrow funding"
-                });
-            }
-            if (booking.AgreedAmount is null or <= 0
-                || string.IsNullOrWhiteSpace(booking.AgreedCurrency))
-            {
-                return Conflict(new
-                {
-                    error = "Booking price and currency must be fixed before escrow funding"
-                });
-            }
-            if (booking.WorkStartedAt.HasValue)
-            {
-                return Conflict(new { error = "Work has already started for this booking" });
-            }
-            if (booking.EscrowId.HasValue
-                && booking.EscrowStatus != EscrowStatus.Pending)
-            {
-                return Conflict(new
-                {
-                    error = $"Booking escrow is {booking.EscrowStatus} and cannot be funded again"
-                });
-            }
-
-            var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(bookingId);
-            if (latestSaga?.Status == SagaState.StatusStarted)
-            {
-                return Conflict(new
-                {
-                    error = "Escrow funding for this booking is already being processed"
-                });
-            }
-
-            var escrowId = booking.EscrowId ?? Guid.NewGuid();
-            if (!booking.EscrowId.HasValue)
-            {
-                try
-                {
-                    booking = await _service.AttachEscrowAsync(bookingId, caller, escrowId);
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    return Forbid();
-                }
-                catch (KeyNotFoundException)
-                {
-                    return NotFound();
-                }
-                catch (InvalidOperationException ex)
-                {
-                    return Conflict(new { error = ex.Message });
-                }
-            }
-
-            var custodyUserId = _configuration["Escrow:CustodyUserId"];
-            if (string.IsNullOrWhiteSpace(custodyUserId))
-            {
-                throw new InvalidOperationException("Escrow:CustodyUserId is required");
-            }
-
-            var sagaId = Guid.NewGuid();
-            var request = new PaymentRequestedV1
-            {
-                SagaId = sagaId,
-                EscrowId = escrowId,
-                BookingId = bookingId,
-                Operation = PaymentOperation.FundEscrow,
-                Amount = booking.AgreedAmount!.Value,
-                Currency = booking.AgreedCurrency!,
-                PayerUserId = caller,
-                PayeeUserId = custodyUserId,
-                TaskMasterUserId = booking.TaskMasterUsername,
-                PaymentMethodToken = body.PaymentMethodToken.Trim()
-            };
-
-            try
-            {
-                await _sagaStateService.EnqueueAsync(
-                    request,
-                    Activity.Current?.Id,
-                    HttpContext.RequestAborted);
-            }
-            catch (ActivePaymentSagaException ex)
-            {
-                return Conflict(new { error = ex.Message });
-            }
-
-            var response = new PaymentAcceptedResponseV1
-            {
-                SagaId = sagaId,
-                EscrowId = escrowId,
-                StatusUrl = $"/api/booking/payment-status/{sagaId:D}"
-            };
-            return Accepted(response.StatusUrl, response);
-        }
-
-        private async Task<PaymentAcceptedResponseV1> EnqueueEscrowTransferAsync(
-            Booking booking,
-            string operation)
-        {
-            if (!booking.EscrowId.HasValue
-                || booking.AgreedAmount is null or <= 0
-                || string.IsNullOrWhiteSpace(booking.AgreedCurrency))
-            {
-                throw new InvalidOperationException(
-                    "Booking escrow, fixed amount, and currency are required");
-            }
-
-            var custodyUserId = _configuration["Escrow:CustodyUserId"];
-            if (string.IsNullOrWhiteSpace(custodyUserId))
-            {
-                throw new EscrowConfigurationException(
-                    "Escrow:CustodyUserId is required");
-            }
-
-            var payeeUserId = operation switch
-            {
-                PaymentOperation.ReleaseEscrow => booking.TaskMasterUsername,
-                PaymentOperation.RefundEscrow => booking.RequesterUsername,
-                _ => throw new ArgumentOutOfRangeException(
-                    nameof(operation),
-                    operation,
-                    "Only release and refund transfers can be enqueued here.")
-            };
-            var sagaId = Guid.NewGuid();
-            var request = new PaymentRequestedV1
-            {
-                SagaId = sagaId,
-                EscrowId = booking.EscrowId.Value,
-                BookingId = booking.Id
-                    ?? throw new InvalidOperationException(
-                        "Booking id is required"),
-                Operation = operation,
-                Amount = booking.AgreedAmount.Value,
-                Currency = booking.AgreedCurrency,
-                PayerUserId = custodyUserId,
-                PayeeUserId = payeeUserId,
-                TaskMasterUserId = booking.TaskMasterUsername
-            };
-
-            await _sagaStateService.EnqueueAsync(
-                request,
-                Activity.Current?.Id,
+            var accepted = await _escrow.FundEscrowAsync(
+                id,
+                caller,
+                body.PaymentMethodToken,
                 HttpContext.RequestAborted);
-
-            return new PaymentAcceptedResponseV1
-            {
-                SagaId = sagaId,
-                EscrowId = booking.EscrowId.Value,
-                StatusUrl = $"/api/booking/payment-status/{sagaId:D}"
-            };
+            return Accepted(accepted.StatusUrl, accepted);
         }
 
-        private async Task<bool> HasActiveOperationAsync(
-            string bookingId,
-            string operation)
-        {
-            var latest = await _sagaStateService.GetLatestByBookingIdAsync(
-                bookingId);
-            return latest?.Status == SagaState.StatusStarted
-                && latest.Operation == operation;
-        }
-
-        /// <summary>
-        /// Exposes the latest durable saga so the frontend can resume status polling after a page
-        /// reload instead of relying on transient client state.
-        /// </summary>
-        private async Task PopulateLatestPaymentAsync(Booking booking)
-        {
-            if (booking.Id == null) return;
-            var latestSaga = await _sagaStateService.GetLatestByBookingIdAsync(booking.Id);
-            if (latestSaga == null) return;
-
-            booking.PaymentPending = latestSaga.Status == SagaState.StatusStarted;
-            if (!latestSaga.EscrowId.HasValue || string.IsNullOrWhiteSpace(latestSaga.Operation))
-            {
-                return;
-            }
-
-            booking.LatestPaymentSagaId = latestSaga.SagaId;
-            booking.LatestPaymentStatus = latestSaga.Status == SagaState.StatusStarted
-                ? PaymentStatusResponseV1.PendingStatus
-                : latestSaga.Status;
-            booking.LatestPaymentOperation = latestSaga.Operation;
-            booking.LatestPaymentFailureReason = latestSaga.FailureReason;
-        }
-
+        /// <summary>Returns the authenticated username from the JWT principal.</summary>
         private string? CurrentUsername() =>
             User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.Identity?.Name;
+
+        private bool IsAdmin() => User.IsInRole("ROLE_ADMIN") || User.IsInRole("ADMIN");
+
+        /// <summary>
+        /// Booking documents carry both usernames, the agreed price, proof URLs and the payment
+        /// saga projection, so reads are restricted to the two parties plus administrators.
+        /// Shared by <see cref="Get"/> and <see cref="GetPaymentStatus"/> so the two read paths
+        /// cannot drift apart.
+        /// </summary>
+        private bool CallerMayViewBooking(Booking booking, string caller)
+        {
+            var isParty = string.Equals(
+                    booking.RequesterUsername,
+                    caller,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    booking.TaskMasterUsername,
+                    caller,
+                    StringComparison.OrdinalIgnoreCase);
+
+            return isParty || IsAdmin();
+        }
 
         private string? BearerFromRequest()
         {

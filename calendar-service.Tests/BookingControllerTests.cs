@@ -1,10 +1,13 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
+using calendar_service.Contracts;
 using calendar_service.Controllers;
+using calendar_service.Filters;
 using calendar_service.MessageQueue;
 using calendar_service.Model;
 using calendar_service.Services;
 using calendar_service.Services.Clients;
 using calendar_service.Services.Contracts;
+using calendar_service.Services.Implementation;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -37,12 +40,18 @@ namespace calendar_service.Tests
             Mock<ISagaStateService>? sagaStateService = null,
             IConfiguration? configuration = null)
         {
+            var saga = sagaStateService ?? DefaultSagaStateServiceMock();
+            var config = configuration ?? new ConfigurationBuilder().AddInMemoryCollection().Build();
+
+            // The notifier and escrow orchestrator are thin collaborators over the same mocks the
+            // controller already uses, so they are wired for real here: these tests still assert
+            // the end-to-end HTTP behaviour of an action, not just controller plumbing.
             var controller = new BookingController(
                 service.Object,
                 taskMasterClient.Object,
-                (sagaStateService ?? DefaultSagaStateServiceMock()).Object,
-                notifications.Object,
-                configuration ?? new ConfigurationBuilder().AddInMemoryCollection().Build());
+                saga.Object,
+                new EscrowPaymentService(service.Object, saga.Object, config),
+                new BookingNotifier(notifications.Object));
 
             var claims = new List<Claim>();
             if (!string.IsNullOrEmpty(username))
@@ -70,6 +79,27 @@ namespace calendar_service.Tests
         }
 
         private static Mock<ISagaStateService> DefaultSagaStateServiceMock() => new();
+
+        /// <summary>
+        /// Runs an action the way the MVC pipeline does. Domain services signal failure with
+        /// exceptions and <see cref="BookingExceptionFilter"/> maps them to status codes, so a
+        /// direct in-process action call has to apply the same mapping to stay representative.
+        /// Exceptions the filter deliberately ignores (misconfiguration, outbox persistence)
+        /// keep propagating.
+        /// </summary>
+        private static async Task<IActionResult> InvokeAsync(Func<Task<IActionResult>> action)
+        {
+            try
+            {
+                return await action();
+            }
+            catch (Exception ex)
+            {
+                var mapped = BookingExceptionFilter.Map(ex);
+                if (mapped == null) throw;
+                return mapped;
+            }
+        }
 
         private static DateTime FutureSlot(int hoursFromNowFloor = 48)
         {
@@ -107,7 +137,7 @@ namespace calendar_service.Tests
                 new Mock<INotificationProducer>(),
                 sagaStateService: sagaState);
 
-            var result = await controller.GetPaymentStatus(sagaId);
+            var result = await InvokeAsync(() => controller.GetPaymentStatus(sagaId));
 
             var ok = Assert.IsType<OkObjectResult>(result);
             var response = Assert.IsType<PaymentStatusResponseV1>(ok.Value);
@@ -145,7 +175,7 @@ namespace calendar_service.Tests
                 new Mock<INotificationProducer>(),
                 sagaStateService: sagaState);
 
-            var result = await controller.GetPaymentStatus(sagaId);
+            var result = await InvokeAsync(() => controller.GetPaymentStatus(sagaId));
 
             Assert.IsType<ForbidResult>(result);
         }
@@ -173,10 +203,10 @@ namespace calendar_service.Tests
                 new Mock<INotificationProducer>(),
                 sagaStateService: sagaState);
 
-            var result = await controller.Get("bk-1");
+            var result = await InvokeAsync(() => controller.Get("bk-1"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            var response = Assert.IsType<Booking>(ok.Value);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
             Assert.Equal(sagaId, response.LatestPaymentSagaId);
             Assert.Equal(SagaState.StatusFailed, response.LatestPaymentStatus);
             Assert.Equal(PaymentOperation.FundEscrow, response.LatestPaymentOperation);
@@ -211,16 +241,18 @@ namespace calendar_service.Tests
                    .ReturnsAsync(created);
 
             var ctrl = BuildController(service, tmClient, notifications);
-            var result = await ctrl.Create(new BookingController.CreateBookingDto
+            var result = await InvokeAsync(() => ctrl.Create(new BookingController.CreateBookingDto
             {
                 TaskMasterId = TaskMasterId,
                 SlotStart = slot,
                 DurationHours = 2,
                 Message = "hi"
-            });
+            }));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(created, ok.Value);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(created.Id, response.Id);
+            Assert.Equal(created.Status, response.Status);
             notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Once);
         }
 
@@ -239,12 +271,12 @@ namespace calendar_service.Tests
                    .ThrowsAsync(new InvalidOperationException("This range overlaps an already-booked slot"));
 
             var ctrl = BuildController(service, tmClient, notifications);
-            var result = await ctrl.Create(new BookingController.CreateBookingDto
+            var result = await InvokeAsync(() => ctrl.Create(new BookingController.CreateBookingDto
             {
                 TaskMasterId = TaskMasterId,
                 SlotStart = FutureSlot(),
                 DurationHours = 2
-            });
+            }));
 
             Assert.IsType<ConflictObjectResult>(result);
             notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Never);
@@ -259,12 +291,12 @@ namespace calendar_service.Tests
                 new Mock<INotificationProducer>(),
                 username: null);
 
-            var result = await ctrl.Create(new BookingController.CreateBookingDto
+            var result = await InvokeAsync(() => ctrl.Create(new BookingController.CreateBookingDto
             {
                 TaskMasterId = TaskMasterId,
                 SlotStart = FutureSlot(),
                 DurationHours = 1
-            });
+            }));
 
             Assert.IsType<UnauthorizedResult>(result);
         }
@@ -281,12 +313,12 @@ namespace calendar_service.Tests
                 tmClient,
                 new Mock<INotificationProducer>());
 
-            var result = await ctrl.Create(new BookingController.CreateBookingDto
+            var result = await InvokeAsync(() => ctrl.Create(new BookingController.CreateBookingDto
             {
                 TaskMasterId = TaskMasterId,
                 SlotStart = FutureSlot(),
                 DurationHours = 1
-            });
+            }));
 
             Assert.IsType<NotFoundObjectResult>(result);
         }
@@ -303,12 +335,12 @@ namespace calendar_service.Tests
                 tmClient,
                 new Mock<INotificationProducer>());
 
-            var result = await ctrl.Create(new BookingController.CreateBookingDto
+            var result = await InvokeAsync(() => ctrl.Create(new BookingController.CreateBookingDto
             {
                 TaskMasterId = TaskMasterId,
                 SlotStart = FutureSlot(),
                 DurationHours = 1
-            });
+            }));
 
             Assert.IsType<BadRequestObjectResult>(result);
         }
@@ -349,10 +381,12 @@ namespace calendar_service.Tests
                    .ReturnsAsync(new AcceptResult { Accepted = accepted, AutoDeclined = new() { declined } });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), notifications);
-            var result = await ctrl.Accept("bk-1", new BookingController.RespondDto { Message = "ok" });
+            var result = await InvokeAsync(() => ctrl.Accept("bk-1", new BookingController.RespondDto { Message = "ok" }));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(accepted, ok.Value);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(accepted.Id, response.Id);
+            Assert.Equal(accepted.Status, response.Status);
             // One notification to the accepted requester + one per auto-declined sibling.
             notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Exactly(2));
             var acceptedNotification = System.Text.Json.JsonSerializer.Serialize(
@@ -378,7 +412,7 @@ namespace calendar_service.Tests
                    .ThrowsAsync(new UnauthorizedAccessException());
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.Accept("bk-1", null);
+            var result = await InvokeAsync(() => ctrl.Accept("bk-1", null));
 
             Assert.IsType<ForbidResult>(result);
         }
@@ -391,7 +425,7 @@ namespace calendar_service.Tests
                    .ThrowsAsync(new KeyNotFoundException());
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.Accept("bk-1", null);
+            var result = await InvokeAsync(() => ctrl.Accept("bk-1", null));
 
             Assert.IsType<NotFoundResult>(result);
         }
@@ -404,7 +438,7 @@ namespace calendar_service.Tests
                    .ThrowsAsync(new InvalidOperationException("This range overlaps an already-accepted booking"));
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.Accept("bk-1", null);
+            var result = await InvokeAsync(() => ctrl.Accept("bk-1", null));
 
             Assert.IsType<ConflictObjectResult>(result);
         }
@@ -431,10 +465,12 @@ namespace calendar_service.Tests
                    .ReturnsAsync(declined);
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), notifications);
-            var result = await ctrl.Decline("bk-1", new BookingController.RespondDto { Message = "no thanks" });
+            var result = await InvokeAsync(() => ctrl.Decline("bk-1", new BookingController.RespondDto { Message = "no thanks" }));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(declined, ok.Value);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(declined.Id, response.Id);
+            Assert.Equal(declined.Status, response.Status);
             notifications.Verify(n => n.PublishAsync(It.IsAny<object>()), Times.Once);
         }
 
@@ -446,7 +482,7 @@ namespace calendar_service.Tests
                    .ReturnsAsync((Booking?)null);
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.Decline("bk-1", null);
+            var result = await InvokeAsync(() => ctrl.Decline("bk-1", null));
 
             Assert.IsType<NotFoundResult>(result);
         }
@@ -470,10 +506,12 @@ namespace calendar_service.Tests
                 new Mock<ITaskMasterApiClient>(),
                 new Mock<INotificationProducer>());
 
-            var result = await controller.StartWork("bk-1");
+            var result = await InvokeAsync(() => controller.StartWork("bk-1"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(booking, ok.Value);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(booking.Id, response.Id);
+            Assert.Equal(booking.Status, response.Status);
         }
 
         [Fact]
@@ -517,12 +555,12 @@ namespace calendar_service.Tests
                 notifications,
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
-            var result = await controller.SubmitProof(
+            var result = await InvokeAsync(() => controller.SubmitProof(
                 "bk-1",
                 new BookingController.SubmitProofDto
                 {
                     ProofFileUrl = "proof.jpg"
-                });
+                }));
 
             var accepted = Assert.IsType<AcceptedResult>(result);
             var response = Assert.IsType<PaymentAcceptedResponseV1>(accepted.Value);
@@ -562,12 +600,12 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.SubmitProof(
+            var result = await InvokeAsync(() => controller.SubmitProof(
                 "bk-1",
                 new BookingController.SubmitProofDto
                 {
                     ProofFileUrl = "proof.jpg"
-                });
+                }));
 
             Assert.IsType<ConflictObjectResult>(result);
             service.Verify(s => s.RequestEscrowReleaseAsync(
@@ -621,7 +659,7 @@ namespace calendar_service.Tests
                 notifications,
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
-            var result = await controller.Cancel("bk-1");
+            var result = await InvokeAsync(() => controller.Cancel("bk-1"));
 
             var accepted = Assert.IsType<AcceptedResult>(result);
             var response = Assert.IsType<PaymentAcceptedResponseV1>(accepted.Value);
@@ -659,12 +697,12 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.SubmitProof(
+            var result = await InvokeAsync(() => controller.SubmitProof(
                 "bk-1",
                 new BookingController.SubmitProofDto
                 {
                     ProofFileUrl = "proof.jpg"
-                });
+                }));
 
             Assert.IsType<ConflictObjectResult>(result);
             service.Verify(s => s.RequestEscrowReleaseAsync(
@@ -698,7 +736,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Cancel("bk-1");
+            var result = await InvokeAsync(() => controller.Cancel("bk-1"));
 
             Assert.IsType<ConflictObjectResult>(result);
             service.Verify(s => s.RequestCancellationAsync(
@@ -871,12 +909,12 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.SubmitProof(
+            var result = await InvokeAsync(() => controller.SubmitProof(
                 "bk-1",
                 new BookingController.SubmitProofDto
                 {
                     ProofFileUrl = "proof.jpg"
-                });
+                }));
 
             Assert.IsType<ConflictObjectResult>(result);
             sagaState.Verify(s => s.EnqueueAsync(
@@ -909,7 +947,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Cancel("bk-1");
+            var result = await InvokeAsync(() => controller.Cancel("bk-1"));
 
             Assert.IsType<ConflictObjectResult>(result);
             sagaState.Verify(s => s.EnqueueAsync(
@@ -987,7 +1025,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             var acceptedResult = Assert.IsType<AcceptedResult>(result);
             var response = Assert.IsType<PaymentAcceptedResponseV1>(acceptedResult.Value);
@@ -1033,7 +1071,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<AcceptedResult>(result);
             service.Verify(
@@ -1056,7 +1094,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", new BookingController.PayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", new BookingController.PayDto()));
 
             Assert.IsType<BadRequestObjectResult>(result);
             service.Verify(s => s.GetByIdAsync(It.IsAny<string>()), Times.Never);
@@ -1088,7 +1126,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<ConflictObjectResult>(result);
             service.Verify(s => s.AttachEscrowAsync(
@@ -1124,7 +1162,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<ConflictObjectResult>(result);
             service.Verify(s => s.AttachEscrowAsync(
@@ -1155,7 +1193,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<ForbidResult>(result);
             sagaState.Verify(s => s.EnqueueAsync(
@@ -1181,7 +1219,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<ConflictObjectResult>(result);
             service.Verify(s => s.AttachEscrowAsync(
@@ -1212,7 +1250,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<ConflictObjectResult>(result);
             sagaState.Verify(s => s.EnqueueAsync(
@@ -1245,7 +1283,7 @@ namespace calendar_service.Tests
                 sagaStateService: sagaState,
                 configuration: EscrowConfiguration());
 
-            var result = await controller.Pay("bk-1", ValidTokenPayDto());
+            var result = await InvokeAsync(() => controller.Pay("bk-1", ValidTokenPayDto()));
 
             Assert.IsType<ConflictObjectResult>(result);
         }
@@ -1260,10 +1298,11 @@ namespace calendar_service.Tests
             service.Setup(s => s.ListIncomingForTaskMasterAsync(Caller, "PENDING")).ReturnsAsync(data);
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.ListIncoming("PENDING");
+            var result = await InvokeAsync(() => ctrl.ListIncoming("PENDING"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(data, ok.Value);
+            var response = Assert.IsType<List<BookingResponse>>(ok.Value);
+            Assert.Equal(data.Select(b => b.Id), response.Select(b => b.Id));
         }
 
         [Fact]
@@ -1274,10 +1313,11 @@ namespace calendar_service.Tests
             service.Setup(s => s.ListOutgoingForRequesterAsync(Caller, null)).ReturnsAsync(data);
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.ListOutgoing(null);
+            var result = await InvokeAsync(() => ctrl.ListOutgoing(null));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(data, ok.Value);
+            var response = Assert.IsType<List<BookingResponse>>(ok.Value);
+            Assert.Equal(data.Select(b => b.Id), response.Select(b => b.Id));
         }
 
         [Fact]
@@ -1293,10 +1333,11 @@ namespace calendar_service.Tests
             service.Setup(s => s.GetTimetableAsync(TaskMasterId, Caller, false, true)).ReturnsAsync(data);
 
             var ctrl = BuildController(service, tmClient, new Mock<INotificationProducer>());
-            var result = await ctrl.GetTimetable(TaskMasterId);
+            var result = await InvokeAsync(() => ctrl.GetTimetable(TaskMasterId));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(data, ok.Value);
+            var response = Assert.IsType<List<BookingResponse>>(ok.Value);
+            Assert.Equal(data.Select(b => b.Id), response.Select(b => b.Id));
             service.VerifyAll();
         }
 
@@ -1312,10 +1353,11 @@ namespace calendar_service.Tests
             service.Setup(s => s.GetTimetableAsync(TaskMasterId, Caller, true, false)).ReturnsAsync(data);
 
             var ctrl = BuildController(service, tmClient, new Mock<INotificationProducer>(), isAdmin: true);
-            var result = await ctrl.GetTimetable(TaskMasterId);
+            var result = await InvokeAsync(() => ctrl.GetTimetable(TaskMasterId));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(data, ok.Value);
+            var response = Assert.IsType<List<BookingResponse>>(ok.Value);
+            Assert.Equal(data.Select(b => b.Id), response.Select(b => b.Id));
             service.VerifyAll();
         }
 
@@ -1326,7 +1368,7 @@ namespace calendar_service.Tests
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync((Booking?)null);
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.Get("bk-1");
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
 
             Assert.IsType<NotFoundResult>(result);
         }
@@ -1335,14 +1377,100 @@ namespace calendar_service.Tests
         public async Task Get_HappyPath_Returns200()
         {
             var service = new Mock<IBookingService>();
-            var booking = new Booking { Id = "bk-1" };
+            var booking = new Booking { Id = "bk-1", RequesterUsername = Caller, TaskMasterUsername = OwnerUsername };
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>());
-            var result = await ctrl.Get("bk-1");
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Same(booking, ok.Value);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(booking.Id, response.Id);
+            Assert.Equal(booking.Status, response.Status);
+        }
+
+        [Fact]
+        public async Task Get_TaskMasterOwner_Returns200()
+        {
+            var service = new Mock<IBookingService>();
+            var booking = new Booking { Id = "bk-1", RequesterUsername = "carol", TaskMasterUsername = OwnerUsername };
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var ctrl = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                username: OwnerUsername);
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(booking.Id, response.Id);
+            Assert.Equal(booking.Status, response.Status);
+        }
+
+        [Fact]
+        public async Task Get_UnrelatedCaller_Returns403()
+        {
+            // A booking exposes both usernames, the agreed price, the proof URL and the payment
+            // saga projection, so a bystander must not be able to read it by guessing an id.
+            var service = new Mock<IBookingService>();
+            var sagaState = new Mock<ISagaStateService>();
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(new Booking
+            {
+                Id = "bk-1",
+                RequesterUsername = "carol",
+                TaskMasterUsername = OwnerUsername,
+                AgreedAmount = 100m
+            });
+
+            var ctrl = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                sagaStateService: sagaState);
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
+
+            Assert.IsType<ForbidResult>(result);
+            sagaState.Verify(s => s.GetLatestByBookingIdAsync(It.IsAny<string>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task Get_Admin_Returns200_EvenWhenNotAParty()
+        {
+            var service = new Mock<IBookingService>();
+            var booking = new Booking { Id = "bk-1", RequesterUsername = "carol", TaskMasterUsername = OwnerUsername };
+            service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
+
+            var ctrl = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                username: "zoe",
+                isAdmin: true);
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
+
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var response = Assert.IsType<BookingResponse>(ok.Value);
+            Assert.Equal(booking.Id, response.Id);
+            Assert.Equal(booking.Status, response.Status);
+        }
+
+        [Fact]
+        public async Task Get_WithoutAuthenticatedCaller_Returns401()
+        {
+            var service = new Mock<IBookingService>();
+
+            var ctrl = BuildController(
+                service,
+                new Mock<ITaskMasterApiClient>(),
+                new Mock<INotificationProducer>(),
+                username: null,
+                bearer: null);
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
+
+            Assert.IsType<UnauthorizedResult>(result);
+            service.Verify(s => s.GetByIdAsync(It.IsAny<string>()), Times.Never);
         }
 
         [Fact]
@@ -1353,17 +1481,17 @@ namespace calendar_service.Tests
             // booking is still IMPLEMENTED; GET must flag PaymentPending so the frontend can
             // block a duplicate /pay attempt even after the user closes and reopens the browser.
             var service = new Mock<IBookingService>();
-            var booking = new Booking { Id = "bk-1", Status = Booking.StatusImplemented, InvoiceAmount = 50m };
+            var booking = new Booking { Id = "bk-1", Status = Booking.StatusImplemented, InvoiceAmount = 50m, RequesterUsername = Caller };
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
             var sagaState = new Mock<ISagaStateService>();
             sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
                 .ReturnsAsync(new SagaState { BookingId = "bk-1", Status = SagaState.StatusStarted });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
-            var result = await ctrl.Get("bk-1");
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            var returned = Assert.IsType<Booking>(ok.Value);
+            var returned = Assert.IsType<BookingResponse>(ok.Value);
             Assert.True(returned.PaymentPending);
         }
 
@@ -1371,17 +1499,17 @@ namespace calendar_service.Tests
         public async Task Get_BookingImplementedWithResolvedSaga_LeavesPaymentPendingFalse()
         {
             var service = new Mock<IBookingService>();
-            var booking = new Booking { Id = "bk-1", Status = Booking.StatusImplemented, InvoiceAmount = 50m };
+            var booking = new Booking { Id = "bk-1", Status = Booking.StatusImplemented, InvoiceAmount = 50m, RequesterUsername = Caller };
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
             var sagaState = new Mock<ISagaStateService>();
             sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
                 .ReturnsAsync(new SagaState { BookingId = "bk-1", Status = SagaState.StatusFailed });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
-            var result = await ctrl.Get("bk-1");
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            var returned = Assert.IsType<Booking>(ok.Value);
+            var returned = Assert.IsType<BookingResponse>(ok.Value);
             Assert.False(returned.PaymentPending);
         }
 
@@ -1389,7 +1517,7 @@ namespace calendar_service.Tests
         public async Task Get_TerminalBooking_StillProjectsLatestSagaForReloadedFrontend()
         {
             var service = new Mock<IBookingService>();
-            var booking = new Booking { Id = "bk-1", Status = Booking.StatusCompleted };
+            var booking = new Booking { Id = "bk-1", Status = Booking.StatusCompleted, RequesterUsername = Caller };
             service.Setup(s => s.GetByIdAsync("bk-1")).ReturnsAsync(booking);
             var sagaState = new Mock<ISagaStateService>();
             sagaState.Setup(s => s.GetLatestByBookingIdAsync("bk-1"))
@@ -1403,10 +1531,10 @@ namespace calendar_service.Tests
                 });
 
             var ctrl = BuildController(service, new Mock<ITaskMasterApiClient>(), new Mock<INotificationProducer>(), sagaStateService: sagaState);
-            var result = await ctrl.Get("bk-1");
+            var result = await InvokeAsync(() => ctrl.Get("bk-1"));
 
             var ok = Assert.IsType<OkObjectResult>(result);
-            var returned = Assert.IsType<Booking>(ok.Value);
+            var returned = Assert.IsType<BookingResponse>(ok.Value);
             Assert.Equal(SagaState.StatusCompleted, returned.LatestPaymentStatus);
             Assert.Equal(PaymentOperation.ReleaseEscrow, returned.LatestPaymentOperation);
         }

@@ -270,10 +270,10 @@ test.describe('Booking request → accept → timetable becomes busy (UI-driven)
     await expect(targetColumn.locator('.hour-cell').nth(slot.startHour)).toHaveClass(/busy/);
     await expect(targetColumn.locator('.hour-cell').nth(slot.endHour)).toHaveClass(/busy/);
 
-    // Backend sanity check — the booking is genuinely ACCEPTED.
+    // Backend sanity check — the booking is genuinely ACCEPTED. GET requires a booking party.
     const finalRes = await axios.get<BookingDto>(
       `${CALENDAR_SERVICE_URL}/api/booking/${bookingId}`,
-      { validateStatus: () => true },
+      { headers: { Authorization: `Bearer ${bookerToken}` }, validateStatus: () => true },
     );
     expect(finalRes.status).toBe(200);
     expect(finalRes.data.status).toBe('ACCEPTED');

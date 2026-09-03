@@ -91,29 +91,6 @@ namespace calendar_service.Model
         /// <summary>Id of the approved payment-service transaction once paid. Null until paid.</summary>
         public string? PaymentTransactionId { get; set; }
 
-        /// <summary>
-        /// True when a payment attempt for this booking is currently ambiguous/in-flight (i.e.
-        /// its most recent saga is STARTED — see PAYMENT_SAGA_SPEC.md) and reconciliation hasn't
-        /// resolved it yet. Not persisted; computed on read by BookingController.Get so the
-        /// frontend can block a duplicate /pay attempt and show "payment is being processed"
-        /// even after a page reload, instead of only showing that message transiently after a
-        /// failed submit.
-        /// </summary>
-        [BsonIgnore]
-        public bool PaymentPending { get; set; }
-
-        [BsonIgnore]
-        public Guid? LatestPaymentSagaId { get; set; }
-
-        [BsonIgnore]
-        public string? LatestPaymentStatus { get; set; }
-
-        [BsonIgnore]
-        public string? LatestPaymentOperation { get; set; }
-
-        [BsonIgnore]
-        public string? LatestPaymentFailureReason { get; set; }
-
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? RespondedAt { get; set; }
 

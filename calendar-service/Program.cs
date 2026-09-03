@@ -41,6 +41,8 @@ builder.Services.AddSingleton<IMongoDBService, MongoDBService>();
 builder.Services.AddSingleton<IBookingService, BookingService>();
 builder.Services.AddSingleton<ISagaStateService, SagaStateService>();
 builder.Services.AddSingleton<INotificationProducer, NotificationProducer>();
+builder.Services.AddSingleton<IBookingNotifier, BookingNotifier>();
+builder.Services.AddSingleton<IEscrowPaymentService, EscrowPaymentService>();
 builder.Services.AddSingleton<IPaymentRequestProducer, PaymentRequestProducer>();
 builder.Services.AddSingleton<IKafkaDeadLetterProducer, KafkaDeadLetterProducer>();
 builder.Services.AddSingleton<IPaymentResultProcessor, PaymentResultProcessor>();

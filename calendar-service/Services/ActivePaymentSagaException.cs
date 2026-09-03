@@ -9,6 +9,17 @@ namespace calendar_service.Services
             Operation = operation;
         }
 
+        /// <summary>
+        /// Used by the pre-flight duplicate check, which can phrase the conflict in terms the
+        /// requester understands rather than exposing saga vocabulary.
+        /// </summary>
+        public ActivePaymentSagaException(string bookingId, string operation, string message)
+            : base(message)
+        {
+            BookingId = bookingId;
+            Operation = operation;
+        }
+
         public string BookingId { get; }
         public string Operation { get; }
     }
