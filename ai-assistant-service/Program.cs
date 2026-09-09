@@ -1,11 +1,16 @@
+using ai_assistant_service.Auth;
 using ai_assistant_service.Services;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Mcp;
 using ai_assistant_service.Services.Tools;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,7 +28,39 @@ builder.Services.AddOpenTelemetry()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(opt => opt.Endpoint = new Uri(otelEndpoint)));
 
+
+var jwtSecret = builder.Configuration["JwtSettings:Secret"]
+    ?? throw new InvalidOperationException("JwtSettings:Secret is required.");
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            RequireExpirationTime = true,
+            ClockSkew = TimeSpan.Zero,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+            NameClaimType = "sub",
+            RoleClaimType = "authorities"
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(CustomAuthorizeAttribute.PolicyName, policy =>
+        policy.Requirements.Add(new AuthorizeUserRequirement()));
+});
+
+builder.Services.AddSingleton<IAuthorizationHandler, AuthorizeUserHandler>();
+
 builder.Services.AddLogging();
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
@@ -68,6 +105,7 @@ var app = builder.Build();
 
 app.UseCors();
 app.UseHttpsRedirection();
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "ai-assistant-service" }));

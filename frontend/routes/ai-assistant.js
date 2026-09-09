@@ -9,6 +9,12 @@ router.use('/', httpProxy(() => ServiceLocation.getServiceLocationPath('ai-assis
         console.log(`[BFF][ai-assistant] → ${req.method} ${upstream}`);
         return `/api/ai-assistant${req.url}`;
     },
+    proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+        if (srcReq.headers.authorization) {
+            proxyReqOpts.headers['Authorization'] = srcReq.headers.authorization;
+        }
+        return proxyReqOpts;
+    },
     userResDecorator: (proxyRes, proxyResData, userReq) => {
         console.log(`[BFF][ai-assistant] ← ${proxyRes.statusCode} ${userReq.method} ${userReq.url}`);
         return proxyResData;

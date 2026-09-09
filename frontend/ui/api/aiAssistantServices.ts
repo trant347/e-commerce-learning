@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Auth from './authenticationStorage';
 
 export interface TaskMasterMention {
     id: string;
@@ -19,7 +20,12 @@ export interface ChatHistoryMessage {
 
 class AiAssistantServices {
     chat(message: string, userId?: string, history?: ChatHistoryMessage[]): Promise<ChatResponse> {
-        return axios.post('/api/ai-assistant/chat', { message, userId, history }).then((res) => res.data);
+        const token = Auth.getToken();
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        return axios
+            .post('/api/ai-assistant/chat', { message, userId, history }, { headers })
+            .then((res) => res.data);
     }
 }
 

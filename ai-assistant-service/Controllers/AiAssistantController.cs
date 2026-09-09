@@ -1,6 +1,7 @@
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Contracts;
 using Microsoft.AspNetCore.Mvc;
+using ai_assistant_service.Auth;
 
 namespace ai_assistant_service.Controllers;
 
@@ -16,6 +17,7 @@ public sealed class AiAssistantController : ControllerBase
     }
 
     [HttpPost("chat")]
+    [CustomAuthorize]
     public async Task<IActionResult> Chat([FromBody] ChatRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Message))
