@@ -75,9 +75,13 @@
 
 **Scope**
 
-- Thread an immutable `ToolExecutionContext` through `IToolDefinition`,
-  `ToolRegistry`, and `McpRemoteTool`, separately from model business arguments.
-  Carry validated actor, scopes, correlation IDs, and applicable run/action IDs.
+- Give every tool execution two separate inputs: the business arguments proposed
+  by the model (for example, rate, time slot, or duration) and an immutable
+  `ToolExecutionContext` created by trusted application code. Pass that context
+  through `IToolDefinition`, `ToolRegistry`, and `McpRemoteTool`. It contains the
+  authenticated actor, authorized scopes, correlation IDs, and, when applicable,
+  the persisted agent run and action IDs. These trusted values must never come
+  from, or be overridable by, model-provided arguments.
 - Keep the singleton registry as a metadata catalog if useful, but never capture
   scoped `ICurrentUserAccessor`, tokens, or mutable user headers in shared tools.
 - Record and prove execution-scoped clients or an SDK-supported isolated per-call

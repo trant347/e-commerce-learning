@@ -11,6 +11,21 @@ namespace ai_assistant_service.Services.Tools;
 /// </summary>
 public sealed class ToolRegistry
 {
+    private static readonly HashSet<string> ReservedExecutionMetadataNames = new(
+        [
+            "actor",
+            "scopes",
+            "authorizedscopes",
+            "correlationid",
+            "correlationids",
+            "traceid",
+            "executioncontext",
+            "toolexecutioncontext",
+            "agentrunid",
+            "actionid"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
     private readonly ConcurrentDictionary<string, IToolDefinition> _tools;
 
     public ToolRegistry(IEnumerable<IToolDefinition> tools)
@@ -39,13 +54,26 @@ public sealed class ToolRegistry
     /// before passing them to the tool implementation.
     /// </summary>
     public async Task<string> ExecuteAsync(
+        ToolExecutionContext executionContext,
         string toolName,
         IReadOnlyDictionary<string, JsonElement> arguments,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(executionContext);
+
         var tool = Get(toolName);
         if (tool is null)
             return $"Tool '{toolName}' is not registered.";
+
+        var reservedArgument = arguments.Keys.FirstOrDefault(IsReservedExecutionMetadata);
+        if (reservedArgument is not null)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                error = "reserved_execution_metadata",
+                message = $"Tool argument '{reservedArgument}' is controlled by the application and cannot be supplied by the model."
+            });
+        }
 
         // Flatten JsonElement values → plain strings for the tool to consume
         var flatArgs = arguments.ToDictionary(
@@ -53,7 +81,13 @@ public sealed class ToolRegistry
             kvp => FlattenToString(kvp.Value),
             StringComparer.OrdinalIgnoreCase);
 
-        return await tool.ExecuteAsync(flatArgs, cancellationToken);
+        return await tool.ExecuteAsync(executionContext, flatArgs, cancellationToken);
+    }
+
+    private static bool IsReservedExecutionMetadata(string name)
+    {
+        var normalized = name.Replace("_", string.Empty).Replace("-", string.Empty);
+        return ReservedExecutionMetadataNames.Contains(normalized);
     }
 
     /// <summary>

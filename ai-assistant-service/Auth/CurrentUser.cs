@@ -4,6 +4,8 @@ namespace ai_assistant_service.Auth;
 
 public sealed record CurrentUser(string Username, IReadOnlyCollection<string> Roles)
 {
+    public IReadOnlyCollection<string> Scopes { get; init; } = Array.Empty<string>();
+
     public bool IsInRole(string role) =>
         Roles.Contains(role, StringComparer.OrdinalIgnoreCase);
 }
@@ -45,6 +47,17 @@ public sealed class HttpContextCurrentUserAccessor : ICurrentUserAccessor
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        return new CurrentUser(username, roles);
+        var scopes = principal.FindAll("scope")
+            .Concat(principal.FindAll("scp"))
+            .SelectMany(claim => claim.Value.Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new CurrentUser(username, roles)
+        {
+            Scopes = Array.AsReadOnly(scopes)
+        };
     }
 }

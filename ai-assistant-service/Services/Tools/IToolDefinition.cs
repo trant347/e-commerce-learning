@@ -19,10 +19,15 @@ public interface IToolDefinition
     object ParametersSchema { get; }
 
     /// <summary>
-    /// Execute the tool with the arguments the LLM provided.
+    /// Execute the tool with trusted execution metadata and the separate arguments
+    /// provided by the LLM.
     /// </summary>
+    /// <param name="executionContext">Trusted actor and execution metadata created by application code.</param>
     /// <param name="arguments">Key-value pairs parsed from the LLM's tool_call arguments JSON.</param>
     /// <param name="cancellationToken"></param>
     /// <returns>Plain-text result to feed back to the LLM as a tool message.</returns>
-    Task<string> ExecuteAsync(IReadOnlyDictionary<string, string> arguments, CancellationToken cancellationToken);
+    Task<string> ExecuteAsync(
+        ToolExecutionContext executionContext,
+        IReadOnlyDictionary<string, string> arguments,
+        CancellationToken cancellationToken);
 }

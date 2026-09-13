@@ -135,7 +135,12 @@ public sealed class McpToolDiscoveryService : BackgroundService
 
         try
         {
+            var executionContext = new ToolExecutionContext(
+                "system:mcp-discovery",
+                Array.Empty<string>(),
+                Guid.NewGuid().ToString("N"));
             var raw = await categoriesTool.ExecuteAsync(
+                executionContext,
                 new Dictionary<string, string>(),
                 stoppingToken);
 

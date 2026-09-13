@@ -7,6 +7,7 @@ using System.Text;
 using ai_assistant_service.Auth;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -34,15 +35,18 @@ public sealed class AuthenticationTests : IClassFixture<AuthenticationTests.AiAs
         _factory.Assistant.Reset();
         using var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", CreateToken("alice", ["ROLE_USER"]));
+            new AuthenticationHeaderValue(
+                "Bearer",
+                CreateToken("alice", ["ROLE_USER"], scopes: ["calendar.read"]));
 
         var response = await client.PostAsJsonAsync(
             "/api/ai-assistant/chat",
             new { message = "hello", userId = "mallory" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("alice", _factory.Assistant.CurrentUser?.Username);
-        Assert.True(_factory.Assistant.CurrentUser?.IsInRole("ROLE_USER"));
+        Assert.Equal("alice", _factory.Assistant.ExecutionContext?.Actor);
+        Assert.Contains("calendar.read", _factory.Assistant.ExecutionContext!.AuthorizedScopes);
+        Assert.False(string.IsNullOrWhiteSpace(_factory.Assistant.ExecutionContext.CorrelationId));
     }
 
     [Fact]
@@ -131,12 +135,17 @@ public sealed class AuthenticationTests : IClassFixture<AuthenticationTests.AiAs
         string? username,
         IReadOnlyCollection<string> roles,
         DateTime? expires = null,
-        string secret = JwtSecret)
+        string secret = JwtSecret,
+        IReadOnlyCollection<string>? scopes = null)
     {
         var claims = roles.Select(role => new Claim("authorities", role)).ToList();
         if (username is not null)
         {
             claims.Add(new Claim(JwtRegisteredClaimNames.Sub, username));
+        }
+        if (scopes is { Count: > 0 })
+        {
+            claims.Add(new Claim("scope", string.Join(' ', scopes)));
         }
 
         var credentials = new SigningCredentials(
@@ -178,14 +187,14 @@ public sealed class AuthenticationTests : IClassFixture<AuthenticationTests.AiAs
 
     public sealed class RecordingAssistant : IAiAssistantService
     {
-        public CurrentUser? CurrentUser { get; private set; }
+        public ToolExecutionContext? ExecutionContext { get; private set; }
 
         public Task<ChatResponse> ChatAsync(
             ChatRequest request,
-            CurrentUser currentUser,
+            ToolExecutionContext executionContext,
             CancellationToken cancellationToken)
         {
-            CurrentUser = currentUser;
+            ExecutionContext = executionContext;
             return Task.FromResult(new ChatResponse
             {
                 Answer = "ok",
@@ -195,7 +204,7 @@ public sealed class AuthenticationTests : IClassFixture<AuthenticationTests.AiAs
 
         public void Reset()
         {
-            CurrentUser = null;
+            ExecutionContext = null;
         }
     }
 }

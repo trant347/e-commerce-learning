@@ -35,10 +35,6 @@ services:
     - SPRING_DATA_MONGODB_PASSWORD=${PRODUCTS_DB_PASSWORD}
     - SPRING_DATA_MONGODB_AUTHENTICATION_DATABASE=products
     - SPRING_DATA_REDIS_HOST=redis
-    - OTEL_SDK_DISABLED=true
-    # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-    # - OTEL_SERVICE_NAME=product-service
-    - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
     ports:
     - "8080:8080" #need to remove exposed port in production
     - "8000:8000" #debug port
@@ -47,7 +43,6 @@ services:
     - consul
     - authentication-service
     - redis
-    # - otel-collector
 
 
   calendar-service:
@@ -306,8 +301,8 @@ services:
     - |
       echo "Waiting for Ollama server to be ready..."
       sleep 10
-      echo "Pulling qwen2.5:7b-instruct model (this may take a few minutes)..."
-      ollama pull qwen2.5:7b-instruct
+      echo "Pulling qwen3:8b model (this may take a few minutes)..."
+      ollama pull qwen3:8b
       echo "Model pull complete!"
     restart: "no"
 
@@ -318,7 +313,7 @@ services:
     image: ai-assistant-service:latest
     environment:
     - Ollama__BaseUrl=http://ollama:11434
-    - Ollama__Model=qwen2.5:7b-instruct
+    - Ollama__Model=qwen3:8b
     - Ollama__TimeoutSeconds=600
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080

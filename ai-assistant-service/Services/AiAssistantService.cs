@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ai_assistant_service.Auth;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
@@ -35,12 +34,13 @@ public sealed class AiAssistantService : IAiAssistantService
 
     public async Task<ChatResponse> ChatAsync(
         ChatRequest request,
-        CurrentUser currentUser,
+        ToolExecutionContext executionContext,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
-            "Starting chat request for authenticated user with {RoleCount} role(s), message length={MessageLength}",
-            currentUser.Roles.Count,
+            "Starting chat request for actor={Actor}, scope count={ScopeCount}, message length={MessageLength}",
+            executionContext.Actor,
+            executionContext.AuthorizedScopes.Count,
             request.Message?.Length ?? 0);
 
         var model = _configuration["Ollama:Model"] ?? "llama3.2:3b";
@@ -150,7 +150,11 @@ public sealed class AiAssistantService : IAiAssistantService
                 string result;
                 try
                 {
-                    result = await _toolRegistry.ExecuteAsync(toolName, args, cancellationToken);
+                    result = await _toolRegistry.ExecuteAsync(
+                        executionContext,
+                        toolName,
+                        args,
+                        cancellationToken);
                 }
                 catch (Exception ex)
                 {

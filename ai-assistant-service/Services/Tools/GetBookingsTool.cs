@@ -33,6 +33,7 @@ public sealed class GetBookingsTool : IToolDefinition
     }
 
     public async Task<string> ExecuteAsync(
+        ToolExecutionContext executionContext,
         IReadOnlyDictionary<string, string> arguments,
         CancellationToken cancellationToken)
     {

@@ -1,5 +1,6 @@
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Tools;
 using Microsoft.AspNetCore.Mvc;
 using ai_assistant_service.Auth;
 
@@ -30,7 +31,11 @@ public sealed class AiAssistantController : ControllerBase
         }
 
         var currentUser = _currentUserAccessor.GetRequiredUser();
-        var response = await _assistantService.ChatAsync(request, currentUser, cancellationToken);
+        var executionContext = new ToolExecutionContext(
+            currentUser.Username,
+            currentUser.Scopes,
+            HttpContext.TraceIdentifier);
+        var response = await _assistantService.ChatAsync(request, executionContext, cancellationToken);
         return Ok(response);
     }
 }

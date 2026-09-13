@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ai_assistant_service.Auth;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services;
 using ai_assistant_service.Services.Contracts;
@@ -38,7 +37,7 @@ public class AiAssistantServiceTests
             NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "hi" }, TestUser(), CancellationToken.None);
+            new ChatRequest { Message = "hi" }, TestContext(), CancellationToken.None);
 
         Assert.Equal("Hello!", resp.Answer);
         Assert.Equal("qwen3:8b", resp.Model);
@@ -89,10 +88,11 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "find a pet sitter" }, TestUser(), CancellationToken.None);
+            new ChatRequest { Message = "find a pet sitter" }, TestContext(), CancellationToken.None);
 
         Assert.Equal("I found Alice.", resp.Answer);
         Assert.Equal(1, fakeTool.CallCount);
+        Assert.Same(TestExecutionContext, fakeTool.LastContext);
         Assert.Single(resp.Mentions);
         Assert.Equal("tm-1", resp.Mentions[0].Id);
         Assert.Equal("Alice", resp.Mentions[0].Name);
@@ -126,7 +126,7 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "what categories?" }, TestUser(), CancellationToken.None);
+            new ChatRequest { Message = "what categories?" }, TestContext(), CancellationToken.None);
 
         Assert.Equal("Pet Care is available.", resp.Answer);
         Assert.Equal(1, fakeTool.CallCount);
@@ -152,7 +152,7 @@ public class AiAssistantServiceTests
             NullLogger<AiAssistantService>.Instance);
 
         await svc.ChatAsync(
-            new ChatRequest { Message = "hi" }, TestUser(), CancellationToken.None);
+            new ChatRequest { Message = "hi" }, TestContext(), CancellationToken.None);
 
         Assert.NotNull(capturedMessages);
         Assert.Equal("system", capturedMessages![0].Role);
@@ -200,7 +200,7 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "loop forever" }, TestUser(), CancellationToken.None);
+            new ChatRequest { Message = "loop forever" }, TestContext(), CancellationToken.None);
 
         Assert.Contains("wasn't able to find a complete answer", resp.Answer);
         Assert.Equal(5, fakeTool.CallCount);
@@ -257,7 +257,7 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "find a pet sitter" }, TestUser(), CancellationToken.None);
+            new ChatRequest { Message = "find a pet sitter" }, TestContext(), CancellationToken.None);
 
         Assert.Equal("I found Alice.", resp.Answer);
         Assert.Single(resp.Mentions);
@@ -265,7 +265,10 @@ public class AiAssistantServiceTests
         Assert.Equal("Alice", resp.Mentions[0].Name);
     }
 
-    private static CurrentUser TestUser() => new("alice", ["ROLE_USER"]);
+    private static readonly ToolExecutionContext TestExecutionContext =
+        new("alice", ["calendar.read"], "correlation-1");
+
+    private static ToolExecutionContext TestContext() => TestExecutionContext;
 
     private sealed class RecordingTool : IToolDefinition
     {
@@ -275,11 +278,14 @@ public class AiAssistantServiceTests
         public string Description => "test tool";
         public object ParametersSchema => new { };
         public int CallCount { get; private set; }
+        public ToolExecutionContext? LastContext { get; private set; }
 
         public Task<string> ExecuteAsync(
+            ToolExecutionContext executionContext,
             IReadOnlyDictionary<string, string> arguments,
             CancellationToken cancellationToken)
         {
+            LastContext = executionContext;
             CallCount++;
             return Task.FromResult(_result);
         }

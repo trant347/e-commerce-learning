@@ -12,6 +12,7 @@ public class ToolRegistryTests
         var registry = new ToolRegistry(Array.Empty<IToolDefinition>());
 
         var result = await registry.ExecuteAsync(
+            TestContext(),
             "does_not_exist",
             new Dictionary<string, JsonElement>(),
             CancellationToken.None);
@@ -30,9 +31,11 @@ public class ToolRegistryTests
         var args = doc.RootElement.EnumerateObject()
             .ToDictionary(p => p.Name, p => p.Value);
 
-        var result = await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+        var context = TestContext();
+        var result = await registry.ExecuteAsync(context, fake.Name, args, CancellationToken.None);
 
         Assert.Equal("ok", result);
+        Assert.Same(context, fake.LastContext);
         Assert.Equal("Pet Care", fake.LastArgs!["category"]);
         Assert.Equal("25", fake.LastArgs!["maxRate"]);
         Assert.Equal("10", fake.LastArgs!["limit"]);
@@ -72,7 +75,7 @@ public class ToolRegistryTests
         var args = doc.RootElement.EnumerateObject()
             .ToDictionary(p => p.Name, p => p.Value);
 
-        await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+        await registry.ExecuteAsync(TestContext(), fake.Name, args, CancellationToken.None);
 
         Assert.Equal("tutoring", fake.LastArgs!["category"]);
         Assert.Equal("50", fake.LastArgs!["maxRate"]);
@@ -92,7 +95,7 @@ public class ToolRegistryTests
         var args = doc.RootElement.EnumerateObject()
             .ToDictionary(p => p.Name, p => p.Value);
 
-        await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+        await registry.ExecuteAsync(TestContext(), fake.Name, args, CancellationToken.None);
 
         Assert.Equal(string.Empty, fake.LastArgs!["location"]);
         Assert.Equal(string.Empty, fake.LastArgs!["minRating"]);
@@ -110,22 +113,67 @@ public class ToolRegistryTests
         var args = doc.RootElement.EnumerateObject()
             .ToDictionary(p => p.Name, p => p.Value);
 
-        await registry.ExecuteAsync(fake.Name, args, CancellationToken.None);
+        await registry.ExecuteAsync(TestContext(), fake.Name, args, CancellationToken.None);
 
         Assert.Equal("tutoring,education", fake.LastArgs!["categories"]);
     }
+
+    [Theory]
+    [InlineData("actor")]
+    [InlineData("authorized_scopes")]
+    [InlineData("correlationId")]
+    [InlineData("agent_run_id")]
+    [InlineData("action-id")]
+    public async Task ExecuteAsync_RejectsModelProvidedExecutionMetadata(string argumentName)
+    {
+        var fake = new FakeTool();
+        var registry = new ToolRegistry(new IToolDefinition[] { fake });
+
+        using var doc = JsonDocument.Parse($"{{\"{argumentName}\": \"untrusted\"}}");
+        var args = doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value);
+
+        var result = await registry.ExecuteAsync(
+            TestContext(),
+            fake.Name,
+            args,
+            CancellationToken.None);
+
+        Assert.Contains("reserved_execution_metadata", result);
+        Assert.Null(fake.LastContext);
+        Assert.Null(fake.LastArgs);
+    }
+
+    [Fact]
+    public void ToolExecutionContext_CopiesAndNormalizesScopes()
+    {
+        var scopes = new List<string> { " calendar.read ", "CALENDAR.READ", "calendar.write" };
+
+        var context = new ToolExecutionContext("alice", scopes, "correlation-1");
+        scopes.Clear();
+
+        Assert.Equal(["calendar.read", "calendar.write"], context.AuthorizedScopes);
+        Assert.Null(context.AgentRunId);
+        Assert.Null(context.ActionId);
+    }
+
+    private static ToolExecutionContext TestContext() =>
+        new("alice", ["calendar.read"], "correlation-1");
 
     private sealed class FakeTool : IToolDefinition
     {
         public string Name => "fake_tool";
         public string Description => "A fake tool used for unit tests.";
         public object ParametersSchema => new { };
+        public ToolExecutionContext? LastContext { get; private set; }
         public IReadOnlyDictionary<string, string>? LastArgs { get; private set; }
 
         public Task<string> ExecuteAsync(
+            ToolExecutionContext executionContext,
             IReadOnlyDictionary<string, string> arguments,
             CancellationToken cancellationToken)
         {
+            LastContext = executionContext;
             LastArgs = arguments;
             return Task.FromResult("ok");
         }
