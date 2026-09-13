@@ -1,4 +1,3 @@
-import './tracing';
 import './polyfills/findDOMNode.js';
 import { createRoot } from 'react-dom/client';
 

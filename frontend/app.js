@@ -12,7 +12,6 @@ const calendarRouter = require('./routes/calendar');
 const notificationRouter = require('./routes/notification');
 const paymentRouter = require('./routes/payment');
 const aiAssistantRouter = require('./routes/ai-assistant');
-const otlpProxyRouter = require('./routes/otlp-proxy');
 
 var app = express();
 
@@ -41,7 +40,6 @@ app.use('/payment-service', paymentRouter);
 
 app.use('/api/notification', notificationRouter);
 app.use('/api/ai-assistant', aiAssistantRouter);
-app.use('/otlp/v1/traces', otlpProxyRouter);
 
 app.use('*',indexRouter);
 
