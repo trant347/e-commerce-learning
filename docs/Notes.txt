@@ -1,0 +1,32 @@
+We can achieve this in Docker without disrupting other containers using docker compose (if you're using it) or individual docker commands. Here's how to do it effectively:
+You can achieve this in Docker without disrupting other containers using docker compose (if you're using it) or individual docker commands. Here's how to do it effectively:
+
+1. Using Docker Compose (Recommended for Multi-Container Applications):
+
+Stop and Remove the Specific Container:
+
+If your application is managed by Docker Compose, navigate to the directory containing your docker-compose.yml file.
+
+Use the following command, replacing your_service_name with the name of your service in the docker-compose.yml file:
+
+Bash
+
+docker compose stop your_service_name
+docker compose rm -f your_service_name
+The stop command gracefully stops the container, and rm -f removes it. The -f force removes it, even if it is running.
+
+Pull the Updated Image:
+
+Pull the latest version of your Docker image:
+
+Bash
+
+docker compose pull your_service_name
+Run the Updated Container:
+
+Use the docker compose up command with the -d flag (detached mode) to start the updated container:
+
+Bash
+
+docker compose up -d your_service_name
+This will only recreate the service that was stopped, leaving the other services running.

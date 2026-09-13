@@ -13,3 +13,7 @@ target/
 *.log
 .env
 .fake
+code-reviews
+.agents
+prompts
+workflows

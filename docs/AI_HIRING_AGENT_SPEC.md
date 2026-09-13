@@ -3,6 +3,8 @@
 > Status: **Proposed**
 >
 > Scope: Evolve `ai-assistant-service` from a request/response tool-calling chatbot into a constrained agent that can help a requester find, negotiate with, and hire a TaskMaster.
+>
+> Review reconciliation: Updated against the current implementation and `code-reviews/ai-hiring-agent-spec-review.md`. Requirements below describe proposed work unless explicitly identified as implemented.
 
 ## 1. Overview
 
@@ -53,10 +55,10 @@ The LLM runs a tool-calling loop inside a single HTTP request. Product tools are
 | Limitation | Current behavior | Impact |
 |---|---|---|
 | Request-scoped execution | The tool loop ends when the chat HTTP request returns | The assistant cannot wait for a TaskMaster response and resume later |
-| Artificially short chat context | Only the last two user/assistant history messages are currently included, although the upgraded workstation can support a larger local-model context | The limit should be removed or made configurable, but conversation history still cannot be the authoritative record of hiring constraints or approvals |
+| Artificially short chat context | Both the browser (`prior.slice(-2)`) and service (`MaxChatMemorySize = 2`) independently restrict history to two messages | Both limits must be addressed; conversation history still cannot be the authoritative record of hiring constraints or approvals |
 | No durable agent state | The service has no workflow database or persisted plan | Restarts and new chat sessions lose negotiation progress |
 | Fixed tool loop | A request is limited to five tool-calling rounds | It supports short lookups, not long-running business workflows |
-| No trusted user identity | `ChatRequest.UserId` is client-supplied and is not used as an authenticated identity | The assistant cannot safely act on behalf of a user |
+| Request authentication implemented; tool identity propagation missing | Chat now validates the marketplace JWT and obtains username and roles through `ICurrentUserAccessor`; tool execution has no trusted identity parameter | Preserve AH-01 authentication and extend trusted identity into tool execution rather than trusting request-body or model-supplied identity |
 | No delegated authorization | Remote MCP tools are discovered through application-lifetime connections without per-user authorization context | State-changing tools cannot determine which user authorized an action |
 | Calendar access is read-only and incomplete | `get_bookings` only safely retrieves a booking when an ID is supplied | The assistant cannot list the caller's bookings, check availability, or create a booking |
 | No hiring tools | Product MCP tools search and read TaskMaster data only | The assistant can recommend but cannot hire |
@@ -64,6 +66,7 @@ The LLM runs a tool-calling loop inside a single HTTP request. Product tools are
 | No event-driven resumption | The assistant does not consume negotiation or booking response events | A TaskMaster response cannot wake or resume an agent run |
 | No approval model | Tool execution is controlled mainly by the system prompt | A model mistake could trigger an unintended write once mutation tools are added |
 | No action idempotency | There is no agent action ID or idempotency key | Retries could create duplicate offers or bookings |
+| Lossy tool arguments | `ToolRegistry` flattens JSON values into strings and normalizes placeholders; `McpRemoteTool` forwards those strings | Hiring tools need schema-validated values without silent coercion of prices, versions, or times |
 | No deterministic policy enforcement | Budget and approval boundaries are not enforced outside the LLM | Prompt instructions alone are insufficient for transactional actions |
 | No auditable delegation record | The system does not record why an action was selected or who approved it | Disputes and operational debugging would be difficult |
 
@@ -71,7 +74,7 @@ The current assistant is therefore a **tool-using chatbot**, not an agent. It ca
 
 ### 2.3 Chat context versus agent memory
 
-The current `MaxChatMemorySize = 2` restriction should be removed or replaced with a configurable context strategy. A larger workstation can support a larger model and context window, allowing the assistant to include substantially more conversation history.
+The current `MaxChatMemorySize = 2` restriction and the independent `prior.slice(-2)` in `frontend/ui/components/chat-overlay/chat-overlay.tsx` must be replaced together with a configurable context strategy. Changing the server alone cannot restore history already discarded by the browser. A larger workstation can support a larger model and context window, allowing the assistant to include substantially more conversation history.
 
 This improves:
 
@@ -100,6 +103,8 @@ The design should use three memory layers:
 | Structured agent state | Goals, constraints, approvals, actions, negotiation IDs, and workflow status | Authoritative |
 
 Conversation history should be selected by relevance and token budget rather than a fixed message count. The context builder may include recent messages, a rolling summary, relevant earlier messages, and the current structured agent state. Domain and policy decisions must always use structured state and current tool results.
+
+For durable runs, persist messages as they arrive and reconstruct context server-side after reload or restart. For simple chat, coordinate bounded browser history submission with the server's context budget. Do not replace the two-message limit with an unbounded request payload.
 
 ---
 
@@ -282,7 +287,7 @@ Notification-service continues to deliver user-facing events. It should support 
 8. User approves or edits the offer.
 9. Agent sends the offer to the selected TaskMaster.
 10. Agent pauses in `WAITING_FOR_TASKMASTER`.
-11. TaskMaster accepts, declines, or counters through the normal application UI/API.
+11. TaskMaster accepts, declines, or counters through authenticated REST/UI endpoints; a TaskMaster-side agent is excluded from v1.
 12. Calendar-service publishes an event.
 13. Agent resumes and evaluates the response against the stored policy.
 14. If permitted, the agent may send a revised offer.
@@ -452,6 +457,21 @@ An `AgentAction` records:
 
 Sensitive credentials and bearer tokens must never be stored in prompts, action arguments, or logs.
 
+### 10.2 Agent store deployment and ownership
+
+There is currently no durable store wired into `ai-assistant-service`. Its existing Compose `Redis__ConnectionString` setting is not evidence of implemented persistence.
+
+AH-11 must record the store choice and durability/atomicity strategy before implementation. The AI service must own its database and use dedicated credentials; it must not store agent state in another service's database.
+
+If MongoDB is selected, delivery must include:
+
+- A dedicated AI Mongo host, logical database, service credentials, and persistent volume in `docker-compose.yml`, following the current per-service deployment pattern.
+- A corresponding bootstrap script in `mongo-init/` and non-secret configuration placeholders in `.env.example`.
+- Both the `OWN_HOST` mapping and `ALL_HOSTS` list in `scripts/check-db-ownership.sh`, so the new service cannot reference other Mongo hosts and existing services cannot reference its host.
+- Bootstrap/upgrade instructions for existing volumes, required indexes, and restart recovery.
+
+If a different store is selected, document and implement equivalent provisioning, credential isolation, and ownership enforcement rather than omitting these requirements. Acceptance must cover persistence across restarts, least-privilege database access, and ownership-check coverage of the new service.
+
 ---
 
 ## 11. Calendar MCP Tools
@@ -479,14 +499,14 @@ Calendar-service should expose narrow business tools rather than generic HTTP or
 | `cancel_negotiation` | Cancel a non-terminal negotiation | Required |
 | `create_booking_from_agreement` | Idempotently convert an agreement to a booking | Always required in v1 |
 
-TaskMaster actions should use authenticated REST/UI endpoints or separately authorized tools. The requester agent must never call a tool as the TaskMaster.
+TaskMaster actions use authenticated REST/UI endpoints in v1, not agent tools. Separately authorized TaskMaster tools are a future extension. The requester agent must never call a tool as the TaskMaster.
 
 ### 11.3 Tool requirements
 
 Every state-changing tool must:
 
 - Derive actor identity from authenticated execution context.
-- Accept an `actionId` or idempotency key generated outside the LLM.
+- Receive an `actionId` or idempotency key through trusted execution metadata generated outside the LLM, not a model-visible argument.
 - Reject an action already processed with different arguments.
 - Validate the expected negotiation version.
 - Return a structured result with machine-readable error codes.
@@ -505,37 +525,64 @@ Example result:
 }
 ```
 
+### 11.4 Typed argument contract
+
+`IToolDefinition`, `ToolRegistry`, and `McpRemoteTool` must preserve JSON value types through execution and bind hiring arguments to explicit domain DTOs. Validate against the authoritative tool contract even if the model-facing schema is simplified.
+
+- Parse `ratePerHour` as a bounded decimal with the supported monetary precision, not a floating-point approximation or locale-dependent string.
+- Require integer `expectedVersion` and `durationHours`, with valid domain ranges.
+- Require an explicit timezone for `slotStart`, normalize it to UTC, and enforce calendar-service's hour alignment and duration constraints.
+- Preserve arrays, objects, and nulls according to the schema. Reject missing required values, wrong types, placeholder strings, overflow, and unsupported precision with a machine-readable validation error before any mutation.
+
+The `FlattenToString`/`NormalizePlaceholder` path must not apply to hiring tools. Any retained compatibility normalization for existing product search must be explicit and isolated to that read-only tool; it must not silently affect mutation parameters.
+
+### 11.5 Calendar MCP server prerequisite
+
+Calendar-service has no MCP server package or .NET MCP server integration today. Product-service's `McpToolsConfig` is the precedent for explicit tool registration, not a reusable .NET server implementation.
+
+Before AH-03 implementation, complete a bounded compatibility spike and record the selected .NET server package, supported version, transport, endpoint, registration API, and authentication integration. The current AI client forces SSE; selecting another transport requires coordinated client configuration changes. The spike must demonstrate discovery and an authenticated tool call, including rejection of an unauthenticated call. Re-estimate AH-03 if this integration cannot fit its current allocation.
+
 ---
 
 ## 12. Authentication and Delegated Authorization
 
 ### 12.1 User authentication
 
-`ai-assistant-service` must validate the same JWT used by protected marketplace services. `ChatRequest.UserId` must not be trusted for authorization.
+`ai-assistant-service` already validates the same JWT used by protected marketplace services for chat. Preserve this behavior and apply it to new protected agent endpoints. Request-body identity, including any legacy `ChatRequest.UserId`, must not be trusted for authorization.
 
 The authenticated username and roles must come from validated claims.
+
+Current authorization-service user tokens contain `sub`, `authorities`, `iat`, and `exp`, but no `iss` or `aud`. AH-01 therefore validates the shared HS256 signing configuration and lifetime without issuer/audience validation. Do not describe this as existing issuer validation or require new claims on legacy user tokens as an incidental part of delegation.
 
 ### 12.2 MCP execution context
 
 The current application-lifetime MCP connections do not provide sufficient per-user delegation for mutation tools.
 
-The implementation must provide a request-scoped execution context without placing credentials in LLM-visible tool arguments. Acceptable designs include:
+Introduce an immutable, explicit `ToolExecutionContext` parameter through `IToolDefinition.ExecuteAsync`, `ToolRegistry.ExecuteAsync`, and `McpRemoteTool.ExecuteAsync`, separate from model-provided business arguments. It carries the validated actor, authorized scopes, correlation identifiers, and, for durable mutations, `agentRunId` and the persisted `actionId`.
 
-- A user-delegated access token attached by the MCP transport per call.
-- A short-lived internal delegation token issued by `ai-assistant-service`, containing actor, audience, scope, agent run ID, and expiration.
+HTTP entry points construct this context from authenticated claims. Background resumption reconstructs it from the owned run and its still-valid persisted authorization/approval records, not from event payload identity or a saved bearer token. Read-only chat and startup discovery do not invent agent runs or mutation action IDs.
 
-The delegation token must:
+The orchestrator must persist an action ID and its exact validated arguments before the first external mutation, and reuse them after timeout or restart. Model-supplied identity or execution-metadata fields must be rejected rather than overriding this context.
 
-- Be signed.
-- Be short-lived.
-- Be audience-restricted to calendar-service.
-- Contain only the scopes required for the action.
-- Be validated by calendar-service.
-- Never be included in prompts, tool schemas, tool results, or application logs.
+The registry may remain a singleton tool catalog, but neither it nor registered tools may capture scoped `ICurrentUserAccessor`, user tokens, or mutable per-user headers. Discovery metadata can be shared; authenticated execution sessions cannot be bound to a different caller.
+
+AH-02 must record and prove the transport mechanism before AH-03/AH-04 proceed: either execution-scoped authenticated clients, or a verified per-call transport that binds headers and sessions to the explicit context. Do not mutate shared `HttpClient.DefaultRequestHeaders`. If the SDK cannot guarantee isolated per-call credentials, use execution-scoped clients. Cancellation, disposal, parallel callers, and background runs without `HttpContext` must be covered.
+
+### 12.3 Delegation token trust and calendar authentication
+
+For calendar hiring tools, issue short-lived internal delegation tokens with an actor, explicit token type, issuer, calendar-service audience, least-privilege scopes, expiration, and the applicable run/action IDs. Carry credentials and signed execution metadata outside LLM-visible tool schemas and business arguments.
+
+Delegation must use a signing key distinct from the marketplace user-token HS256 secret. A type or `kid` field alone is insufficient: existing services do not enforce those fields. Only the calendar delegation validator may trust the delegation key, and only for explicitly delegated operations. Configure keys through secrets/configuration, with no committed values or token logging.
+
+Calendar must validate the allowed algorithm, signature, required expiration, issuer, audience, token type, actor, and required scopes. Missing, expired, wrong-audience, wrong-type, or insufficient-scope delegation must fail closed. Delegation tokens must not fall back to the legacy user-token path or authorize unrelated REST/payment operations; other services must continue rejecting them under their existing user-token key.
+
+Calendar currently uses bespoke `JwtAuthMiddleware` and manual controller checks, not a registered ASP.NET authentication scheme. Before AH-02/AH-03 implementation, record whether to extend that explicit enforcement pattern for MCP or introduce a dedicated ASP.NET scheme/policy. Either design must preserve existing audience-less user tokens on existing user routes while keeping delegation validation separate and mandatory on every protected MCP invocation. `UseAuthorization()` alone does not satisfy this requirement.
+
+Tokens must never appear in prompts, tool schemas, tool results, persisted action arguments, or application logs.
 
 Service credentials alone are insufficient because calendar-service must know which user authorized the action.
 
-### 12.3 Authorization principle
+### 12.4 Authorization principle
 
 Calendar-service performs the final authorization check. The AI service's policy decision is an additional safety boundary, not a replacement for domain authorization.
 
@@ -600,7 +647,7 @@ Before a state-changing tool call, the orchestrator must:
 1. Load the latest agent run and negotiation state.
 2. Validate the proposed action against policy.
 3. Verify a matching approval when required.
-4. Generate or reuse a stable action ID.
+4. Generate and persist a stable action ID with the exact validated arguments, or reload the existing action for a retry.
 5. Execute the tool with delegated authorization.
 6. Persist the result.
 7. Advance state only from the verified result.
@@ -631,6 +678,24 @@ The AI service must consume relevant events using an inbox/checkpoint pattern:
 
 An event is a wake-up signal, not authoritative state by itself.
 
+### 15.1 Event contract and delivery
+
+Use a dedicated `negotiation-events` topic for versioned negotiation domain events. Keep the existing flat `notification-events` contract compatible for current producers; do not use its string-map `ActionPayload` as the agent's durable event contract.
+
+Calendar owns the versioned negotiation event schema. AH-10 must check in its contract/schema and fixtures alongside the calendar producer and use them in AI and notification consumer contract tests. Every envelope includes:
+
+- `eventId`: generated once with the committed transition and retained on every outbox retry.
+- `eventType`, `schemaVersion`, and `occurredAt` (UTC).
+- `negotiationId`, authoritative participant identifiers, and `negotiationVersion` for ordering.
+- `agentRunId` when linked to an agent run, `actionId` when applicable, and `bookingId` for booking creation.
+- A typed event-specific payload; no credentials or unnecessary free-form messages.
+
+Use `negotiationId` as the Kafka key and preserve `traceparent` in Kafka headers. Distinguish the envelope's schema version from the negotiation's concurrency version. Manual negotiations may have no agent run; consumers must not infer an authorized run from an untrusted correlation field.
+
+Persist each state transition, its stable event ID, and outbox payload atomically. Kafka delivery is at least once, not physically exactly once. AI and notification-service use separate consumer groups. Notification-service maps domain events to its existing persisted notification/SSE presentation and deduplicates by `(eventId, recipient)`; the AI inbox deduplicates by event ID with recoverable resumption state.
+
+Consumers disable auto-commit and commit only after durable processing or deliberate dead-letter handling. Retryable failures leave or rewind the offset. Unsupported schema versions and malformed envelopes produce explicit errors and follow the dead-letter policy, not a success-shaped skip.
+
 ---
 
 ## 16. Booking Creation
@@ -648,6 +713,24 @@ Calendar-service must:
 - Return the existing booking when the same idempotent action is retried.
 
 If the slot became unavailable, the negotiation must not silently select another time. It should return a conflict so the agent can ask for approval or prepare a new offer.
+
+### 16.1 Price authority and existing booking behavior
+
+Before conversion, the agreed immutable negotiation revision is authoritative for terms. Conversion creates an `ACCEPTED`, unfunded booking, not a new `PENDING` request requiring a second TaskMaster acceptance. Copy `SlotStart`, `DurationHours`, and `OfferedRatePerHour` from that revision and call the existing `FixAgreedPrice(agreedCurrency)` logic once to establish `AgreedAmount` and `AgreedCurrency`, including its two-decimal, midpoint-to-even rounding.
+
+The approval UI must show that same computed total and currency. After conversion, the booking's frozen agreed amount/currency are authoritative for escrow; the linked negotiation remains immutable provenance. Neither subsequent negotiation operations nor direct-booking endpoints may reprice the converted booking. Preserve legacy direct-booking behavior and do not reinterpret old booking messages as negotiation revisions.
+
+### 16.2 Availability, coexistence, and concurrency
+
+Open negotiations, including `AGREED` negotiations awaiting conversion, do not reserve slots. They may coexist with direct pending bookings and other negotiations for the same slot. Existing direct-booking duplicate-request rules still apply.
+
+Agreement conversion must share calendar-service's occupied-range enforcement with direct booking acceptance, including all hours of a multi-hour booking. A successful conversion applies the same auto-decline behavior and notifications for overlapping `PENDING` bookings. Conversely, direct acceptance may make an open negotiation's terms unavailable; it must not silently change those terms or turn the negotiation into a booking.
+
+Re-check availability on proposals, agreement acceptance, and final conversion; loss of availability must not prevent declining or cancelling a negotiation. A losing conversion returns a typed slot conflict and leaves no partial booking; the run returns to planning or requests user direction. The negotiation remains unconverted until an explicit valid transition or expiry. Terms already marked `AGREED` cannot be silently revised; replacement terms require a new offer/negotiation and approval.
+
+AH-05/AH-21 must document the repository-level atomicity and recovery mechanism covering the unique negotiation-to-booking link, occupied ranges, negotiation state, and durable booking-created event. A read-then-write availability check or process-local lock alone is insufficient across service replicas. Coordinate any necessary change to the direct acceptance path so both paths use the same concurrency boundary.
+
+Use a partial unique index for non-null `NegotiationId` so legacy/direct bookings without a negotiation remain valid. Concurrency tests must use Mongo-backed repositories and independent service instances, not only mocks or concurrent calls to one singleton, and cover direct acceptance racing conversion, overlapping multi-hour conversions, retries, and interruption between durable writes.
 
 ---
 
@@ -697,6 +780,8 @@ The frontend should display:
 - Audit-friendly action timeline.
 
 The UI must not present a draft or pending tool call as completed.
+
+Keep browser-facing paths aligned across the React API module, Express BFF route, and downstream controller. The BFF already proxies the entire `/api/ai-assistant` prefix and preserves authorization, so both agent-run and approval resources belong under that existing prefix. Preserve the existing authentication storage keys used by frontend and E2E setup.
 
 ---
 
@@ -749,6 +834,13 @@ Prompts, JWTs, payment data, and sensitive free-form messages must not be logged
 - Restart and resume.
 - Duplicate event and duplicate tool-call handling.
 - Slot conflict during final booking.
+- Parallel MCP calls from different users, with no identity or action-ID leakage.
+- Background event resumption without an HTTP request or persisted bearer token.
+- Legacy user-token compatibility and rejection of delegated tokens on unrelated routes/services.
+- Typed argument rejection for malformed money, versions, dates, arrays, and placeholders.
+- Mongo-backed direct acceptance versus conversion races, including multi-hour overlaps.
+- Stable event IDs across outbox retries, schema compatibility, and per-recipient notification deduplication.
+- History beyond two messages reaching server-side context assembly through the browser.
 
 ### 20.3 End-to-end scenarios
 
@@ -761,14 +853,17 @@ Prompts, JWTs, payment data, and sensitive free-form messages must not be logged
 7. An unauthorized user attempts to access another user's run or negotiation.
 8. The model attempts to exceed the stored budget; policy enforcement blocks it.
 
+Run browser scenarios with the repository's single-worker Playwright setup against the real Compose stack, reusing authenticated storage-state helpers and unique users where pending-request rules apply. Stub model/network responses for deterministic decisions; do not depend on live Ollama wording or fixed sleeps.
+
 ---
 
 ## 21. Delivery Plan
 
 ### Phase 1 - Secure calendar tools
 
-- Add JWT validation to `ai-assistant-service`.
-- Define delegated authorization for MCP calls.
+- Preserve the implemented AI JWT authentication and extend it to new protected endpoints.
+- Add explicit tool execution context, isolated delegated transport, and separate delegation-token trust.
+- Complete the .NET MCP compatibility spike and calendar authentication integration decision.
 - Add calendar-service MCP server.
 - Expose authenticated read-only availability and booking tools.
 - Replace the local `GetBookingsTool`.
@@ -783,9 +878,9 @@ Prompts, JWTs, payment data, and sensitive free-form messages must not be logged
 
 ### Phase 3 - Durable agent
 
-- Add the AI service state store.
+- Add the AI service state store with dedicated provisioning, credentials, and database-ownership enforcement.
 - Add agent runs, actions, approvals, and event checkpoints.
-- Replace the fixed two-message limit with configurable, token-budgeted context assembly.
+- Replace both browser and service two-message limits with coordinated, bounded, token-budgeted context assembly.
 - Add rolling conversation summaries and retrieval of relevant earlier messages.
 - Implement deterministic state-machine orchestration.
 - Resume runs from Kafka events.
@@ -809,6 +904,29 @@ Prompts, JWTs, payment data, and sensitive free-form messages must not be logged
 
 - Show escrow funding as the next required user action.
 - Do not enable automatic payment until a separate payment-agent security specification is approved.
+
+### 21.1 Review-driven backlog prerequisites
+
+The companion backlog's task IDs remain the delivery references. The following scope is required even where its original task wording is shorter; unresolved implementation choices must be recorded before dependent tasks start.
+
+| Task(s) | Required scope or prerequisite |
+|---|---|
+| AH-01 | Already implemented for chat; preserve signing/lifetime validation and do not imply legacy issuer/audience claims exist |
+| AH-02 | Explicit execution context through the full tool pipeline; isolated transport/lifetimes; distinct delegation key; calendar authentication decision and legacy compatibility |
+| AH-03 | .NET MCP package/transport spike and explicit registration; depends on AH-02's authentication/transport contract |
+| AH-04 | Retire the local tool and its misleading model-visible "all bookings" description; use caller-authorized calendar tools |
+| AH-05, AH-06 | Booking/negotiation authority and coexistence rules; Mongo-backed concurrency coverage |
+| AH-08 | TaskMaster REST/UI only in v1; no TaskMaster-side agent |
+| AH-09 | Typed arguments and trusted action metadata across AI and calendar, not just calendar tool definitions; requires AH-03's MCP server infrastructure |
+| AH-10 | Dedicated domain topic, versioned envelope, durable event IDs/outbox, notification deduplication, and shared contract fixtures |
+| AH-11 | Store decision plus provisioning, credentials, bootstrap/configuration, and ownership-check updates |
+| AH-12, AH-23 | React/BFF/controller routing alignment under the existing AI prefix |
+| AH-14 | Coordinated frontend and backend history handling, including reload/restart behavior |
+| AH-15, AH-17 | Persist actions before dispatch; reuse IDs on retry; reconstruct authorized execution context for background resumption |
+| AH-21 | Requires AH-03/AH-09's MCP execution contracts and AH-10's event infrastructure as well as AH-06; reconcile price, accepted status, occupied ranges, unique links, and crash recovery |
+| AH-25 | Real-stack, single-worker, stubbed-model E2E scenarios plus the integration cases in section 20.2 |
+
+Documentation-path cleanup identified by the review is separate from this feature; do not restore moved root specs or change unrelated instructions as part of hiring-agent implementation.
 
 ---
 
