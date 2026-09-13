@@ -10,10 +10,14 @@ namespace ai_assistant_service.Controllers;
 public sealed class AiAssistantController : ControllerBase
 {
     private readonly IAiAssistantService _assistantService;
+    private readonly ICurrentUserAccessor _currentUserAccessor;
 
-    public AiAssistantController(IAiAssistantService assistantService)
+    public AiAssistantController(
+        IAiAssistantService assistantService,
+        ICurrentUserAccessor currentUserAccessor)
     {
         _assistantService = assistantService;
+        _currentUserAccessor = currentUserAccessor;
     }
 
     [HttpPost("chat")]
@@ -25,7 +29,8 @@ public sealed class AiAssistantController : ControllerBase
             return BadRequest(new { message = "Message is required." });
         }
 
-        var response = await _assistantService.ChatAsync(request, cancellationToken);
+        var currentUser = _currentUserAccessor.GetRequiredUser();
+        var response = await _assistantService.ChatAsync(request, currentUser, cancellationToken);
         return Ok(response);
     }
 }

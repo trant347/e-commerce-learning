@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ai_assistant_service.Auth;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services;
 using ai_assistant_service.Services.Contracts;
@@ -36,7 +37,8 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, new ToolRegistry(Array.Empty<IToolDefinition>()),
             NullLogger<AiAssistantService>.Instance);
 
-        var resp = await svc.ChatAsync(new ChatRequest { Message = "hi" }, CancellationToken.None);
+        var resp = await svc.ChatAsync(
+            new ChatRequest { Message = "hi" }, TestUser(), CancellationToken.None);
 
         Assert.Equal("Hello!", resp.Answer);
         Assert.Equal("qwen3:8b", resp.Model);
@@ -87,7 +89,7 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "find a pet sitter" }, CancellationToken.None);
+            new ChatRequest { Message = "find a pet sitter" }, TestUser(), CancellationToken.None);
 
         Assert.Equal("I found Alice.", resp.Answer);
         Assert.Equal(1, fakeTool.CallCount);
@@ -124,7 +126,7 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "what categories?" }, CancellationToken.None);
+            new ChatRequest { Message = "what categories?" }, TestUser(), CancellationToken.None);
 
         Assert.Equal("Pet Care is available.", resp.Answer);
         Assert.Equal(1, fakeTool.CallCount);
@@ -149,7 +151,8 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, new ToolRegistry(Array.Empty<IToolDefinition>()),
             NullLogger<AiAssistantService>.Instance);
 
-        await svc.ChatAsync(new ChatRequest { Message = "hi" }, CancellationToken.None);
+        await svc.ChatAsync(
+            new ChatRequest { Message = "hi" }, TestUser(), CancellationToken.None);
 
         Assert.NotNull(capturedMessages);
         Assert.Equal("system", capturedMessages![0].Role);
@@ -197,7 +200,7 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "loop forever" }, CancellationToken.None);
+            new ChatRequest { Message = "loop forever" }, TestUser(), CancellationToken.None);
 
         Assert.Contains("wasn't able to find a complete answer", resp.Answer);
         Assert.Equal(5, fakeTool.CallCount);
@@ -254,13 +257,15 @@ public class AiAssistantServiceTests
             BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
 
         var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "find a pet sitter" }, CancellationToken.None);
+            new ChatRequest { Message = "find a pet sitter" }, TestUser(), CancellationToken.None);
 
         Assert.Equal("I found Alice.", resp.Answer);
         Assert.Single(resp.Mentions);
         Assert.Equal("tm-1", resp.Mentions[0].Id);
         Assert.Equal("Alice", resp.Mentions[0].Name);
     }
+
+    private static CurrentUser TestUser() => new("alice", ["ROLE_USER"]);
 
     private sealed class RecordingTool : IToolDefinition
     {

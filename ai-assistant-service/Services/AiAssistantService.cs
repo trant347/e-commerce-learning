@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ai_assistant_service.Auth;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
@@ -32,9 +33,14 @@ public sealed class AiAssistantService : IAiAssistantService
         _seededExamples = new Lazy<IReadOnlyList<OllamaChatMessage>>(LoadFewShotExamples);
     }
 
-    public async Task<ChatResponse> ChatAsync(ChatRequest request, CancellationToken cancellationToken)
+    public async Task<ChatResponse> ChatAsync(
+        ChatRequest request,
+        CurrentUser currentUser,
+        CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Starting chat request with message length={MessageLength}", 
+        _logger.LogInformation(
+            "Starting chat request for authenticated user with {RoleCount} role(s), message length={MessageLength}",
+            currentUser.Roles.Count,
             request.Message?.Length ?? 0);
 
         var model = _configuration["Ollama:Model"] ?? "llama3.2:3b";

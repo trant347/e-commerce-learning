@@ -1,31 +1,24 @@
 ﻿using Microsoft.AspNetCore.Authorization;
-using System.Security.Claims;
 
-namespace ai_assistant_service.Auth
+namespace ai_assistant_service.Auth;
+
+public sealed class AuthorizeUserRequirement : IAuthorizationRequirement
 {
-    public class AuthorizeUserRequirement : IAuthorizationRequirement
-    {
-    }
+}
 
-    public class AuthorizeUserHandler : AuthorizationHandler<AuthorizeUserRequirement>
+public sealed class AuthorizeUserHandler : AuthorizationHandler<AuthorizeUserRequirement>
+{
+    protected override Task HandleRequirementAsync(
+        AuthorizationHandlerContext context,
+        AuthorizeUserRequirement requirement)
     {
-        protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, AuthorizeUserRequirement requirement)
+        if (context.User.Identity?.IsAuthenticated == true
+            && context.User.HasClaim(claim =>
+                claim.Type == "sub" && !string.IsNullOrWhiteSpace(claim.Value)))
         {
-            var user = context.User;
-            if (user == null || !(user.Identity?.IsAuthenticated ?? false))
-            {
-                return Task.CompletedTask;
-            }
-
-            var subClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                        ?? user.FindFirst("sub")?.Value;
-
-            if (!string.IsNullOrWhiteSpace(subClaim))
-            {
-                // Everything checks out! Grant access.
-                context.Succeed(requirement);
-            }
-            return Task.CompletedTask;
+            context.Succeed(requirement);
         }
+
+        return Task.CompletedTask;
     }
 }

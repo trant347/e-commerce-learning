@@ -1,11 +1,12 @@
 @ai_assistant_service_HostAddress = http://localhost:5180
+@access_token = replace-with-marketplace-jwt
 
 POST {{ai_assistant_service_HostAddress}}/api/ai-assistant/chat
 Content-Type: application/json
+Authorization: Bearer {{access_token}}
 
 {
-  "message": "What products do you have for office chairs under 200 dollars?",
-  "userId": "demo-user"
+  "message": "What products do you have for office chairs under 200 dollars?"
 }
 
 ###

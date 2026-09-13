@@ -1,15 +1,14 @@
 ﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc.Filters;
 
-namespace ai_assistant_service.Auth
+namespace ai_assistant_service.Auth;
+
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+public sealed class CustomAuthorizeAttribute : AuthorizeAttribute
 {
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-    public class CustomAuthorizeAttribute: AuthorizeAttribute
+    public const string PolicyName = "AuthenticatedMarketplaceUser";
+
+    public CustomAuthorizeAttribute()
     {
-        public const string PolicyName = "ValidUserAndSubPolicy";
-        public CustomAuthorizeAttribute() 
-        { 
-            Policy = PolicyName;
-        }       
+        Policy = PolicyName;
     }
 }

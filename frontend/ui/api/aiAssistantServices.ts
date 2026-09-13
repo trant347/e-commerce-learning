@@ -19,12 +19,12 @@ export interface ChatHistoryMessage {
 }
 
 class AiAssistantServices {
-    chat(message: string, userId?: string, history?: ChatHistoryMessage[]): Promise<ChatResponse> {
+    chat(message: string, history?: ChatHistoryMessage[]): Promise<ChatResponse> {
         const token = Auth.getToken();
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
         return axios
-            .post('/api/ai-assistant/chat', { message, userId, history }, { headers })
+            .post('/api/ai-assistant/chat', { message, history }, { headers })
             .then((res) => res.data);
     }
 }

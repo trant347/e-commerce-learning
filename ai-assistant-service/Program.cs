@@ -54,10 +54,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(CustomAuthorizeAttribute.PolicyName, policy =>
-        policy.Requirements.Add(new AuthorizeUserRequirement()));
+    {
+        policy.RequireAuthenticatedUser();
+        policy.Requirements.Add(new AuthorizeUserRequirement());
+    });
 });
 
 builder.Services.AddSingleton<IAuthorizationHandler, AuthorizeUserHandler>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();
 
 builder.Services.AddLogging();
 
@@ -112,3 +117,5 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "ai-assist
 app.MapControllers();
 
 app.Run();
+
+public partial class Program;

@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import Auth from '../../api/authenticationStorage';
 import AiAssistantServices, { TaskMasterMention } from '../../api/aiAssistantServices';
 
 import './chat-overlay.css';
@@ -189,11 +188,10 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
         });
 
         try {
-            const userId = Auth.getUser();
             // Send only the immediately previous user+assistant exchange as history
             const prior = nextMessages.slice(1, -1); // exclude welcome greeting and current user message
             const history = prior.slice(-2).map(m => ({ role: m.role, content: m.content }));
-            const response = await AiAssistantServices.chat(text, userId, history);
+            const response = await AiAssistantServices.chat(text, history);
             const assistantMessage: IChatMessage = {
                 role: 'assistant',
                 content: response.answer || 'No answer returned from assistant.',
