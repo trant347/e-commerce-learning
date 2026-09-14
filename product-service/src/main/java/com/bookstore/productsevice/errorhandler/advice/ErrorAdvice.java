@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import com.bookstore.productsevice.location.LocationValidationException;
 
 @ControllerAdvice
 public class ErrorAdvice {
@@ -76,6 +77,15 @@ public class ErrorAdvice {
     public ResponseEntity<Map<String, Object>> handleInvalidFileUpload(InvalidFileUploadException ex) {
         Map<String, Object> body = Map.of("error", ex.getMessage());
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(LocationValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleLocationValidation(LocationValidationException ex) {
+        return new ResponseEntity<>(
+                Map.of(
+                        "error", "invalid_location",
+                        "message", ex.getMessage()),
+                HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

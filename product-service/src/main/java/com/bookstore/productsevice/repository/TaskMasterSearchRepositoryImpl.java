@@ -1,5 +1,6 @@
 package com.bookstore.productsevice.repository;
 
+import com.bookstore.productsevice.location.LocationSearchCriteria;
 import com.bookstore.productsevice.model.TaskMaster;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -18,7 +19,17 @@ public class TaskMasterSearchRepositoryImpl implements TaskMasterSearchRepositor
     }
 
     @Override
-    public List<TaskMaster> searchWithFilters(String category, String location,
+    public List<TaskMaster> findByLocation(LocationSearchCriteria location, Integer limit) {
+        Query query = new Query();
+        addLocationCriteria(query, location);
+        if (limit != null) {
+            query.limit(limit);
+        }
+        return mongoTemplate.find(query, TaskMaster.class);
+    }
+
+    @Override
+    public List<TaskMaster> searchWithFilters(String category, LocationSearchCriteria location,
                                                Double minRate, Double maxRate,
                                                Double minRating, int limit) {
         Query query = new Query();
@@ -26,8 +37,8 @@ public class TaskMasterSearchRepositoryImpl implements TaskMasterSearchRepositor
         if (category != null && !category.isBlank()) {
             query.addCriteria(Criteria.where("jobCategories").is(category));
         }
-        if (location != null && !location.isBlank()) {
-            query.addCriteria(Criteria.where("location").is(location));
+        if (location != null) {
+            addLocationCriteria(query, location);
         }
         if (minRate != null || maxRate != null) {
             Criteria rateCriteria = Criteria.where("hourlyRateUsd");
@@ -41,5 +52,18 @@ public class TaskMasterSearchRepositoryImpl implements TaskMasterSearchRepositor
 
         query.limit(limit);
         return mongoTemplate.find(query, TaskMaster.class);
+    }
+
+    private static void addLocationCriteria(Query query, LocationSearchCriteria location) {
+        switch (location.matchMode()) {
+            case CITY -> query.addCriteria(Criteria.where("locationCity").is(location.city()));
+            case STATE -> query.addCriteria(Criteria.where("locationStateCode").is(location.stateCode()));
+            case CITY_AND_STATE -> query.addCriteria(
+                    Criteria.where("locationCity").is(location.city())
+                            .and("locationStateCode").is(location.stateCode()));
+            case CITY_OR_STATE -> query.addCriteria(new Criteria().orOperator(
+                    Criteria.where("locationCity").is(location.city()),
+                    Criteria.where("locationStateCode").is(location.stateCode())));
+        }
     }
 }

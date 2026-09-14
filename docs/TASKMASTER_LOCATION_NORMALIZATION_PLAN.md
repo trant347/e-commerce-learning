@@ -1,6 +1,6 @@
 # TaskMaster Location Normalization Plan
 
-> Status: **Proposed**
+> Status: **Implemented**
 >
 > Scope: Normalize TaskMaster locations in `product-service` so searches can
 > match a city (`Chicago`), state (`IL` or `Illinois`), or city and state
@@ -85,11 +85,12 @@ Search behavior:
    validate them, and send the canonical `City, ST` value. There is currently
    no React location-search UI; search behavior remains limited to the MCP tool
    and existing REST endpoint unless a separate UI feature is added.
-8. Update `seed/taskMasters.json` and every mock/test document that creates a
-   TaskMaster or TaskMasterApplication to use canonical US city/state values and
-   populate normalized fields. Replace stored non-US samples such as `Hanoi`.
-   Keep or add city-only values such as `Chicago` where they are search inputs,
-   because city-only search is supported and requires coverage.
+8. Normalize every record loaded from `seed/taskMasters.json` before saving it,
+   and update every mock/test document that creates a TaskMaster or
+   TaskMasterApplication to use canonical US city/state values and normalized
+   fields. Replace stored non-US samples such as `Hanoi`. Keep or add city-only
+   values such as `Chicago` where they are search inputs, because city-only
+   search is supported and requires coverage.
 9. Add parser, repository, cache, controller, application-acceptance, MCP, and
    frontend tests for state code, full state name, city-only, combined,
    case-insensitive, canonical formatting, invalid, and ambiguous inputs.

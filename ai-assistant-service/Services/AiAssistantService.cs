@@ -106,6 +106,8 @@ public sealed class AiAssistantService : IAiAssistantService
 
         messages.Add(new OllamaChatMessage { Role = "user", Content = request.Message });
         var hadToolExecutionFailure = false;
+        var executedToolNames = new List<string>();
+        var executedToolMessages = new List<OllamaChatMessage>();
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)
@@ -147,6 +149,11 @@ public sealed class AiAssistantService : IAiAssistantService
                 _logger.LogInformation("Executing tool={ToolName} with args={Args}", 
                     toolName, string.Join(", ", args.Select(a => $"{a.Key}={a.Value}")));
 
+                if (!executedToolNames.Contains(toolName, StringComparer.Ordinal))
+                {
+                    executedToolNames.Add(toolName);
+                }
+
                 string result;
                 try
                 {
@@ -167,11 +174,13 @@ public sealed class AiAssistantService : IAiAssistantService
                 _logger.LogInformation("Tool={ToolName} returned result length={ResultLength}", 
                     toolName, result?.Length ?? 0);
 
-                messages.Add(new OllamaChatMessage
+                var toolMessage = new OllamaChatMessage
                 {
                     Role    = "tool",
                     Content = result
-                });
+                };
+                messages.Add(toolMessage);
+                executedToolMessages.Add(toolMessage);
             }
         }
 
@@ -194,14 +203,14 @@ public sealed class AiAssistantService : IAiAssistantService
         _logger.LogInformation("Chat request completed with final answer length={AnswerLength}, total messages={MessageCount}", 
             finalContent.Length, messages.Count);
 
-        var mentions = ExtractMentions(messages);
+        var mentions = ExtractMentions(executedToolMessages);
         _logger.LogInformation("Extracted {MentionCount} task master mentions from tool results", mentions.Count);
 
         return new ChatResponse
         {
             Answer   = finalContent,
             Model    = model,
-            Sources  = _toolRegistry.All.Select(t => t.Name).ToList(),
+            Sources  = executedToolNames,
             Mentions = mentions
         };
     }

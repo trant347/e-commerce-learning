@@ -1,6 +1,8 @@
 package com.bookstore.productsevice.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
+import lombok.Getter;
 import lombok.experimental.Accessors;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -30,6 +32,10 @@ public class TaskMasterApplication {
     private String name;
     private int age;
     private String location;
+    @Getter(onMethod_ = @JsonIgnore)
+    private String locationCity;
+    @Getter(onMethod_ = @JsonIgnore)
+    private String locationStateCode;
     private String description;
     private double hourlyRateUsd;
     private String photo;

@@ -1,5 +1,7 @@
 package com.bookstore.productsevice.services;
 
+import com.bookstore.productsevice.location.LocationNormalizer;
+import com.bookstore.productsevice.location.LocationSearchCriteria;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,6 +43,7 @@ public class ProductCacheService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final TaskMasterRepository repository;
     private final ObjectMapper objectMapper;
+    private final LocationNormalizer locationNormalizer;
 
     // ── Metrics ─────────────────────────────────────────────────────────
     private final Counter itemHits;
@@ -58,10 +61,12 @@ public class ProductCacheService {
     public ProductCacheService(RedisTemplate<String, Object> redisTemplate,
                                TaskMasterRepository repository,
                                ObjectMapper objectMapper,
-                               MeterRegistry meterRegistry) {
+                               MeterRegistry meterRegistry,
+                               LocationNormalizer locationNormalizer) {
         this.redisTemplate = redisTemplate;
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.locationNormalizer = locationNormalizer;
 
         this.itemHits         = Counter.builder("cache.hits").tag("type", "item").register(meterRegistry);
         this.itemMisses       = Counter.builder("cache.misses").tag("type", "item").register(meterRegistry);
@@ -111,8 +116,13 @@ public class ProductCacheService {
     }
 
     public List<TaskMaster> getByLocation(String location) {
-        String listKey = FILTER_PREFIX + "location:" + location;
-        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findAllByLocation(location));
+        LocationSearchCriteria criteria = locationNormalizer.normalizeForSearch(location);
+        String listKey = FILTER_PREFIX + "location:" + criteria.cacheKey();
+        return getViaFragmentCache(
+                listKey,
+                filterHits,
+                filterMisses,
+                () -> repository.findByLocation(criteria, null));
     }
 
     public List<TaskMaster> getByCategory(String category) {
@@ -133,9 +143,10 @@ public class ProductCacheService {
     // ── Limited filter methods (for MCP tools — push limit to MongoDB) ──
 
     public List<TaskMaster> getByLocationLimited(String location, int limit) {
-        String listKey = FILTER_PREFIX + "location:" + location + ":limit:" + limit;
+        LocationSearchCriteria criteria = locationNormalizer.normalizeForSearch(location);
+        String listKey = FILTER_PREFIX + "location:" + criteria.cacheKey() + ":limit:" + limit;
         return getViaFragmentCache(listKey, filterHits, filterMisses,
-                () -> repository.findAllByLocation(location, PageRequest.of(0, limit)));
+                () -> repository.findByLocation(criteria, limit));
     }
 
     public List<TaskMaster> getByCategoryLimited(String category, int limit) {
@@ -159,10 +170,20 @@ public class ProductCacheService {
     public List<TaskMaster> searchWithFilters(String category, String location,
                                                Double minRate, Double maxRate,
                                                Double minRating, int limit) {
-        String listKey = FILTER_PREFIX + "search:" + category + ":" + location
+        LocationSearchCriteria locationCriteria = location == null
+                ? null
+                : locationNormalizer.normalizeForSearch(location);
+        String locationKey = locationCriteria == null ? "none" : locationCriteria.cacheKey();
+        String listKey = FILTER_PREFIX + "search:" + category + ":" + locationKey
                 + ":" + minRate + ":" + maxRate + ":" + minRating + ":limit:" + limit;
         return getViaFragmentCache(listKey, filterHits, filterMisses,
-                () -> repository.searchWithFilters(category, location, minRate, maxRate, minRating, limit));
+                () -> repository.searchWithFilters(
+                        category,
+                        locationCriteria,
+                        minRate,
+                        maxRate,
+                        minRating,
+                        limit));
     }
 
     // ── Categories cache ────────────────────────────────────────────────
@@ -377,7 +398,14 @@ public class ProductCacheService {
         if (value == null) return null;
         if (value instanceof TaskMaster tm) return tm;
         try {
-            return objectMapper.convertValue(value, TaskMaster.class);
+            TaskMaster taskMaster = objectMapper.convertValue(value, TaskMaster.class);
+            if (taskMaster.getLocationCity() == null || taskMaster.getLocationStateCode() == null) {
+                var location = locationNormalizer.normalizeForWrite(taskMaster.getLocation());
+                taskMaster.setLocation(location.displayLocation())
+                        .setLocationCity(location.city())
+                        .setLocationStateCode(location.stateCode());
+            }
+            return taskMaster;
         } catch (Exception e) {
             log.warn("[Cache] Failed to convert cached value to TaskMaster", e);
             return null;

@@ -4,13 +4,15 @@ import { useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
+import { formatUsLocation, US_STATES, validateUsCity } from '../../common/usStates';
 
 import './new-task-master.css';
 
 interface FormState {
     name: string;
     age: string;
-    location: string;
+    city: string;
+    stateCode: string;
     description: string;
     hourlyRateUsd: string;
     photo: string;
@@ -23,7 +25,8 @@ export default function NewTaskMaster() {
     const [form, setForm] = useState<FormState>({
         name: '',
         age: '',
-        location: '',
+        city: '',
+        stateCode: '',
         description: '',
         hourlyRateUsd: '',
         photo: '',
@@ -39,7 +42,7 @@ export default function NewTaskMaster() {
         return <Navigate to="/" replace />;
     }
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         setForm({ ...form, [e.target.name]: e.target.value });
     };
 
@@ -73,12 +76,18 @@ export default function NewTaskMaster() {
             return;
         }
 
+        const cityError = validateUsCity(form.city);
+        if (cityError) {
+            setFeedback({ type: 'error', message: cityError });
+            return;
+        }
+
         setSubmitting(true);
         try {
             const created = await TaskMasterServices.createTaskMaster({
                 name: form.name,
                 age: parseInt(form.age, 10),
-                location: form.location,
+                location: formatUsLocation(form.city, form.stateCode),
                 description: form.description,
                 hourlyRateUsd: parseFloat(form.hourlyRateUsd),
                 photo: form.photo || null,
@@ -87,8 +96,9 @@ export default function NewTaskMaster() {
             });
 
             navigate(`/product/${created.id}`);
-        } catch (err) {
-            setFeedback({ type: 'error', message: 'Failed to create TaskMaster. Please try again.' });
+        } catch (err: any) {
+            const message = err?.response?.data?.message || 'Failed to create TaskMaster. Please try again.';
+            setFeedback({ type: 'error', message });
         } finally {
             setSubmitting(false);
         }
@@ -110,8 +120,18 @@ export default function NewTaskMaster() {
                 </div>
 
                 <div className="user-input-row">
-                    <label>Location *</label>
-                    <input type="text" name="location" value={form.location} onChange={handleChange} required placeholder="e.g. New York, NY" />
+                    <label htmlFor="taskmaster-city">City *</label>
+                    <input id="taskmaster-city" type="text" name="city" value={form.city} onChange={handleChange} required placeholder="e.g. Chicago" />
+                </div>
+
+                <div className="user-input-row">
+                    <label htmlFor="taskmaster-state">State *</label>
+                    <select id="taskmaster-state" name="stateCode" value={form.stateCode} onChange={handleChange} required>
+                        <option value="">Select a state</option>
+                        {US_STATES.map(([code, name]) => (
+                            <option key={code} value={code}>{name} ({code})</option>
+                        ))}
+                    </select>
                 </div>
 
                 <div className="user-input-row">

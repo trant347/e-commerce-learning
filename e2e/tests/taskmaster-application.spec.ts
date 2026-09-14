@@ -7,7 +7,8 @@ const testUser = readTestUser(TEST_USER_FILE);
 const applicationData = {
   name: 'Jane Doe',
   age: '32',
-  location: 'Toronto, ON',
+  city: 'Chicago',
+  stateCode: 'IL',
   description: 'Experienced tutor with 8 years of math instruction.',
   hourlyRateUsd: '49.99',
   category: 'tutoring',
@@ -18,7 +19,8 @@ async function fillAndSubmitApplication(page: Page): Promise<void> {
 
   await page.locator('input[name="name"]').fill(applicationData.name);
   await page.locator('input[name="age"]').fill(applicationData.age);
-  await page.locator('input[name="location"]').fill(applicationData.location);
+  await page.locator('input[name="city"]').fill(applicationData.city);
+  await page.locator('select[name="stateCode"]').selectOption(applicationData.stateCode);
   await page.locator('textarea[name="description"]').fill(applicationData.description);
   await page.locator('input[name="hourlyRateUsd"]').fill(applicationData.hourlyRateUsd);
 

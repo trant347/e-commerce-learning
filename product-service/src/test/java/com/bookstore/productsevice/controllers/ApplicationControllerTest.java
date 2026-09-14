@@ -1,6 +1,7 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.messaging.ApplicationEventPublisher;
+import com.bookstore.productsevice.location.LocationNormalizer;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.model.TaskMasterApplication;
 import com.bookstore.productsevice.model.TaskMasterApplication.ApplicationStatus;
@@ -49,7 +50,8 @@ public class ApplicationControllerTest {
                 applicationRepository,
                 taskMasterRepository,
                 eventPublisher,
-                productCacheService);
+                productCacheService,
+                new LocationNormalizer());
     }
 
     @Test
@@ -60,7 +62,7 @@ public class ApplicationControllerTest {
                 .setApplicantUsername("panda")
                 .setName("Panda")
                 .setAge(30)
-                .setLocation("Hanoi")
+                .setLocation("Chicago, IL")
                 .setDescription("Handy")
                 .setHourlyRateUsd(25.0)
                 .setPhoto("photo.png")
@@ -87,6 +89,10 @@ public class ApplicationControllerTest {
         inOrder.verify(productCacheService).evictOnCreate();
 
         verify(eventPublisher).publishApplicationAccepted("panda", "tm-1");
+        verify(taskMasterRepository).save(argThat(taskMaster ->
+                "Chicago, IL".equals(taskMaster.getLocation())
+                        && "chicago".equals(taskMaster.getLocationCity())
+                        && "IL".equals(taskMaster.getLocationStateCode())));
         assertThat(pending.getStatus()).isEqualTo(ApplicationStatus.ACCEPTED);
         assertThat(pending.getCreatedTaskMasterId()).isEqualTo("tm-1");
     }

@@ -1,5 +1,6 @@
 package com.bookstore.productsevice;
 
+import com.bookstore.productsevice.location.LocationSearchCriteria;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.bookstore.productsevice.repository.FacetRepository;
@@ -38,11 +39,6 @@ public class MockConfiguration {
             }
 
             @Override
-            public List<TaskMaster> findAllByLocation(String location) {
-                return null;
-            }
-
-            @Override
             public List<TaskMaster> findAllByJobCategoriesContaining(String category) {
                 return null;
             }
@@ -68,11 +64,6 @@ public class MockConfiguration {
             }
 
             @Override
-            public List<TaskMaster> findAllByLocation(String location, Pageable pageable) {
-                return null;
-            }
-
-            @Override
             public List<TaskMaster> findAllByJobCategoriesContaining(String category, Pageable pageable) {
                 return null;
             }
@@ -88,7 +79,12 @@ public class MockConfiguration {
             }
 
             @Override
-            public List<TaskMaster> searchWithFilters(String category, String location, Double minRate, Double maxRate, Double minRating, int limit) {
+            public List<TaskMaster> findByLocation(LocationSearchCriteria location, Integer limit) {
+                return new ArrayList<>();
+            }
+
+            @Override
+            public List<TaskMaster> searchWithFilters(String category, LocationSearchCriteria location, Double minRate, Double maxRate, Double minRating, int limit) {
                 return new ArrayList<>();
             }
 

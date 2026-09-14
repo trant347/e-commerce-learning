@@ -4,13 +4,15 @@ import { useNavigate, Navigate } from 'react-router-dom';
 
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
+import { formatUsLocation, US_STATES, validateUsCity } from '../../common/usStates';
 
 import '../new-task-master/new-task-master.css';
 
 interface FormState {
     name: string;
     age: string;
-    location: string;
+    city: string;
+    stateCode: string;
     description: string;
     hourlyRateUsd: string;
     photo: string;
@@ -25,7 +27,8 @@ export default function ApplyForTaskMaster() {
     const [form, setForm] = useState<FormState>({
         name: '',
         age: '',
-        location: '',
+        city: '',
+        stateCode: '',
         description: '',
         hourlyRateUsd: '',
         photo: '',
@@ -48,7 +51,7 @@ export default function ApplyForTaskMaster() {
             .catch(() => setAlreadyTaskMaster(false));
     }, [username]);
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         setForm({ ...form, [e.target.name]: e.target.value });
     };
 
@@ -82,12 +85,18 @@ export default function ApplyForTaskMaster() {
             return;
         }
 
+        const cityError = validateUsCity(form.city);
+        if (cityError) {
+            setFeedback({ type: 'error', message: cityError });
+            return;
+        }
+
         setSubmitting(true);
         try {
             await TaskMasterServices.submitApplication({
                 name: form.name,
                 age: parseInt(form.age, 10),
-                location: form.location,
+                location: formatUsLocation(form.city, form.stateCode),
                 description: form.description,
                 hourlyRateUsd: parseFloat(form.hourlyRateUsd),
                 photo: form.photo || null,
@@ -96,7 +105,7 @@ export default function ApplyForTaskMaster() {
 
             setSubmitted(true);
         } catch (err: any) {
-            const msg = err?.response?.data?.error || err?.response?.data?.message || 'Failed to submit application. Please try again.';
+            const msg = err?.response?.data?.message || err?.response?.data?.error || 'Failed to submit application. Please try again.';
             setFeedback({ type: 'error', message: msg });
         } finally {
             setSubmitting(false);
@@ -160,8 +169,18 @@ export default function ApplyForTaskMaster() {
                 </div>
 
                 <div className="user-input-row">
-                    <label>Location *</label>
-                    <input type="text" name="location" value={form.location} onChange={handleChange} required placeholder="e.g. New York, NY" />
+                    <label htmlFor="application-city">City *</label>
+                    <input id="application-city" type="text" name="city" value={form.city} onChange={handleChange} required placeholder="e.g. Chicago" />
+                </div>
+
+                <div className="user-input-row">
+                    <label htmlFor="application-state">State *</label>
+                    <select id="application-state" name="stateCode" value={form.stateCode} onChange={handleChange} required>
+                        <option value="">Select a state</option>
+                        {US_STATES.map(([code, name]) => (
+                            <option key={code} value={code}>{name} ({code})</option>
+                        ))}
+                    </select>
                 </div>
 
                 <div className="user-input-row">

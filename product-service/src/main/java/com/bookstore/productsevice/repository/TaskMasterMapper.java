@@ -18,6 +18,8 @@ public class TaskMasterMapper {
         taskMaster.setAge(document.getInteger("age", 0));
         taskMaster.setPhoto(document.getString("photo"));
         taskMaster.setLocation(document.getString("location"));
+        taskMaster.setLocationCity(document.getString("locationCity"));
+        taskMaster.setLocationStateCode(document.getString("locationStateCode"));
         taskMaster.setRating(document.getDouble("rating") != null ? document.getDouble("rating") : 0.0);
         taskMaster.setDescription(document.getString("description"));
         taskMaster.setHourlyRateUsd(document.getDouble("hourlyRateUsd") != null ? document.getDouble("hourlyRateUsd") : 0.0);

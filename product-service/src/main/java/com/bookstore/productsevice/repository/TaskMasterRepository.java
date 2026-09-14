@@ -9,7 +9,6 @@ import java.util.Optional;
 
 public interface TaskMasterRepository extends MongoRepository<TaskMaster, String>, FacetRepository, TaskMasterSearchRepository {
     List<TaskMaster> findAllByName(String name);
-    List<TaskMaster> findAllByLocation(String location);
     List<TaskMaster> findAllByJobCategoriesContaining(String category);
     List<TaskMaster> findTaskMasterByHourlyRateUsdBetween(double low, double high);
     List<TaskMaster> findTaskMasterByRatingGreaterThanEqual(double rating);
@@ -17,7 +16,6 @@ public interface TaskMasterRepository extends MongoRepository<TaskMaster, String
     Optional<TaskMaster> findByOwnerUsername(String ownerUsername);
 
     // Pageable overloads for limited queries (used by MCP tools)
-    List<TaskMaster> findAllByLocation(String location, Pageable pageable);
     List<TaskMaster> findAllByJobCategoriesContaining(String category, Pageable pageable);
     List<TaskMaster> findTaskMasterByHourlyRateUsdBetween(double low, double high, Pageable pageable);
     List<TaskMaster> findTaskMasterByRatingGreaterThanEqual(double rating, Pageable pageable);

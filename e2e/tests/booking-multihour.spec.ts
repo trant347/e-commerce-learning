@@ -14,7 +14,7 @@ async function createTaskMaster(ownerUsername: string): Promise<CreatedTaskMaste
     name: `E2E TaskMaster ${ownerUsername}`,
     age: 30,
     photo: '',
-    location: 'Toronto, ON',
+    location: 'Chicago, IL',
     rating: 4.5,
     jobCategories: ['e2e-booking'],
     description: 'Created by booking-multihour e2e test',

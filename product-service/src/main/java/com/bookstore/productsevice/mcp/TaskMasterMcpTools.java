@@ -1,5 +1,6 @@
 package com.bookstore.productsevice.mcp;
 
+import com.bookstore.productsevice.location.LocationValidationException;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.services.ProductCacheService;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -45,11 +46,14 @@ public class TaskMasterMcpTools {
                     + "For ranking words like 'cheapest', 'most expensive', 'best rated', 'closest' WITHOUT a specific number, "
                     + "do NOT add minRate/maxRate/location filters — call with only the category, then pick the matching "
                     + "item from the returned list by inspecting its hourlyRateUsd or rating field. "
+                    + "Choose categories by the object and skill requested: wooden cupboard, cabinet, table, or wooden "
+                    + "furniture repair maps to 'carpentry'; flat-pack or IKEA assembly maps to 'furniture-assembly'. "
                     + "If the user's request does not match any category, do NOT call this tool; ask them to clarify instead.")
     public String searchTaskMasters(
             @ToolParam(description = "Job category to filter by. REQUIRED. Must be an exact value from get_categories.")
             String category,
-            @ToolParam(description = "City or region to filter by, e.g. 'New York, NY'.",
+            @ToolParam(description = "Optional US city, state name/code, or city and state. "
+                    + "Examples: 'Chicago', 'IL', 'Illinois', or 'Chicago, IL'.",
                     required = false)
             String location,
             @ToolParam(description = "Minimum hourly rate in USD (inclusive). Numeric only, no $ sign. Example: 20",
@@ -76,8 +80,13 @@ public class TaskMasterMcpTools {
             return "{\"error\": \"Please specify what type of service you are looking for so I can help you find the right task master.\"}";
         }
 
-        List<TaskMaster> results = productCacheService.searchWithFilters(
-                sanitizedCategory, sanitizedLocation, minRateVal, maxRateVal, minRatingVal, MAX_RESULTS);
+        List<TaskMaster> results;
+        try {
+            results = productCacheService.searchWithFilters(
+                    sanitizedCategory, sanitizedLocation, minRateVal, maxRateVal, minRatingVal, MAX_RESULTS);
+        } catch (LocationValidationException ex) {
+            return toJson(new ToolValidationError("invalid_location", ex.getMessage()));
+        }
 
         log.info("[MCP] search_task_masters returning {} results", results.size());
         return toJson(results);
@@ -139,5 +148,8 @@ public class TaskMasterMcpTools {
             log.error("[MCP] JSON serialization failed", e);
             return "{\"error\": \"Failed to serialize result\"}";
         }
+    }
+
+    private record ToolValidationError(String error, String message) {
     }
 }

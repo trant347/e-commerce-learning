@@ -1,5 +1,7 @@
 package com.bookstore.productsevice.services;
 
+import com.bookstore.productsevice.location.LocationNormalizer;
+import com.bookstore.productsevice.location.LocationSearchCriteria;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,15 +46,22 @@ public class ProductCacheServiceTest {
         repository = mock(TaskMasterRepository.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
-        cacheService = new ProductCacheService(redisTemplate, repository, new ObjectMapper(), new SimpleMeterRegistry());
+        cacheService = new ProductCacheService(
+                redisTemplate,
+                repository,
+                new ObjectMapper(),
+                new SimpleMeterRegistry(),
+                new LocationNormalizer());
 
         sampleTm1 = new TaskMaster()
-                .setId("tm-1").setName("Alice").setLocation("New York")
+                .setId("tm-1").setName("Alice").setLocation("New York, NY")
+                .setLocationCity("new york").setLocationStateCode("NY")
                 .setRating(4.5).setHourlyRateUsd(50.0)
                 .setJobCategories(new String[]{"Plumbing"});
 
         sampleTm2 = new TaskMaster()
-                .setId("tm-2").setName("Bob").setLocation("Chicago")
+                .setId("tm-2").setName("Bob").setLocation("Chicago, IL")
+                .setLocationCity("chicago").setLocationStateCode("IL")
                 .setRating(3.8).setHourlyRateUsd(35.0)
                 .setJobCategories(new String[]{"Electrical"});
     }
@@ -198,13 +207,18 @@ public class ProductCacheServiceTest {
 
     @Test
     public void getByLocation_cacheMiss_queriesDbAndCaches() {
-        when(valueOps.get("products:filter:location:Chicago")).thenReturn(null);
-        when(repository.findAllByLocation("Chicago")).thenReturn(List.of(sampleTm2));
+        LocationSearchCriteria criteria = new LocationSearchCriteria(
+                LocationSearchCriteria.MatchMode.CITY,
+                "chicago",
+                null);
+        when(valueOps.get("products:filter:location:city:chicago")).thenReturn(null);
+        when(repository.findByLocation(criteria, null)).thenReturn(List.of(sampleTm2));
 
         List<TaskMaster> result = cacheService.getByLocation("Chicago");
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getName()).isEqualTo("Bob");
+        verify(repository).findByLocation(criteria, null);
     }
 
     @Test
@@ -294,7 +308,7 @@ public class ProductCacheServiceTest {
 
     @Test
     public void searchWithFilters_cacheMiss_passesLimitToRepository() {
-        String key = "products:filter:search:Plumbing:null:null:25.0:null:limit:10";
+        String key = "products:filter:search:Plumbing:none:null:25.0:null:limit:10";
         when(valueOps.get(key)).thenReturn(null);
         when(repository.searchWithFilters("Plumbing", null, null, 25.0, null, 10))
                 .thenReturn(List.of(sampleTm1));
@@ -309,7 +323,7 @@ public class ProductCacheServiceTest {
 
     @Test
     public void searchWithFilters_cacheHit_skipsDb() {
-        String key = "products:filter:search:Plumbing:New York:null:null:null:limit:10";
+        String key = "products:filter:search:Plumbing:city-or-state:new york:NY:null:null:null:limit:10";
         when(valueOps.get(key)).thenReturn(List.of("tm-1"));
         when(valueOps.multiGet(List.of("products:item:tm-1")))
                 .thenReturn(List.of(sampleTm1));
@@ -319,13 +333,19 @@ public class ProductCacheServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getName()).isEqualTo("Alice");
-        verify(repository, never()).searchWithFilters(anyString(), anyString(), any(), any(), any(), anyInt());
+        verify(repository, never()).searchWithFilters(
+                anyString(),
+                any(LocationSearchCriteria.class),
+                any(),
+                any(),
+                any(),
+                anyInt());
     }
 
     @Test
     public void searchWithFilters_differentLimits_useDifferentCacheKeys() {
-        String key5  = "products:filter:search:Plumbing:null:null:null:null:limit:5";
-        String key10 = "products:filter:search:Plumbing:null:null:null:null:limit:10";
+        String key5  = "products:filter:search:Plumbing:none:null:null:null:limit:5";
+        String key10 = "products:filter:search:Plumbing:none:null:null:null:limit:10";
 
         when(valueOps.get(key5)).thenReturn(null);
         when(valueOps.get(key10)).thenReturn(null);
@@ -352,7 +372,7 @@ public class ProductCacheServiceTest {
         // surfaces exactly what it returns and never exceeds the cap.
         List<TaskMaster> capped = generateTaskMasters(limit);
 
-        String key = "products:filter:search:Plumbing:null:null:null:null:limit:" + limit;
+        String key = "products:filter:search:Plumbing:none:null:null:null:limit:" + limit;
         when(valueOps.get(key)).thenReturn(null);
         when(repository.searchWithFilters("Plumbing", null, null, null, null, limit))
                 .thenReturn(capped);
@@ -385,15 +405,18 @@ public class ProductCacheServiceTest {
     @Test
     public void getByLocationLimited_passesLimitAsPageable() {
         int limit = 10;
-        when(valueOps.get("products:filter:location:Chicago:limit:" + limit)).thenReturn(null);
-        when(repository.findAllByLocation(eq("Chicago"), eq(PageRequest.of(0, limit))))
+        LocationSearchCriteria criteria = new LocationSearchCriteria(
+                LocationSearchCriteria.MatchMode.CITY,
+                "chicago",
+                null);
+        when(valueOps.get("products:filter:location:city:chicago:limit:" + limit)).thenReturn(null);
+        when(repository.findByLocation(criteria, limit))
                 .thenReturn(generateTaskMasters(limit));
 
         List<TaskMaster> result = cacheService.getByLocationLimited("Chicago", limit);
 
         assertThat(result).hasSize(limit);
-        verify(repository).findAllByLocation("Chicago", PageRequest.of(0, limit));
-        verify(repository, never()).findAllByLocation("Chicago");
+        verify(repository).findByLocation(criteria, limit);
     }
 
     @Test
@@ -427,7 +450,7 @@ public class ProductCacheServiceTest {
         int limit = 10;
         List<TaskMaster> few = generateTaskMasters(3);
 
-        String key = "products:filter:search:Plumbing:null:null:null:null:limit:" + limit;
+        String key = "products:filter:search:Plumbing:none:null:null:null:limit:" + limit;
         when(valueOps.get(key)).thenReturn(null);
         when(repository.searchWithFilters("Plumbing", null, null, null, null, limit))
                 .thenReturn(few);
@@ -465,7 +488,9 @@ public class ProductCacheServiceTest {
                 .mapToObj(i -> new TaskMaster()
                         .setId("tm-cap-" + i)
                         .setName("Provider " + i)
-                        .setLocation("New York")
+                        .setLocation("New York, NY")
+                        .setLocationCity("new york")
+                        .setLocationStateCode("NY")
                         .setRating(4.5)
                         .setHourlyRateUsd(20.0)
                         .setJobCategories(new String[]{"Plumbing"}))

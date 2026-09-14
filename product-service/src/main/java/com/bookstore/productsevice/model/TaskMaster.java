@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -26,6 +27,10 @@ public class TaskMaster implements java.io.Serializable {
     private int age;
     private String photo;
     private String location;
+    @Getter(onMethod_ = @JsonIgnore)
+    private String locationCity;
+    @Getter(onMethod_ = @JsonIgnore)
+    private String locationStateCode;
     private double rating;
     private String[] jobCategories;
     private String description;

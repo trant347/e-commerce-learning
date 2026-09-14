@@ -1,6 +1,8 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.messaging.ApplicationEventPublisher;
+import com.bookstore.productsevice.location.LocationNormalizer;
+import com.bookstore.productsevice.location.NormalizedLocation;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.model.TaskMasterApplication;
 import com.bookstore.productsevice.model.TaskMasterApplication.ApplicationStatus;
@@ -40,15 +42,18 @@ public class ApplicationController {
     private final TaskMasterRepository taskMasterRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final ProductCacheService productCacheService;
+    private final LocationNormalizer locationNormalizer;
 
     public ApplicationController(ApplicationRepository applicationRepository,
                                  TaskMasterRepository taskMasterRepository,
                                  ApplicationEventPublisher eventPublisher,
-                                 ProductCacheService productCacheService) {
+                                 ProductCacheService productCacheService,
+                                 LocationNormalizer locationNormalizer) {
         this.applicationRepository = applicationRepository;
         this.taskMasterRepository = taskMasterRepository;
         this.eventPublisher = eventPublisher;
         this.productCacheService = productCacheService;
+        this.locationNormalizer = locationNormalizer;
     }
 
     // -------------------------------------------------------------------------
@@ -68,11 +73,14 @@ public class ApplicationController {
                     .body(Map.of("error", "You already have a pending application."));
         }
 
+        NormalizedLocation location = locationNormalizer.normalizeForWrite(body.getLocation());
         TaskMasterApplication application = new TaskMasterApplication()
                 .setApplicantUsername(username)
                 .setName(body.getName())
                 .setAge(body.getAge())
-                .setLocation(body.getLocation())
+                .setLocation(location.displayLocation())
+                .setLocationCity(location.city())
+                .setLocationStateCode(location.stateCode())
                 .setDescription(body.getDescription())
                 .setHourlyRateUsd(body.getHourlyRateUsd())
                 .setPhoto(body.getPhoto())
@@ -142,10 +150,13 @@ public class ApplicationController {
         }
 
         // Create the TaskMaster profile
+        NormalizedLocation location = locationNormalizer.normalizeForWrite(application.getLocation());
         TaskMaster taskMaster = new TaskMaster()
                 .setName(application.getName())
                 .setAge(application.getAge())
-                .setLocation(application.getLocation())
+                .setLocation(location.displayLocation())
+                .setLocationCity(location.city())
+                .setLocationStateCode(location.stateCode())
                 .setDescription(application.getDescription())
                 .setHourlyRateUsd(application.getHourlyRateUsd())
                 .setPhoto(application.getPhoto())

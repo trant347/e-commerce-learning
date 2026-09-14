@@ -12,14 +12,28 @@ namespace ai_assistant_service.Tests;
 
 public class AiAssistantServiceTests
 {
-    private static IConfiguration BuildConfig(string model = "qwen3:8b") =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+    private static IConfiguration BuildConfig(
+        string model = "qwen3:8b",
+        IReadOnlyDictionary<string, string?>? additionalValues = null)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["Ollama:Model"]               = model,
+            ["PromptOptions:SystemPrompt"] = "test system prompt"
+        };
+
+        if (additionalValues is not null)
+        {
+            foreach (var pair in additionalValues)
             {
-                ["Ollama:Model"]               = model,
-                ["PromptOptions:SystemPrompt"] = "test system prompt"
-            })
+                values[pair.Key] = pair.Value;
+            }
+        }
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
             .Build();
+    }
 
     [Fact]
     public async Task ChatAsync_NoToolCalls_ReturnsAssistantContent()
@@ -41,6 +55,8 @@ public class AiAssistantServiceTests
 
         Assert.Equal("Hello!", resp.Answer);
         Assert.Equal("qwen3:8b", resp.Model);
+        Assert.Empty(resp.Sources);
+        Assert.Empty(resp.Mentions);
         ollama.Verify(c => c.ChatAsync(
             "qwen3:8b",
             It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
@@ -93,6 +109,7 @@ public class AiAssistantServiceTests
         Assert.Equal("I found Alice.", resp.Answer);
         Assert.Equal(1, fakeTool.CallCount);
         Assert.Same(TestExecutionContext, fakeTool.LastContext);
+        Assert.Equal(new[] { "search_task_masters" }, resp.Sources);
         Assert.Single(resp.Mentions);
         Assert.Equal("tm-1", resp.Mentions[0].Id);
         Assert.Equal("Alice", resp.Mentions[0].Name);
@@ -263,6 +280,39 @@ public class AiAssistantServiceTests
         Assert.Single(resp.Mentions);
         Assert.Equal("tm-1", resp.Mentions[0].Id);
         Assert.Equal("Alice", resp.Mentions[0].Name);
+    }
+
+    [Fact]
+    public async Task ChatAsync_DoesNotExposeFewShotSourcesOrMentions()
+    {
+        var config = BuildConfig(additionalValues: new Dictionary<string, string?>
+        {
+            ["PromptOptions:FewShotExamples:0:Description"] = "example",
+            ["PromptOptions:FewShotExamples:0:Turns:0:Role"] = "tool",
+            ["PromptOptions:FewShotExamples:0:Turns:0:Content"] =
+                "[{\"id\":\"seed-1\",\"name\":\"Seeded Example\"}]"
+        });
+        var registeredTool = new RecordingTool("search_task_masters", "[]");
+        var ollama = new Mock<IOllamaClient>();
+        ollama.Setup(c => c.ChatAsync(
+                It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
+                It.IsAny<IReadOnlyList<object>?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OllamaChatMessage { Role = "assistant", Content = "No search needed." });
+
+        var svc = new AiAssistantService(
+            config,
+            ollama.Object,
+            new ToolRegistry(new IToolDefinition[] { registeredTool }),
+            NullLogger<AiAssistantService>.Instance);
+
+        var response = await svc.ChatAsync(
+            new ChatRequest { Message = "hello" }, TestContext(), CancellationToken.None);
+
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
+        Assert.Equal(0, registeredTool.CallCount);
     }
 
     private static readonly ToolExecutionContext TestExecutionContext =

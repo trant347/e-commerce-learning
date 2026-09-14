@@ -1,4 +1,4 @@
-import { render, waitFor, screen } from '@testing-library/react';
+import { fireEvent, render, waitFor, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -8,6 +8,7 @@ import UserContext from '../../context/userContext';
 jest.mock('../../api/taskMasterServices', () => ({
     TaskMasterServices: {
         getMyTaskMaster: jest.fn(),
+        submitApplication: jest.fn(),
     },
 }));
 
@@ -15,6 +16,7 @@ import { TaskMasterServices } from '../../api/taskMasterServices';
 import ApplyForTaskMaster from './ApplyForTaskMaster';
 
 const getMyTaskMasterMock = TaskMasterServices.getMyTaskMaster as jest.Mock;
+const submitApplicationMock = TaskMasterServices.submitApplication as jest.Mock;
 
 function renderWithUser(username: string | null) {
     return render(
@@ -29,6 +31,7 @@ function renderWithUser(username: string | null) {
 describe('ApplyForTaskMaster — already a TaskMaster', () => {
     beforeEach(() => {
         getMyTaskMasterMock.mockReset();
+        submitApplicationMock.mockReset();
     });
 
     test('blocks the application form and shows a message when the user is already a TaskMaster', async () => {
@@ -55,5 +58,28 @@ describe('ApplyForTaskMaster — already a TaskMaster', () => {
         });
 
         expect(screen.queryByText(/you're already a taskmaster/i)).not.toBeInTheDocument();
+    });
+
+    test('submits city and state as a canonical location', async () => {
+        getMyTaskMasterMock.mockResolvedValue(null);
+        submitApplicationMock.mockResolvedValue({ id: 'app-1' });
+
+        renderWithUser('bob');
+
+        await screen.findByText(/apply to become a taskmaster/i);
+        fireEvent.change(screen.getByPlaceholderText(/e\.g\. john smith/i), { target: { value: 'Bob Smith' } });
+        fireEvent.change(screen.getByPlaceholderText(/e\.g\. 30/i), { target: { value: '30' } });
+        fireEvent.change(screen.getByLabelText(/city/i), { target: { value: ' Chicago ' } });
+        fireEvent.change(screen.getByLabelText(/state/i), { target: { value: 'IL' } });
+        fireEvent.change(screen.getByPlaceholderText(/e\.g\. 45\.00/i), { target: { value: '50' } });
+        fireEvent.change(screen.getByPlaceholderText(/e\.g\. tutoring/i), { target: { value: 'carpentry' } });
+        fireEvent.click(screen.getByRole('button', { name: /\+ add/i }));
+        fireEvent.click(screen.getByRole('button', { name: /submit application/i }));
+
+        await waitFor(() => {
+            expect(submitApplicationMock).toHaveBeenCalledWith(
+                expect.objectContaining({ location: 'Chicago, IL' })
+            );
+        });
     });
 });

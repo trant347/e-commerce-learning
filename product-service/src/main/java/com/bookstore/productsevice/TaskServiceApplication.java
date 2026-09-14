@@ -1,6 +1,8 @@
 package com.bookstore.productsevice;
 
 import com.bookstore.productsevice.model.TaskMaster;
+import com.bookstore.productsevice.location.LocationNormalizer;
+import com.bookstore.productsevice.location.NormalizedLocation;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.bookstore.productsevice.security.Secret;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -44,6 +46,9 @@ public class TaskServiceApplication {
 
     @Autowired
     private TaskMasterRepository repository;
+
+    @Autowired
+    private LocationNormalizer locationNormalizer;
 
     @Autowired
     Secret secret;
@@ -116,6 +121,12 @@ public class TaskServiceApplication {
                         return;
                     }
 
+                    payload.taskMasters.forEach(taskMaster -> {
+                        NormalizedLocation location = locationNormalizer.normalizeForWrite(taskMaster.getLocation());
+                        taskMaster.setLocation(location.displayLocation())
+                                .setLocationCity(location.city())
+                                .setLocationStateCode(location.stateCode());
+                    });
                     repository.saveAll(payload.taskMasters);
                     logger.info("Seeded {} task masters from seed/taskMasters.json", payload.taskMasters.size());
                 }
@@ -129,4 +140,3 @@ public class TaskServiceApplication {
     }
 
 }
-

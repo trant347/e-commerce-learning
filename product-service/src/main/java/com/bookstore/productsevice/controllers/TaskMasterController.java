@@ -1,6 +1,8 @@
 package com.bookstore.productsevice.controllers;
 
 import com.bookstore.productsevice.exception.ItemNotFoundException;
+import com.bookstore.productsevice.location.LocationNormalizer;
+import com.bookstore.productsevice.location.NormalizedLocation;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.bookstore.productsevice.services.ProductCacheService;
@@ -41,6 +43,9 @@ public class TaskMasterController {
 
     @Autowired
     private ProductCacheService productCacheService;
+
+    @Autowired
+    private LocationNormalizer locationNormalizer;
 
     @GetMapping(params = "name")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByName(@RequestParam String name) {
@@ -99,6 +104,11 @@ public class TaskMasterController {
             throw e;
         }
         log.info("[TaskMasterController] Validation passed, saving to DB...");
+
+        NormalizedLocation location = locationNormalizer.normalizeForWrite(taskMaster.getLocation());
+        taskMaster.setLocation(location.displayLocation())
+                .setLocationCity(location.city())
+                .setLocationStateCode(location.stateCode());
 
         TaskMaster response;
         try {
