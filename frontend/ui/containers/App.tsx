@@ -23,6 +23,7 @@ const AsyncNewTaskMaster = React.lazy(() => import('../components/new-task-maste
 const AsyncApplyForTaskMaster = React.lazy(() => import('../components/apply-for-task-master/ApplyForTaskMaster'));
 const AsyncApplicationReview = React.lazy(() => import('../components/application-review/ApplicationReview'));
 const AsyncAdminApplicationsList = React.lazy(() => import('../components/admin-applications/AdminApplicationsList'));
+const AsyncAdminCategories = React.lazy(() => import('../components/admin-categories/AdminCategories'));
 const AsyncIncomingBookings = React.lazy(() => import('./IncomingBookings'));
 const AsyncMyCalendar = React.lazy(() => import('./MyCalendar'));
 const AsyncSubmitProof = React.lazy(() => import('./SubmitProof'));
@@ -69,6 +70,7 @@ export default class App extends React.Component<{}, IAppContext> {
                                     <Route path="/apply" element={<AsyncApplyForTaskMaster />} />
                                     <Route path="/admin/applications/:id" element={<AsyncApplicationReview />} />
                                     <Route path="/admin/applications" element={<AsyncAdminApplicationsList />} />
+                                    <Route path="/admin/categories" element={<AsyncAdminCategories />} />
                                     <Route path="/bookings/incoming" element={<AsyncIncomingBookings />} />
                                     <Route path="/my-calendar" element={<AsyncMyCalendar />} />
                                     <Route path="/booking/:id/submit-proof" element={<AsyncSubmitProof />} />

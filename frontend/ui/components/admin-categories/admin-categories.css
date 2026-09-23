@@ -1,0 +1,107 @@
+.admin-categories-page {
+    max-width: 960px;
+}
+
+.category-page-intro {
+    color: #666;
+    margin-bottom: 1.5rem;
+}
+
+.category-panel {
+    background: #fff;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    padding: 1.25rem;
+}
+
+.category-panel h2 {
+    color: #333;
+    font-size: 1.2rem;
+    margin: 0 0 1rem;
+}
+
+.category-create-form {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.category-create-form small {
+    color: #777;
+    display: block;
+    margin-top: 0.25rem;
+}
+
+.category-table-wrapper {
+    overflow-x: auto;
+}
+
+.categories-table {
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    width: 100%;
+}
+
+.categories-table th,
+.categories-table td {
+    border-bottom: 1px solid #eee;
+    padding: 0.7rem;
+    text-align: left;
+    vertical-align: top;
+}
+
+.categories-table th {
+    color: #444;
+    white-space: nowrap;
+}
+
+.categories-table code {
+    color: #555;
+    white-space: nowrap;
+}
+
+.category-edit-form {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.category-edit-form label {
+    color: #555;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.category-edit-form input,
+.category-edit-form textarea {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 0.5rem;
+}
+
+.category-edit-form textarea {
+    min-height: 70px;
+    resize: vertical;
+}
+
+.category-actions {
+    white-space: nowrap;
+}
+
+.category-actions button {
+    margin-right: 0.4rem;
+}
+
+.category-cancel-btn {
+    background: #fff;
+    border: 1px solid #aaa;
+    border-radius: 6px;
+    color: #555;
+    cursor: pointer;
+    padding: 0.3rem 0.75rem;
+}
+
+.category-cancel-btn:disabled,
+.review-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}

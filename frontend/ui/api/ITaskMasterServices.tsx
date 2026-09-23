@@ -1,4 +1,11 @@
-import { TaskMaster, TaskMasterApplication, SubmitApplicationRequest } from '../common/interfaces';
+import {
+    CategoryMetadata,
+    CreateCategoryRequest,
+    TaskMaster,
+    TaskMasterApplication,
+    SubmitApplicationRequest,
+    UpdateCategoryRequest,
+} from '../common/interfaces';
 
 
 export default interface ITaskMasterServices {
@@ -26,4 +33,10 @@ export default interface ITaskMasterServices {
     getUnviewedCount(): Promise<number>;
 
     markApplicationViewed(id: string): Promise<void>;
+
+    listAdminCategories(): Promise<CategoryMetadata[]>;
+
+    createCategory(category: CreateCategoryRequest): Promise<CategoryMetadata>;
+
+    updateCategory(id: string, category: UpdateCategoryRequest): Promise<CategoryMetadata>;
 }

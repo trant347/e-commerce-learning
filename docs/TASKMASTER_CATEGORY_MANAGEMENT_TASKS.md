@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-6 complete; implementation tasks 7-11 have not started.
+Status: Tasks 1-7 complete; implementation tasks 8-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -97,7 +97,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   other profile writers/imports so they cannot bypass the rule. Neither applicant
   nor admin profile creation may implicitly create catalog entries.
 
-- [ ] **7. Add the admin category management screen.** Provide category list,
+- [x] **7. Add the admin category management screen.** Provide category list,
   create, and metadata-edit views with loading, empty, duplicate, and failure
   states. Add an admin navigation entry and connect frontend API methods through
   the existing `/products` BFF routing. Reuse authenticated bearer-token helpers;

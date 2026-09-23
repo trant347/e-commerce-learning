@@ -1,6 +1,13 @@
 import axios from 'axios';
 
-import { TaskMaster, TaskMasterApplication, SubmitApplicationRequest } from '../common/interfaces';
+import {
+    CategoryMetadata,
+    CreateCategoryRequest,
+    TaskMaster,
+    TaskMasterApplication,
+    SubmitApplicationRequest,
+    UpdateCategoryRequest,
+} from '../common/interfaces';
 import ITaskMasterServices from './ITaskMasterServices';
 
 
@@ -14,7 +21,7 @@ export const TaskMasterServices : ITaskMasterServices  = {
         const token = localStorage.getItem('token');
         return axios.get(
             `/products/${id}`,
-            { headers: {"Authorization" : `Bearer ${token}`} }
+            { headers: {"Authorization" : 'Bearer ' + token} }
         ).then(res => res.data);
     },
 
@@ -22,7 +29,7 @@ export const TaskMasterServices : ITaskMasterServices  = {
         const token = localStorage.getItem('token');
         return axios.get(
             '/products/me/taskmaster',
-            { headers: { 'Authorization': `Bearer ${token}` } }
+            { headers: { 'Authorization': 'Bearer ' + token } }
         ).then(res => res.data)
          .catch(err => {
              if (err?.response?.status === 404) return null;
@@ -39,7 +46,7 @@ export const TaskMasterServices : ITaskMasterServices  = {
         return axios.post(
             '/products',
             taskMaster,
-            { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+            { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },
 
@@ -48,21 +55,21 @@ export const TaskMasterServices : ITaskMasterServices  = {
         return axios.post(
             '/products/applications',
             application,
-            { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+            { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },
 
     listApplications(status?: string): Promise<TaskMasterApplication[]> {
         const token = localStorage.getItem('token');
         const url = status ? `/products/applications?status=${status}` : '/products/applications';
-        return axios.get(url, { headers: { 'Authorization': `Bearer ${token}` } }).then(res => res.data);
+        return axios.get(url, { headers: { 'Authorization': 'Bearer ' + token } }).then(res => res.data);
     },
 
     getApplication(id: string): Promise<TaskMasterApplication> {
         const token = localStorage.getItem('token');
         return axios.get(
             `/products/applications/${id}`,
-            { headers: { 'Authorization': `Bearer ${token}` } }
+            { headers: { 'Authorization': 'Bearer ' + token } }
         ).then(res => res.data);
     },
 
@@ -71,7 +78,7 @@ export const TaskMasterServices : ITaskMasterServices  = {
         return axios.put(
             `/products/applications/${id}/accept`,
             {},
-            { headers: { 'Authorization': `Bearer ${token}` } }
+            { headers: { 'Authorization': 'Bearer ' + token } }
         ).then(res => res.data);
     },
 
@@ -80,7 +87,7 @@ export const TaskMasterServices : ITaskMasterServices  = {
         return axios.put(
             `/products/applications/${id}/decline`,
             reason ? { reason } : {},
-            { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+            { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
         ).then(res => res.data);
     },
 
@@ -88,7 +95,7 @@ export const TaskMasterServices : ITaskMasterServices  = {
         const token = localStorage.getItem('token');
         return axios.get(
             '/products/applications/unviewed-count',
-            { headers: { 'Authorization': `Bearer ${token}` } }
+            { headers: { 'Authorization': 'Bearer ' + token } }
         ).then(res => res.data.count);
     },
 
@@ -97,7 +104,33 @@ export const TaskMasterServices : ITaskMasterServices  = {
         return axios.put(
             `/products/applications/${id}/view`,
             {},
-            { headers: { 'Authorization': `Bearer ${token}` } }
+            { headers: { 'Authorization': 'Bearer ' + token } }
         ).then(() => undefined);
+    },
+
+    listAdminCategories(): Promise<CategoryMetadata[]> {
+        const token = localStorage.getItem('token');
+        return axios.get(
+            '/products/admin/categories',
+            { headers: { 'Authorization': 'Bearer ' + token } }
+        ).then(res => res.data);
+    },
+
+    createCategory(category: CreateCategoryRequest): Promise<CategoryMetadata> {
+        const token = localStorage.getItem('token');
+        return axios.post(
+            '/products/admin/categories',
+            category,
+            { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
+    },
+
+    updateCategory(id: string, category: UpdateCategoryRequest): Promise<CategoryMetadata> {
+        const token = localStorage.getItem('token');
+        return axios.put(
+            `/products/admin/categories/${id}`,
+            category,
+            { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
+        ).then(res => res.data);
     },
 };

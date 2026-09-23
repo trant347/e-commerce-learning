@@ -36,3 +36,20 @@ export interface SubmitApplicationRequest {
     photo?: string | null;
     jobCategories: string[];
 }
+
+export interface CategoryMetadata {
+    id: string;
+    displayName: string;
+    description: string;
+}
+
+export interface CreateCategoryRequest {
+    id: string;
+    displayName: string;
+    description: string;
+}
+
+export interface UpdateCategoryRequest {
+    displayName: string;
+    description: string;
+}

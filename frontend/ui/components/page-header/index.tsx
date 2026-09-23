@@ -189,6 +189,14 @@ export default function(props) {
                                                 </Menu.Item>
                                             )}
 
+                                            {username === 'admin' && (
+                                                <Menu.Item name='categories'>
+                                                    <StyledLinkHovered onClick={() => navigate('/admin/categories')}>
+                                                        <i className="tags icon" /> Categories
+                                                    </StyledLinkHovered>
+                                                </Menu.Item>
+                                            )}
+
                                             <Menu.Item
                                                 name='logout'                                                                                              
                                                 >                                               
