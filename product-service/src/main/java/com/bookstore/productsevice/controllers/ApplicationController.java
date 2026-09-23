@@ -64,6 +64,11 @@ public class ApplicationController {
     // Submit a new application (any authenticated user)
     // -------------------------------------------------------------------------
 
+    /**
+     * Review-based creation path for regular users. This stores a PENDING
+     * application only; no searchable TaskMaster profile is created until an
+     * administrator accepts the application.
+     */
     @PostMapping
     public ResponseEntity<?> submitApplication(@RequestBody TaskMasterApplication body,
                                                HttpServletRequest request) {

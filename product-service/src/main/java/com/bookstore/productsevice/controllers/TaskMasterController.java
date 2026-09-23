@@ -93,6 +93,11 @@ public class TaskMasterController {
         return new ResponseEntity<>(HttpStatus.OK);
     }
 
+    /**
+     * Direct-creation shortcut used by the admin-facing form. Unlike
+     * submitApplication, this bypasses the PENDING review workflow and creates
+     * an immediately searchable TaskMaster profile.
+     */
     @PostMapping
     public ResponseEntity<TaskMaster> createTaskMaster(@Valid @RequestBody TaskMaster taskMaster) throws Exception {
         log.info("[TaskMasterController] POST /products — received: name='{}', location='{}', categories={}, hourlyRate={}, description='{}'",
