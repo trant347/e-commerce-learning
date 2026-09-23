@@ -1,6 +1,9 @@
 package com.bookstore.productsevice.errorhandler.advice;
 
 
+import com.bookstore.productsevice.category.CategoryConflictException;
+import com.bookstore.productsevice.category.CategoryNotFoundException;
+import com.bookstore.productsevice.category.CategoryValidationException;
 import com.bookstore.productsevice.errorhandler.ErrorDetail;
 import com.bookstore.productsevice.errorhandler.ErrorStatus;
 import com.bookstore.productsevice.errorhandler.Error;
@@ -17,6 +20,7 @@ import org.springframework.util.ReflectionUtils;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -86,6 +90,47 @@ public class ErrorAdvice {
                         "error", "invalid_location",
                         "message", ex.getMessage()),
                 HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(CategoryValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleCategoryValidation(
+            CategoryValidationException ex) {
+        Map<String, Object> body = Map.of(
+                "error", ex.getErrorCode(),
+                "message", ex.getMessage(),
+                "fieldErrors", ex.getFieldErrors());
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(CategoryConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleCategoryConflict(
+            CategoryConflictException ex) {
+        Map<String, Object> body = Map.of(
+                "error", ex.getErrorCode(),
+                "message", ex.getMessage(),
+                "fieldErrors", Map.of(ex.getField(), "must be unique"));
+        return new ResponseEntity<>(body, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(CategoryNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleCategoryNotFound(
+            CategoryNotFoundException ex) {
+        Map<String, Object> body = Map.of(
+                "error", "category_not_found",
+                "message", ex.getMessage());
+        return new ResponseEntity<>(body, HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleUnreadableRequest(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request) {
+        boolean categoryRequest = request.getRequestURI()
+                .startsWith("/products/admin/categories");
+        Map<String, Object> body = Map.of(
+                "error", categoryRequest ? "invalid_category" : "invalid_request",
+                "message", "Request body is missing or malformed.");
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

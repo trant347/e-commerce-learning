@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-3 complete; implementation tasks 4-11 have not started.
+Status: Tasks 1-4 complete; implementation tasks 5-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -74,7 +74,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   without a catalog. Document the destructive reset scope and ensure the reset
   recreates the products database user without affecting other service data.
 
-- [ ] **4. Add admin category management APIs.** Support listing, creating, and
+- [x] **4. Add admin category management APIs.** Support listing, creating, and
   editing category metadata through product-service. Keep IDs immutable and
   use explicit DTOs so clients cannot set audit fields. Enforce `ROLE_ADMIN`
   server-side using trusted JWT authorities, not a username or UI-only guard.

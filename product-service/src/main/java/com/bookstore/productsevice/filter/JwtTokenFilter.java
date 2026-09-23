@@ -58,15 +58,17 @@ public class JwtTokenFilter implements Filter {
             }
         }
 
-        String header = ((HttpServletRequest)servletRequest).getHeader("Authorization");
+        HttpServletRequest request = (HttpServletRequest) servletRequest;
+        HttpServletResponse response = (HttpServletResponse) servletResponse;
+        String header = request.getHeader("Authorization");
 
-        if(!shouldRequestAuthenticated(((HttpServletRequest)servletRequest).getRequestURI())) {
+        if(!shouldRequestAuthenticated(request.getRequestURI())) {
             filterChain.doFilter(servletRequest,servletResponse);
             return;
         }
 
         if(header == null || !header.startsWith("Bearer")){
-            ((HttpServletResponse)servletResponse).sendError(HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED ACCESS");
+            sendUnauthorized(request, response);
             return;
         }
 
@@ -89,10 +91,23 @@ public class JwtTokenFilter implements Filter {
             }
         }catch (Exception ex){
             log.warn("[JwtTokenFilter] JWT verification failed for {}: {} - {}",
-                    ((HttpServletRequest)servletRequest).getRequestURI(), ex.getClass().getSimpleName(), ex.getMessage());
-            ((HttpServletResponse)servletResponse).sendError(HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED ACCESS");
+                    request.getRequestURI(), ex.getClass().getSimpleName(), ex.getMessage());
+            sendUnauthorized(request, response);
             return;
         }
         filterChain.doFilter(servletRequest,servletResponse);
+    }
+
+    private void sendUnauthorized(HttpServletRequest request,
+                                  HttpServletResponse response) throws IOException {
+        if (request.getRequestURI().startsWith("/products/admin/categories")) {
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            response.setContentType("application/json");
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+            response.getWriter().write(
+                    "{\"error\":\"unauthorized\",\"message\":\"Authentication is required.\"}");
+            return;
+        }
+        response.sendError(HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED ACCESS");
     }
 }

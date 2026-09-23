@@ -18,6 +18,8 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -133,6 +135,23 @@ public class JwtTokenFilterTest {
         filter.doFilter(request, response, chain);
 
         verify(response).sendError(eq(401), anyString());
+        verify(chain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    public void doFilter_missingAuthorizationForAdminCategories_returnsJson401() throws Exception {
+        StringWriter responseBody = new StringWriter();
+        when(request.getRequestURI()).thenReturn("/products/admin/categories");
+        when(request.getHeader("Authorization")).thenReturn(null);
+        when(response.getWriter()).thenReturn(new PrintWriter(responseBody));
+
+        filter.doFilter(request, response, chain);
+
+        verify(response).setStatus(401);
+        verify(response).setContentType("application/json");
+        assertThat(responseBody.toString())
+                .isEqualTo("{\"error\":\"unauthorized\",\"message\":\"Authentication is required.\"}");
+        verify(response, never()).sendError(anyInt(), anyString());
         verify(chain, never()).doFilter(any(), any());
     }
 
