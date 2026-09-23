@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Task 1 complete; implementation tasks 2-11 have not started.
+Status: Tasks 1-2 complete; implementation tasks 3-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -61,7 +61,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   shapes. Preserve the existing category-ID arrays and exact-category search.
   Record the phase boundary and revised rollout order in the source spec.
 
-- [ ] **2. Add category persistence and shared domain logic.** Create the
+- [x] **2. Add category persistence and shared domain logic.** Create the
   product-service model, repository, and service. Centralize catalog reads,
   normalization, duplicate checks, and validation of selected IDs. A category
   must exist independently of whether any TaskMaster currently uses it.
