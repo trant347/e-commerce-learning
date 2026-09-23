@@ -13,6 +13,7 @@ export interface ITaskMasterProps {
     description?: string,
     photo?: string,
     jobCategories?: string[],
+    categoryDisplayNames?: Record<string, string>,
     location?: string,
     rating?: number,
     age?: number
@@ -59,7 +60,9 @@ export default function(props: ITaskMasterProps) {
 
                 <div style={{ marginBottom: '15px' }}>
                     {props.jobCategories?.map((cat, idx) => (
-                        <Label key={idx} color="blue" style={{ marginRight: '5px', marginBottom: '5px' }}>{cat}</Label>
+                        <Label key={idx} color="blue" style={{ marginRight: '5px', marginBottom: '5px' }}>
+                            {props.categoryDisplayNames?.[cat] || cat}
+                        </Label>
                     ))}
                 </div>
 
@@ -101,4 +104,3 @@ function getPictureSrc(imageName: string): string {
     }
     return `products/image/${imageName}`;
 }
-

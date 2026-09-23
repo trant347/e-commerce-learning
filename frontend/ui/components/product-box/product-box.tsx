@@ -12,6 +12,7 @@ type Props = {
     description?: string,
     openProduct?: Function,
     jobCategories?: string[],
+    categoryDisplayNames?: Record<string, string>,
     location?: string,
     rating?: number,
     age?: number
@@ -66,7 +67,9 @@ export default class ProductBox extends React.Component<Props, Readonly<State>> 
                     <Card.Description>
                         <div className="content-section">
                             {this.props.jobCategories?.map((cat, idx) => (
-                                <Label key={idx} size="tiny" color="blue">{cat}</Label>
+                                <Label key={idx} size="tiny" color="blue">
+                                    {this.props.categoryDisplayNames?.[cat] || cat}
+                                </Label>
                             ))}
                         </div>
                         <div className="content-section">

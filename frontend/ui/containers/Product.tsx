@@ -2,6 +2,8 @@ import * as React from 'react';
 import { useParams } from 'react-router-dom';
 import ProductPage from "../components/product-page";
 import {TaskMasterServices} from "../api/taskMasterServices";
+import { useCategoryCatalog } from '../hooks/useCategoryCatalog';
+import { TaskMaster } from '../common/interfaces';
 
 const errorMessageStyle: React.CSSProperties = {
     display: "flex",
@@ -11,7 +13,8 @@ const errorMessageStyle: React.CSSProperties = {
 
 export default function Product() {
     const { id } = useParams<{ id: string }>();
-    const [taskMaster, setTaskMaster] = React.useState<any>({});
+    const { displayNamesById } = useCategoryCatalog();
+    const [taskMaster, setTaskMaster] = React.useState<TaskMaster | null>(null);
     const [error, setError] = React.useState<{ message: string } | null>(null);
 
     React.useEffect(() => {
@@ -19,12 +22,18 @@ export default function Product() {
         TaskMasterServices.getTaskMasterById(id)
             .then(tm => setTaskMaster(tm))
             .catch(() => {
-                setTaskMaster({});
+                setTaskMaster(null);
                 setError({ message: "You need to log in to view the content" });
             });
     }, [id]);
 
-    return !error
-        ? <ProductPage {...taskMaster} />
-        : <div style={errorMessageStyle}>{error.message}</div>;
+    if (error) {
+        return <div style={errorMessageStyle}>{error.message}</div>;
+    }
+
+    if (!taskMaster) {
+        return <></>;
+    }
+
+    return <ProductPage {...taskMaster} categoryDisplayNames={displayNamesById} />;
 }

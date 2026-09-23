@@ -9,6 +9,7 @@ import ApplicationBadgeContext from '../../context/applicationBadgeContext';
 jest.mock('../../api/taskMasterServices', () => ({
     TaskMasterServices: {
         getMyTaskMaster: jest.fn(),
+        listCategoryMetadata: jest.fn(),
     },
 }));
 
@@ -34,7 +35,13 @@ import { WalletServices } from '../../api/walletServices';
 import PageHeader from './index';
 
 const getMyTaskMasterMock = TaskMasterServices.getMyTaskMaster as jest.Mock;
+const listCategoryMetadataMock = TaskMasterServices.listCategoryMetadata as jest.Mock;
 const getBalanceMock = WalletServices.getBalance as jest.Mock;
+
+beforeEach(() => {
+    listCategoryMetadataMock.mockReset();
+    listCategoryMetadataMock.mockResolvedValue([]);
+});
 
 function renderHeader(username: string | null) {
     return render(
@@ -113,6 +120,62 @@ describe('PageHeader — wallet balance', () => {
 
         await waitFor(() => {
             expect(screen.getByText(/Balance: \$875\.50/)).toBeInTheDocument();
+        });
+    });
+
+    describe('PageHeader — service catalog', () => {
+        beforeEach(() => {
+            getMyTaskMasterMock.mockReset();
+            getMyTaskMasterMock.mockResolvedValue(null);
+            getBalanceMock.mockReset();
+            getBalanceMock.mockResolvedValue(null);
+        });
+
+        test('renders catalog display names instead of the hard-coded service list', async () => {
+            listCategoryMetadataMock.mockResolvedValue([
+                {
+                    id: 'appliance-repair',
+                    displayName: 'Appliance Repair',
+                    description: 'Household appliance diagnosis and repair.',
+                },
+                {
+                    id: 'carpentry',
+                    displayName: 'Carpentry',
+                    description: 'Wood construction and repair.',
+                },
+            ]);
+
+            renderHeader(null);
+
+            expect(await screen.findByText('Appliance Repair')).toHaveAttribute(
+                'data-category-id',
+                'appliance-repair'
+            );
+            expect(screen.getByText('Carpentry')).toHaveAttribute('data-category-id', 'carpentry');
+            expect(screen.queryByText('Plumbing')).not.toBeInTheDocument();
+        });
+
+        test('refreshes the catalog when the service menu is opened', async () => {
+            listCategoryMetadataMock
+                .mockRejectedValueOnce(new Error('temporary failure'))
+                .mockResolvedValueOnce([
+                    {
+                        id: 'carpentry',
+                        displayName: 'Carpentry',
+                        description: 'Wood construction and repair.',
+                    },
+                ]);
+
+            renderHeader(null);
+
+            expect(await screen.findByText('Services unavailable')).toBeInTheDocument();
+            fireEvent.mouseEnter(screen.getByText(/browse by service/i));
+
+            expect(await screen.findByText('Carpentry')).toHaveAttribute(
+                'data-category-id',
+                'carpentry'
+            );
+            expect(listCategoryMetadataMock).toHaveBeenCalledTimes(2);
         });
     });
 

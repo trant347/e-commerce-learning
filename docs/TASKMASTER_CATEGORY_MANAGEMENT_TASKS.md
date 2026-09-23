@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-8 complete; implementation tasks 9-11 have not started.
+Status: Tasks 1-9 complete; implementation tasks 10-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -109,7 +109,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   explicitly; prevent submission without a valid selection and never fall back
   to free text. No "Category not listed" submission path exists until Phase 2.
 
-- [ ] **9. Align category consumers.** Use catalog metadata where category
+- [x] **9. Align category consumers.** Use catalog metadata where category
   labels are shown in application review and profile flows. Replace the
   hard-coded header service list with catalog-backed entries without expanding
   unrelated navigation behavior. Preserve existing ID-based search URLs,

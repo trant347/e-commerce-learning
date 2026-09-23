@@ -4,6 +4,7 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
 import { TaskMasterApplication } from '../../common/interfaces';
+import { useCategoryCatalog } from '../../hooks/useCategoryCatalog';
 
 import '../new-task-master/new-task-master.css';
 import './admin-applications.css';
@@ -13,6 +14,7 @@ type FilterStatus = 'ALL' | 'PENDING' | 'ACCEPTED' | 'DECLINED';
 export default function AdminApplicationsList() {
     const { username } = useContext(UserContext);
     const navigate = useNavigate();
+    const { displayNamesById } = useCategoryCatalog();
 
     const [applications, setApplications] = useState<TaskMasterApplication[]>([]);
     const [filter, setFilter] = useState<FilterStatus>('PENDING');
@@ -95,7 +97,9 @@ export default function AdminApplicationsList() {
                                 <td>
                                     <div className="category-tags" style={{ flexWrap: 'wrap' }}>
                                         {app.jobCategories.slice(0, 3).map(c => (
-                                            <span key={c} className="category-tag" style={{ fontSize: '0.75rem' }}>{c}</span>
+                                            <span key={c} className="category-tag" style={{ fontSize: '0.75rem' }}>
+                                                {displayNamesById[c] || c}
+                                            </span>
                                         ))}
                                         {app.jobCategories.length > 3 && (
                                             <span className="category-tag" style={{ fontSize: '0.75rem' }}>+{app.jobCategories.length - 3}</span>

@@ -5,6 +5,7 @@ import UserContext from '../../context/userContext';
 import ApplicationBadgeContext from '../../context/applicationBadgeContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
 import { TaskMasterApplication } from '../../common/interfaces';
+import { useCategoryCatalog } from '../../hooks/useCategoryCatalog';
 
 import '../new-task-master/new-task-master.css';
 import './application-review.css';
@@ -18,6 +19,7 @@ export default function ApplicationReview() {
     const { decrementUnviewedCount } = useContext(ApplicationBadgeContext);
     const navigate = useNavigate();
     const { id } = useParams<keyof RouteParams>() as RouteParams;
+    const { displayNamesById } = useCategoryCatalog();
 
     const [application, setApplication] = useState<TaskMasterApplication | null>(null);
     const [loading, setLoading] = useState(true);
@@ -152,7 +154,9 @@ export default function ApplicationReview() {
                 <label>Categories</label>
                 <div className="category-tags">
                     {application.jobCategories.map(cat => (
-                        <span key={cat} className="category-tag">{cat}</span>
+                        <span key={cat} className="category-tag">
+                            {displayNamesById[cat] || cat}
+                        </span>
                     ))}
                 </div>
             </div>

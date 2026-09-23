@@ -22,6 +22,7 @@ import { NotificationBell } from '../notifications/NotificationBell';
 import { useNotifications } from '../../hooks/useNotifications';
 import { TaskMasterServices } from '../../api/taskMasterServices';
 import { WalletServices } from '../../api/walletServices';
+import { useCategoryCatalog } from '../../hooks/useCategoryCatalog';
 
 const StyledNav = styled.nav`
     padding-left: 10%;
@@ -47,8 +48,6 @@ export default function(props) {
 
         let navigate = useNavigate();
 
-        let topCategories = ["Plumbing","Cleaning","Electrical", "Tutoring", "Pet Care", "Moving"]
-
         let [arrowDirection,setArrowDirection] = useState<string>("down");
 
 
@@ -61,6 +60,12 @@ export default function(props) {
         const { notifications, unreadCount, markAsRead, lastNotification } = useNotifications(username);
 
         const [isTaskMaster, setIsTaskMaster] = useState<boolean>(false);
+        const {
+            categories: catalogCategories,
+            loading: categoriesLoading,
+            error: categoriesError,
+            refresh: refreshCategories,
+        } = useCategoryCatalog();
 
         useEffect(() => {
             if (!username) { setIsTaskMaster(false); return; }
@@ -237,15 +242,27 @@ export default function(props) {
                     <StyledNav className="cart-bar">
                         <ul style={{paddingLeft:"0px"}}>
                             <li className="categories-dropdown"  onMouseLeave={() => setArrowDirection("down")}>
-                                <div onMouseEnter={() => setArrowDirection("up")}>Browse by service <i className={`angle ${arrowDirection} icon`}/></div>
+                                <div onMouseEnter={() => {
+                                    setArrowDirection("up");
+                                    refreshCategories();
+                                }}>
+                                    Browse by service <i className={`angle ${arrowDirection} icon`}/>
+                                </div>
 
                                         <ul>
                                             <li><a>Popular Services</a></li>
-                                            {
-                                                topCategories.map((item,index) => {
-                                                   return <li key={index}><a> {item}</a></li>
-                                                })
-                                            }
+                                            {categoriesLoading && <li><span>Loading services...</span></li>}
+                                            {!categoriesLoading && categoriesError && (
+                                                <li><span>Services unavailable</span></li>
+                                            )}
+                                            {!categoriesLoading && !categoriesError && catalogCategories.length === 0 && (
+                                                <li><span>No services available</span></li>
+                                            )}
+                                            {!categoriesLoading && !categoriesError && catalogCategories.map(category => (
+                                                <li key={category.id}>
+                                                    <a data-category-id={category.id}>{category.displayName}</a>
+                                                </li>
+                                            ))}
                                         </ul>
                             </li>
                             <li> Top Rated </li>

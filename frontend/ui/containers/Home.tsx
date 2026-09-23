@@ -4,6 +4,7 @@ import ProductBox from "../components/product-box/product-box";
 
 import {TaskMaster} from "../common/interfaces";
 import {TaskMasterServices} from "../api/taskMasterServices";
+import { useCategoryCatalog } from '../hooks/useCategoryCatalog';
 
 export const ITEMS_PER_PAGE = 20;
 
@@ -22,6 +23,7 @@ export interface Action {
 export default function Home() {
 
     const navigate = useNavigate();
+    const { displayNamesById } = useCategoryCatalog();
 
     const initialStates = {
         taskMasters: [],
@@ -86,7 +88,15 @@ export default function Home() {
             <div className="App-content ui">
             {
                 state.taskMasters.map(
-                    (taskMaster, index) => <ProductBox key={index} {...taskMaster} quantity={1} openProduct={() => openTaskMaster(taskMaster)}/>
+                    (taskMaster, index) => (
+                        <ProductBox
+                            key={index}
+                            {...taskMaster}
+                            quantity={1}
+                            categoryDisplayNames={displayNamesById}
+                            openProduct={() => openTaskMaster(taskMaster)}
+                        />
+                    )
                 )
             }
             </div>
