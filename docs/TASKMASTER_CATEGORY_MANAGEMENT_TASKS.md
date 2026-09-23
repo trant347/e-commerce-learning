@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-7 complete; implementation tasks 8-11 have not started.
+Status: Tasks 1-8 complete; implementation tasks 9-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -103,7 +103,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   the existing `/products` BFF routing. Reuse authenticated bearer-token helpers;
   backend authorization remains authoritative.
 
-- [ ] **8. Replace free-text category inputs.** Use a shared catalog-backed
+- [x] **8. Replace free-text category inputs.** Use a shared catalog-backed
   multi-select in both `ApplyForTaskMaster` and `NewTaskMaster`. Display readable
   names but submit canonical IDs. Handle loading failures and an empty catalog
   explicitly; prevent submission without a valid selection and never fall back

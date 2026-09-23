@@ -8,6 +8,7 @@ import UserContext from '../../context/userContext';
 jest.mock('../../api/taskMasterServices', () => ({
     TaskMasterServices: {
         getMyTaskMaster: jest.fn(),
+        listCategoryMetadata: jest.fn(),
         submitApplication: jest.fn(),
     },
 }));
@@ -16,6 +17,7 @@ import { TaskMasterServices } from '../../api/taskMasterServices';
 import ApplyForTaskMaster from './ApplyForTaskMaster';
 
 const getMyTaskMasterMock = TaskMasterServices.getMyTaskMaster as jest.Mock;
+const listCategoryMetadataMock = TaskMasterServices.listCategoryMetadata as jest.Mock;
 const submitApplicationMock = TaskMasterServices.submitApplication as jest.Mock;
 
 function renderWithUser(username: string | null) {
@@ -31,6 +33,14 @@ function renderWithUser(username: string | null) {
 describe('ApplyForTaskMaster — already a TaskMaster', () => {
     beforeEach(() => {
         getMyTaskMasterMock.mockReset();
+        listCategoryMetadataMock.mockReset();
+        listCategoryMetadataMock.mockResolvedValue([
+            {
+                id: 'carpentry',
+                displayName: 'Carpentry',
+                description: 'Wood construction and repair.',
+            },
+        ]);
         submitApplicationMock.mockReset();
     });
 
@@ -72,14 +82,27 @@ describe('ApplyForTaskMaster — already a TaskMaster', () => {
         fireEvent.change(screen.getByLabelText(/city/i), { target: { value: ' Chicago ' } });
         fireEvent.change(screen.getByLabelText(/state/i), { target: { value: 'IL' } });
         fireEvent.change(screen.getByPlaceholderText(/e\.g\. 45\.00/i), { target: { value: '50' } });
-        fireEvent.change(screen.getByPlaceholderText(/e\.g\. tutoring/i), { target: { value: 'carpentry' } });
-        fireEvent.click(screen.getByRole('button', { name: /\+ add/i }));
+        fireEvent.click(await screen.findByRole('checkbox', { name: /carpentry/i }));
         fireEvent.click(screen.getByRole('button', { name: /submit application/i }));
 
         await waitFor(() => {
             expect(submitApplicationMock).toHaveBeenCalledWith(
-                expect.objectContaining({ location: 'Chicago, IL' })
+                expect.objectContaining({
+                    location: 'Chicago, IL',
+                    jobCategories: ['carpentry'],
+                })
             );
         });
+    });
+
+    test('prevents submission until a catalog category is selected', async () => {
+        getMyTaskMasterMock.mockResolvedValue(null);
+
+        renderWithUser('bob');
+
+        await screen.findByRole('checkbox', { name: /carpentry/i });
+
+        expect(screen.getByRole('button', { name: /submit application/i })).toBeDisabled();
+        expect(submitApplicationMock).not.toHaveBeenCalled();
     });
 });

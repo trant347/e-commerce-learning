@@ -24,6 +24,14 @@ describe('TaskMasterServices category administration', () => {
         localStorage.setItem('token', 'admin-token');
     });
 
+    test('loads public category metadata without an authorization header', async () => {
+        getMock.mockResolvedValue({ data: [] });
+
+        await TaskMasterServices.listCategoryMetadata();
+
+        expect(getMock).toHaveBeenCalledWith('/products/categories/metadata');
+    });
+
     test('lists categories through the admin endpoint with bearer authentication', async () => {
         getMock.mockResolvedValue({ data: [] });
 

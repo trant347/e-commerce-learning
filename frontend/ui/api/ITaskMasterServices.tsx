@@ -34,6 +34,8 @@ export default interface ITaskMasterServices {
 
     markApplicationViewed(id: string): Promise<void>;
 
+    listCategoryMetadata(): Promise<CategoryMetadata[]>;
+
     listAdminCategories(): Promise<CategoryMetadata[]>;
 
     createCategory(category: CreateCategoryRequest): Promise<CategoryMetadata>;

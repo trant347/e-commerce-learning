@@ -108,6 +108,10 @@ export const TaskMasterServices : ITaskMasterServices  = {
         ).then(() => undefined);
     },
 
+    listCategoryMetadata(): Promise<CategoryMetadata[]> {
+        return axios.get('/products/categories/metadata').then(res => res.data);
+    },
+
     listAdminCategories(): Promise<CategoryMetadata[]> {
         const token = localStorage.getItem('token');
         return axios.get(

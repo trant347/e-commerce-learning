@@ -5,6 +5,7 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import UserContext from '../../context/userContext';
 import { TaskMasterServices } from '../../api/taskMasterServices';
 import { formatUsLocation, US_STATES, validateUsCity } from '../../common/usStates';
+import CategoryMultiSelect from '../category-multi-select/CategoryMultiSelect';
 
 import './new-task-master.css';
 
@@ -31,9 +32,7 @@ export default function NewTaskMaster() {
         hourlyRateUsd: '',
         photo: '',
     });
-
     const [categories, setCategories] = useState<string[]>([]);
-    const [categoryInput, setCategoryInput] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -46,33 +45,12 @@ export default function NewTaskMaster() {
         setForm({ ...form, [e.target.name]: e.target.value });
     };
 
-    const addCategory = () => {
-        const incoming = categoryInput
-            .split(',')
-            .map(c => c.trim().toLowerCase())
-            .filter(c => c.length > 0);
-        const merged = Array.from(new Set([...categories, ...incoming]));
-        setCategories(merged);
-        setCategoryInput('');
-    };
-
-    const handleCategoryKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            addCategory();
-        }
-    };
-
-    const removeCategory = (cat: string) => {
-        setCategories(categories.filter(c => c !== cat));
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setFeedback(null);
 
         if (categories.length === 0) {
-            setFeedback({ type: 'error', message: 'Please add at least one category.' });
+            setFeedback({ type: 'error', message: 'Please select at least one category.' });
             return;
         }
 
@@ -139,29 +117,11 @@ export default function NewTaskMaster() {
                     <textarea name="description" value={form.description} onChange={handleChange} placeholder="Brief bio or service description..." />
                 </div>
 
-                <div className="user-input-row">
-                    <label>Categories * <small>(press Enter or click + to add)</small></label>
-                    <div className="category-input-row">
-                        <input
-                            type="text"
-                            value={categoryInput}
-                            onChange={e => setCategoryInput(e.target.value)}
-                            onKeyDown={handleCategoryKeyDown}
-                            placeholder="e.g. tutoring"
-                        />
-                        <button type="button" onClick={addCategory}>+ Add</button>
-                    </div>
-                    {categories.length > 0 && (
-                        <div className="category-tags">
-                            {categories.map(cat => (
-                                <span key={cat} className="category-tag">
-                                    {cat}
-                                    <button type="button" onClick={() => removeCategory(cat)} aria-label={`Remove ${cat}`}>×</button>
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <CategoryMultiSelect
+                    selectedIds={categories}
+                    onChange={setCategories}
+                    disabled={submitting}
+                />
 
                 <div className="user-input-row">
                     <label>Hourly Rate (USD) *</label>
@@ -177,7 +137,11 @@ export default function NewTaskMaster() {
                     <div className={`form-feedback ${feedback.type}`}>{feedback.message}</div>
                 )}
 
-                <button type="submit" className="submit-btn" disabled={submitting}>
+                <button
+                    type="submit"
+                    className="submit-btn"
+                    disabled={submitting || categories.length === 0}
+                >
                     {submitting ? 'Saving...' : 'Create TaskMaster'}
                 </button>
             </form>
