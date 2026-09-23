@@ -1,5 +1,6 @@
 package com.bookstore.productsevice.services;
 
+import com.bookstore.productsevice.category.CategoryService;
 import com.bookstore.productsevice.location.LocationNormalizer;
 import com.bookstore.productsevice.location.LocationSearchCriteria;
 import com.bookstore.productsevice.model.TaskMaster;
@@ -38,10 +39,12 @@ public class ProductCacheService {
     static final String ITEM_PREFIX = "products:item:";
     static final String LIST_PREFIX = "products:list:";
     static final String FILTER_PREFIX = "products:filter:";
-    static final String CATEGORIES_KEY = "products:categories";
+    static final String CATEGORIES_KEY = "products:categories:v2";
+    static final String CATEGORIES_VERSION_KEY = "products:categories:version";
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final TaskMasterRepository repository;
+    private final CategoryService categoryService;
     private final ObjectMapper objectMapper;
     private final LocationNormalizer locationNormalizer;
 
@@ -60,11 +63,13 @@ public class ProductCacheService {
 
     public ProductCacheService(RedisTemplate<String, Object> redisTemplate,
                                TaskMasterRepository repository,
+                               CategoryService categoryService,
                                ObjectMapper objectMapper,
                                MeterRegistry meterRegistry,
                                LocationNormalizer locationNormalizer) {
         this.redisTemplate = redisTemplate;
         this.repository = repository;
+        this.categoryService = categoryService;
         this.objectMapper = objectMapper;
         this.locationNormalizer = locationNormalizer;
 
@@ -204,19 +209,31 @@ public class ProductCacheService {
 
         log.debug("[Cache] MISS categories");
         categoriesMisses.increment();
-        List<String> categories = repository.findAll().stream()
-                .filter(tm -> tm.getJobCategories() != null)
-                .flatMap(tm -> Arrays.stream(tm.getJobCategories()))
-                .filter(c -> c != null && !c.isBlank())
-                .distinct()
+        Long versionBeforeRead = getCategoryCatalogVersion();
+        List<String> categories = categoryService.getCategories().stream()
+                .map(category -> category.getId())
                 .sorted()
                 .collect(Collectors.toList());
 
-        try {
-            redisTemplate.opsForValue().set(CATEGORIES_KEY, categories, ITEM_TTL_MINUTES, TimeUnit.MINUTES);
-        } catch (Exception e) {
-            log.warn("[Cache] Redis write failed for categories", e);
-            cacheWriteErrors.increment();
+        Long versionBeforeWrite = getCategoryCatalogVersion();
+        if (versionBeforeRead != null && versionBeforeRead.equals(versionBeforeWrite)) {
+            try {
+                redisTemplate.opsForValue().set(
+                        CATEGORIES_KEY,
+                        categories,
+                        ITEM_TTL_MINUTES,
+                        TimeUnit.MINUTES);
+                Long versionAfterWrite = getCategoryCatalogVersion();
+                if (!versionBeforeRead.equals(versionAfterWrite)) {
+                    log.debug("[Cache] Category catalog changed after cache fill; deleting stale entry");
+                    deleteKey(CATEGORIES_KEY);
+                }
+            } catch (Exception e) {
+                log.warn("[Cache] Redis write failed for categories", e);
+                cacheWriteErrors.increment();
+            }
+        } else {
+            log.debug("[Cache] Category catalog changed during cache fill; skipping stale write");
         }
         return categories;
     }
@@ -225,10 +242,9 @@ public class ProductCacheService {
 
     /** Called after a new product is created. */
     public void evictOnCreate() {
-        log.info("[Cache] Evicting list/filter caches and categories after product creation");
+        log.info("[Cache] Evicting list/filter caches after product creation");
         evictByPattern(LIST_PREFIX + "*");
         evictByPattern(FILTER_PREFIX + "*");
-        deleteKey(CATEGORIES_KEY);
         cacheEvictions.increment();
     }
 
@@ -237,7 +253,6 @@ public class ProductCacheService {
         log.info("[Cache] Evicting caches after product edit id={}", id);
         deleteKey(ITEM_PREFIX + id);
         evictByPattern(FILTER_PREFIX + "*");
-        deleteKey(CATEGORIES_KEY);
         cacheEvictions.increment();
     }
 
@@ -247,6 +262,17 @@ public class ProductCacheService {
         deleteKey(ITEM_PREFIX + id);
         evictByPattern(LIST_PREFIX + "*");
         evictByPattern(FILTER_PREFIX + "*");
+        cacheEvictions.increment();
+    }
+
+    public void evictCategoryCatalog() {
+        log.info("[Cache] Evicting category catalog cache");
+        try {
+            redisTemplate.opsForValue().increment(CATEGORIES_VERSION_KEY);
+        } catch (Exception e) {
+            log.warn("[Cache] Failed to increment category catalog version", e);
+            cacheWriteErrors.increment();
+        }
         deleteKey(CATEGORIES_KEY);
         cacheEvictions.increment();
     }
@@ -417,6 +443,23 @@ public class ProductCacheService {
             redisTemplate.delete(key);
         } catch (Exception e) {
             log.warn("[Cache] Failed to delete key={}", key, e);
+        }
+    }
+
+    private Long getCategoryCatalogVersion() {
+        try {
+            Object version = redisTemplate.opsForValue().get(CATEGORIES_VERSION_KEY);
+            if (version == null) {
+                return 0L;
+            }
+            if (version instanceof Number number) {
+                return number.longValue();
+            }
+            return Long.parseLong(version.toString());
+        } catch (Exception e) {
+            log.warn("[Cache] Failed to read category catalog version", e);
+            cacheReadErrors.increment();
+            return null;
         }
     }
 

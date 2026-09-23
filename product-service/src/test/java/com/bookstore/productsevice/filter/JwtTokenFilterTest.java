@@ -222,6 +222,16 @@ public class JwtTokenFilterTest {
     }
 
     @Test
+    public void doFilter_productsCategoryMetadata_bypassesAuth() throws Exception {
+        when(request.getRequestURI()).thenReturn("/products/categories/metadata");
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(response, never()).sendError(anyInt(), anyString());
+    }
+
+    @Test
     public void doFilter_nonProductUrl_bypassesAuth() throws Exception {
         when(request.getRequestURI()).thenReturn("/actuator/health");
 

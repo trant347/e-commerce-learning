@@ -1,5 +1,7 @@
 package com.bookstore.productsevice.controllers;
 
+import com.bookstore.productsevice.category.CategoryService;
+import com.bookstore.productsevice.category.dto.CategoryResponse;
 import com.bookstore.productsevice.exception.ItemNotFoundException;
 import com.bookstore.productsevice.location.LocationNormalizer;
 import com.bookstore.productsevice.location.NormalizedLocation;
@@ -46,6 +48,9 @@ public class TaskMasterController {
 
     @Autowired
     private LocationNormalizer locationNormalizer;
+
+    @Autowired
+    private CategoryService categoryService;
 
     @GetMapping(params = "name")
     public ResponseEntity<List<TaskMaster>> getTaskMastersByName(@RequestParam String name) {
@@ -206,6 +211,15 @@ public class TaskMasterController {
         log.debug("[TaskMasterController] GET /products/categories");
         List<String> categories = productCacheService.getCategories();
         log.debug("[TaskMasterController] categories → {} distinct values", categories.size());
+        return ResponseEntity.ok(categories);
+    }
+
+    @GetMapping("/categories/metadata")
+    public ResponseEntity<List<CategoryResponse>> getCategoryMetadata() {
+        log.debug("[TaskMasterController] GET /products/categories/metadata");
+        List<CategoryResponse> categories = categoryService.getCategories().stream()
+                .map(CategoryResponse::from)
+                .toList();
         return ResponseEntity.ok(categories);
     }
 }

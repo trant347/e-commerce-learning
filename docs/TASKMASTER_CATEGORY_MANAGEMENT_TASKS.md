@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-4 complete; implementation tasks 5-11 have not started.
+Status: Tasks 1-5 complete; implementation tasks 6-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -81,7 +81,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   Return clear validation, conflict, unauthenticated, and forbidden responses.
   Keep deletion, merging, and retirement out of this phase.
 
-- [ ] **5. Switch category discovery to the catalog.** Make
+- [x] **5. Switch category discovery to the catalog.** Make
   `GET /products/categories` and MCP `get_categories` return canonical IDs from
   the same catalog, preserving their current string-array response shapes.
   Add a separate metadata response for selection/admin UIs needing display names

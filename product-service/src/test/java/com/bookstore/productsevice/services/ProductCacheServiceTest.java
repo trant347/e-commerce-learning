@@ -1,7 +1,9 @@
 package com.bookstore.productsevice.services;
 
+import com.bookstore.productsevice.category.CategoryService;
 import com.bookstore.productsevice.location.LocationNormalizer;
 import com.bookstore.productsevice.location.LocationSearchCriteria;
+import com.bookstore.productsevice.model.Category;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +35,7 @@ public class ProductCacheServiceTest {
     private RedisTemplate<String, Object> redisTemplate;
     private ValueOperations<String, Object> valueOps;
     private TaskMasterRepository repository;
+    private CategoryService categoryService;
     private ProductCacheService cacheService;
 
     private TaskMaster sampleTm1;
@@ -44,11 +47,13 @@ public class ProductCacheServiceTest {
         redisTemplate = mock(RedisTemplate.class);
         valueOps = mock(ValueOperations.class);
         repository = mock(TaskMasterRepository.class);
+        categoryService = mock(CategoryService.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
         cacheService = new ProductCacheService(
                 redisTemplate,
                 repository,
+                categoryService,
                 new ObjectMapper(),
                 new SimpleMeterRegistry(),
                 new LocationNormalizer());
@@ -236,30 +241,72 @@ public class ProductCacheServiceTest {
 
     @Test
     public void getCategories_cacheHit_returnsFromRedis() {
-        when(valueOps.get("products:categories")).thenReturn(List.of("Electrical", "Plumbing"));
+        when(valueOps.get("products:categories:v2")).thenReturn(List.of("electrical", "plumbing"));
 
         List<String> result = cacheService.getCategories();
 
-        assertThat(result).containsExactly("Electrical", "Plumbing");
-        verify(repository, never()).findAll();
+        assertThat(result).containsExactly("electrical", "plumbing");
+        verifyNoInteractions(categoryService);
     }
 
     @Test
-    public void getCategories_cacheMiss_computesFromDbAndCaches() {
-        when(valueOps.get("products:categories")).thenReturn(null);
-        when(repository.findAll()).thenReturn(List.of(sampleTm1, sampleTm2));
+    public void getCategories_cacheMiss_readsCatalogAndCachesCanonicalIds() {
+        when(valueOps.get("products:categories:v2")).thenReturn(null);
+        when(categoryService.getCategories()).thenReturn(List.of(
+                new Category().setId("plumbing").setDisplayName("Plumbing"),
+                new Category().setId("electrical").setDisplayName("Electrical")));
 
         List<String> result = cacheService.getCategories();
 
-        assertThat(result).containsExactly("Electrical", "Plumbing");
-        verify(valueOps).set(eq("products:categories"), anyList(), anyLong(), any());
+        assertThat(result).containsExactly("electrical", "plumbing");
+        verify(repository, never()).findAll();
+        verify(valueOps).set(
+                eq("products:categories:v2"),
+                eq(List.of("electrical", "plumbing")),
+                anyLong(),
+                any());
+    }
+
+    @Test
+    public void getCategories_catalogChangesDuringRead_doesNotCacheStaleIds() {
+        when(valueOps.get("products:categories:v2")).thenReturn(null);
+        when(valueOps.get("products:categories:version")).thenReturn(4L, 5L);
+        when(categoryService.getCategories()).thenReturn(List.of(
+                new Category().setId("plumbing").setDisplayName("Plumbing")));
+
+        List<String> result = cacheService.getCategories();
+
+        assertThat(result).containsExactly("plumbing");
+        verify(valueOps, never()).set(
+                eq("products:categories:v2"),
+                anyList(),
+                anyLong(),
+                any());
+    }
+
+    @Test
+    public void getCategories_catalogChangesAfterWrite_deletesStaleCacheEntry() {
+        when(valueOps.get("products:categories:v2")).thenReturn(null);
+        when(valueOps.get("products:categories:version")).thenReturn(4L, 4L, 5L);
+        when(categoryService.getCategories()).thenReturn(List.of(
+                new Category().setId("plumbing").setDisplayName("Plumbing")));
+
+        List<String> result = cacheService.getCategories();
+
+        assertThat(result).containsExactly("plumbing");
+        verify(valueOps).set(
+                eq("products:categories:v2"),
+                eq(List.of("plumbing")),
+                anyLong(),
+                any());
+        verify(redisTemplate).delete("products:categories:v2");
     }
 
     // ── Invalidation ────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
     @Test
-    public void evictOnCreate_deletesListAndFilterKeysAndCategories() {
+    public void evictOnCreate_deletesOnlyProductListAndFilterKeys() {
         Cursor<String> listCursor = mock(Cursor.class);
         Cursor<String> filterCursor = mock(Cursor.class);
         when(listCursor.hasNext()).thenReturn(true, false);
@@ -275,12 +322,12 @@ public class ProductCacheServiceTest {
 
         verify(redisTemplate).delete(Set.of("products:list:page:0:limit:20"));
         verify(redisTemplate).delete(Set.of("products:filter:category:Plumbing"));
-        verify(redisTemplate).delete("products:categories");
+        verify(redisTemplate, never()).delete("products:categories:v2");
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    public void evictOnEdit_deletesItemAndFilterKeysAndCategories() {
+    public void evictOnEdit_deletesItemAndFilterKeys() {
         Cursor<String> filterCursor = mock(Cursor.class);
         when(filterCursor.hasNext()).thenReturn(false);
         when(redisTemplate.scan(any(ScanOptions.class))).thenReturn(filterCursor);
@@ -288,12 +335,12 @@ public class ProductCacheServiceTest {
         cacheService.evictOnEdit("tm-1");
 
         verify(redisTemplate).delete("products:item:tm-1");
-        verify(redisTemplate).delete("products:categories");
+        verify(redisTemplate, never()).delete("products:categories:v2");
     }
 
     @SuppressWarnings("unchecked")
     @Test
-    public void evictOnDelete_deletesItemAndAllListsAndFiltersAndCategories() {
+    public void evictOnDelete_deletesItemAndAllListsAndFilters() {
         Cursor<String> cursor = mock(Cursor.class);
         when(cursor.hasNext()).thenReturn(false);
         when(redisTemplate.scan(any(ScanOptions.class))).thenReturn(cursor);
@@ -301,7 +348,15 @@ public class ProductCacheServiceTest {
         cacheService.evictOnDelete("tm-1");
 
         verify(redisTemplate).delete("products:item:tm-1");
-        verify(redisTemplate).delete("products:categories");
+        verify(redisTemplate, never()).delete("products:categories:v2");
+    }
+
+    @Test
+    public void evictCategoryCatalog_deletesVersionedCatalogKey() {
+        cacheService.evictCategoryCatalog();
+
+        verify(valueOps).increment("products:categories:version");
+        verify(redisTemplate).delete("products:categories:v2");
     }
 
     // ── searchWithFilters (used by MCP search_task_masters) ─────────────

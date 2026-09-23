@@ -5,6 +5,7 @@ import com.bookstore.productsevice.category.CategoryValidationException;
 import com.bookstore.productsevice.category.dto.CategoryResponse;
 import com.bookstore.productsevice.category.dto.CreateCategoryRequest;
 import com.bookstore.productsevice.category.dto.UpdateCategoryRequest;
+import com.bookstore.productsevice.services.ProductCacheService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,9 +25,12 @@ import java.util.Map;
 public class CategoryAdminController {
 
     private final CategoryService categoryService;
+    private final ProductCacheService productCacheService;
 
-    public CategoryAdminController(CategoryService categoryService) {
+    public CategoryAdminController(CategoryService categoryService,
+                                   ProductCacheService productCacheService) {
         this.categoryService = categoryService;
+        this.productCacheService = productCacheService;
     }
 
     @GetMapping
@@ -58,6 +62,7 @@ public class CategoryAdminController {
                 body.displayName(),
                 body.description(),
                 getUsername(request)));
+        productCacheService.evictCategoryCatalog();
         return ResponseEntity.status(HttpStatus.CREATED).body(category);
     }
 
@@ -78,6 +83,7 @@ public class CategoryAdminController {
                 body.displayName(),
                 body.description(),
                 getUsername(request)));
+        productCacheService.evictCategoryCatalog();
         return ResponseEntity.ok(category);
     }
 

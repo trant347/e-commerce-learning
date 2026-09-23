@@ -5,6 +5,7 @@ import com.bookstore.productsevice.category.dto.CategoryResponse;
 import com.bookstore.productsevice.category.dto.CreateCategoryRequest;
 import com.bookstore.productsevice.category.dto.UpdateCategoryRequest;
 import com.bookstore.productsevice.model.Category;
+import com.bookstore.productsevice.services.ProductCacheService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.Before;
 import org.junit.Test;
@@ -21,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -29,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 public class CategoryAdminControllerTest {
 
     private CategoryService categoryService;
+    private ProductCacheService productCacheService;
     private HttpServletRequest request;
     private CategoryAdminController controller;
     private MockMvc mockMvc;
@@ -36,8 +39,9 @@ public class CategoryAdminControllerTest {
     @Before
     public void setUp() {
         categoryService = mock(CategoryService.class);
+        productCacheService = mock(ProductCacheService.class);
         request = mock(HttpServletRequest.class);
-        controller = new CategoryAdminController(categoryService);
+        controller = new CategoryAdminController(categoryService, productCacheService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new ErrorAdvice())
                 .build();
@@ -90,6 +94,7 @@ public class CategoryAdminControllerTest {
                 "Carpentry",
                 "Wood construction and repair.",
                 "catalog-admin");
+        verify(productCacheService).evictCategoryCatalog();
     }
 
     @Test
@@ -115,6 +120,7 @@ public class CategoryAdminControllerTest {
                 "carpentry",
                 "Fine Carpentry",
                 "Custom wood construction."));
+        verify(productCacheService).evictCategoryCatalog();
     }
 
     @Test
@@ -133,6 +139,7 @@ public class CategoryAdminControllerTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(productCacheService);
     }
 
     @Test
@@ -151,6 +158,7 @@ public class CategoryAdminControllerTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(productCacheService);
     }
 
     @Test
