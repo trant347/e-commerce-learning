@@ -1,0 +1,184 @@
+{
+  "categories": [
+    {
+      "id": "alterations",
+      "displayName": "Alterations",
+      "description": "Clothing adjustments, hemming, resizing, and garment repairs."
+    },
+    {
+      "id": "automotive",
+      "displayName": "Automotive",
+      "description": "General vehicle maintenance, care, and automotive services."
+    },
+    {
+      "id": "babysitting",
+      "displayName": "Babysitting",
+      "description": "Short-term supervision and care for children."
+    },
+    {
+      "id": "car-detailing",
+      "displayName": "Car Detailing",
+      "description": "Interior and exterior vehicle cleaning and detailing."
+    },
+    {
+      "id": "carpentry",
+      "displayName": "Carpentry",
+      "description": "Wood construction, modification, and repair."
+    },
+    {
+      "id": "catering",
+      "displayName": "Catering",
+      "description": "Food preparation and service for gatherings and events."
+    },
+    {
+      "id": "childcare",
+      "displayName": "Childcare",
+      "description": "Ongoing care and support for children."
+    },
+    {
+      "id": "cleaning",
+      "displayName": "Cleaning",
+      "description": "Residential and commercial cleaning services."
+    },
+    {
+      "id": "computer-repair",
+      "displayName": "Computer Repair",
+      "description": "Diagnosis and repair of computer hardware and software problems."
+    },
+    {
+      "id": "cooking",
+      "displayName": "Cooking",
+      "description": "Meal preparation and personal cooking services."
+    },
+    {
+      "id": "delivery",
+      "displayName": "Delivery",
+      "description": "Pickup and delivery of items and household goods."
+    },
+    {
+      "id": "dog-walking",
+      "displayName": "Dog Walking",
+      "description": "Scheduled walks and exercise for dogs."
+    },
+    {
+      "id": "education",
+      "displayName": "Education",
+      "description": "General educational support and learning services."
+    },
+    {
+      "id": "electrical",
+      "displayName": "Electrical",
+      "description": "Electrical installation, maintenance, and repair."
+    },
+    {
+      "id": "entertainment",
+      "displayName": "Entertainment",
+      "description": "Live entertainment and performance services."
+    },
+    {
+      "id": "errand-running",
+      "displayName": "Errand Running",
+      "description": "Shopping, pickups, appointments, and everyday errands."
+    },
+    {
+      "id": "fitness",
+      "displayName": "Fitness",
+      "description": "Exercise instruction and general fitness support."
+    },
+    {
+      "id": "furniture-assembly",
+      "displayName": "Furniture Assembly",
+      "description": "Assembly and installation of household furniture."
+    },
+    {
+      "id": "gardening",
+      "displayName": "Gardening",
+      "description": "Plant care, garden maintenance, and garden improvement."
+    },
+    {
+      "id": "home-improvement",
+      "displayName": "Home Improvement",
+      "description": "General improvements and upgrades for residential properties."
+    },
+    {
+      "id": "home-repair",
+      "displayName": "Home Repair",
+      "description": "General household maintenance and minor repairs."
+    },
+    {
+      "id": "landscaping",
+      "displayName": "Landscaping",
+      "description": "Landscape design, installation, and outdoor maintenance."
+    },
+    {
+      "id": "moving",
+      "displayName": "Moving",
+      "description": "Packing, loading, transport, and unloading assistance."
+    },
+    {
+      "id": "music-lessons",
+      "displayName": "Music Lessons",
+      "description": "Instruction in musical instruments, performance, and theory."
+    },
+    {
+      "id": "organizing",
+      "displayName": "Organizing",
+      "description": "Home, office, and personal organization services."
+    },
+    {
+      "id": "painting",
+      "displayName": "Painting",
+      "description": "Interior and exterior painting and surface preparation."
+    },
+    {
+      "id": "personal-assistant",
+      "displayName": "Personal Assistant",
+      "description": "Administrative and day-to-day personal support."
+    },
+    {
+      "id": "personal-training",
+      "displayName": "Personal Training",
+      "description": "Individual fitness coaching and exercise programming."
+    },
+    {
+      "id": "pet-care",
+      "displayName": "Pet Care",
+      "description": "General care, feeding, supervision, and support for pets."
+    },
+    {
+      "id": "photography",
+      "displayName": "Photography",
+      "description": "Professional photography for people, properties, and events."
+    },
+    {
+      "id": "plumbing",
+      "displayName": "Plumbing",
+      "description": "Pipe, fixture, drain, and water-system installation and repair."
+    },
+    {
+      "id": "sewing",
+      "displayName": "Sewing",
+      "description": "Custom sewing, garment construction, and fabric repairs."
+    },
+    {
+      "id": "smart-home",
+      "displayName": "Smart Home",
+      "description": "Installation and configuration of connected home devices."
+    },
+    {
+      "id": "tech-support",
+      "displayName": "Tech Support",
+      "description": "Setup, troubleshooting, and support for consumer technology."
+    },
+    {
+      "id": "tutoring",
+      "displayName": "Tutoring",
+      "description": "Individual academic instruction and test preparation."
+    },
+    {
+      "id": "videography",
+      "displayName": "Videography",
+      "description": "Professional video recording and production."
+    }
+  ]
+}

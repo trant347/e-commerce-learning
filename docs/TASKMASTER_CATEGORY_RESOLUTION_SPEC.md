@@ -174,9 +174,9 @@ or migrated application cannot publish an invalid profile.
 
 ### Phase boundary
 
-Phase 1 includes catalog persistence, legacy/mock-data migration, admin
-management, category discovery, selection-only forms, and backend validation.
-It deliberately excludes:
+Phase 1 includes catalog persistence, a clean product-database reset and
+catalog/mock-data bootstrap, admin management, category discovery,
+selection-only forms, and backend validation. It deliberately excludes:
 
 - Applicant requests for missing categories.
 - Category proposal states and administrative resolution.
@@ -500,8 +500,8 @@ Add coverage for:
 
 ## Rollout
 
-1. Add the MongoDB-backed category catalog and migrate approved legacy, seed,
-   and mock-data category values.
+1. Add the MongoDB-backed category catalog, reset the disposable `products`
+   database, and bootstrap the approved catalog and mock TaskMasters.
 2. Add administrator category APIs and UI, switch REST/MCP discovery to the
    catalog, and invalidate the old profile-derived category cache.
 3. Enforce catalog IDs on every TaskMaster/application write and replace

@@ -1,12 +1,7 @@
 package com.bookstore.productsevice;
 
-import com.bookstore.productsevice.model.TaskMaster;
-import com.bookstore.productsevice.location.LocationNormalizer;
-import com.bookstore.productsevice.location.NormalizedLocation;
-import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.seed.ProductDataSeeder;
 import com.bookstore.productsevice.security.Secret;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +14,8 @@ import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
@@ -32,7 +28,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.ConnectException;
 import java.net.URI;
-import java.io.InputStream;
 import java.util.List;
 
 
@@ -45,10 +40,7 @@ public class TaskServiceApplication {
     Logger logger = LoggerFactory.getLogger(TaskServiceApplication.class);
 
     @Autowired
-    private TaskMasterRepository repository;
-
-    @Autowired
-    private LocationNormalizer locationNormalizer;
+    private ProductDataSeeder productDataSeeder;
 
     @Autowired
     Secret secret;
@@ -100,43 +92,15 @@ public class TaskServiceApplication {
     }
 
     @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE + 10)
     public CommandLineRunner createDatabase(){
         return new CommandLineRunner() {
             @Override
             public void run(String... args) throws Exception {
-                if (repository.count() > 0) {
-                    logger.info("Task masters collection already has data; skipping seed.");
-                    return;
-                }
-
-                ObjectMapper objectMapper = new ObjectMapper();
-                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-
-                ClassPathResource seedResource = new ClassPathResource("seed/taskMasters.json");
-                try (InputStream inputStream = seedResource.getInputStream()) {
-                    SeedTaskMastersPayload payload = objectMapper.readValue(inputStream, SeedTaskMastersPayload.class);
-
-                    if (payload == null || payload.taskMasters == null || payload.taskMasters.isEmpty()) {
-                        logger.warn("No task masters found in seed/taskMasters.json; product catalog remains empty.");
-                        return;
-                    }
-
-                    payload.taskMasters.forEach(taskMaster -> {
-                        NormalizedLocation location = locationNormalizer.normalizeForWrite(taskMaster.getLocation());
-                        taskMaster.setLocation(location.displayLocation())
-                                .setLocationCity(location.city())
-                                .setLocationStateCode(location.stateCode());
-                    });
-                    repository.saveAll(payload.taskMasters);
-                    logger.info("Seeded {} task masters from seed/taskMasters.json", payload.taskMasters.size());
-                }
+                productDataSeeder.seedIfEmpty();
             }
         };
 
     };
-
-    private static class SeedTaskMastersPayload {
-        public List<TaskMaster> taskMasters;
-    }
 
 }

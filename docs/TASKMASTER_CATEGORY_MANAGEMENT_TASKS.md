@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-2 complete; implementation tasks 3-11 have not started.
+Status: Tasks 1-3 complete; implementation tasks 4-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -66,13 +66,13 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   normalization, duplicate checks, and validation of selected IDs. A category
   must exist independently of whether any TaskMaster currently uses it.
 
-- [ ] **3. Prepare an explicit legacy-data migration.** Inventory category
-  strings in profiles, pending applications, and seed/test data. Produce an
-  admin-reviewed canonical catalog and mapping for spelling/case variants.
-  Report unresolved values rather than automatically publishing every historic
-  free-text label. Provide a repeatable migration with a dry-run report, backup
-  and rollback instructions, and reconciliation of affected pending applications.
-  Preserve historical application records or retain an audit of any changes.
+- [x] **3. Prepare a clean-reset catalog bootstrap.** Because current product
+  data is disposable, reset only the `products` logical database instead of
+  converting legacy category strings. Maintain an explicit, version-controlled
+  canonical catalog, seed it before mock TaskMasters, and validate every mock
+  category reference. Refuse startup when legacy profiles/applications exist
+  without a catalog. Document the destructive reset scope and ensure the reset
+  recreates the products database user without affecting other service data.
 
 - [ ] **4. Add admin category management APIs.** Support listing, creating, and
   editing category metadata through product-service. Keep IDs immutable and
@@ -117,7 +117,8 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
 
 - [ ] **10. Add focused regression coverage.** Cover catalog persistence,
   normalized ID collisions, admin-only writes, unknown/empty selections,
-  acceptance-time validation, migration reruns, and cache refresh after changes.
+  acceptance-time validation, reset/bootstrap repeatability, and cache refresh
+  after changes.
   Add React coverage for catalog selection and admin management. Preserve MCP
   response compatibility and single-category search behavior. Add an E2E
   scenario: admin creates a category, applicant selects it, admin approves the
@@ -125,19 +126,19 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   attempts to submit arbitrary categories without using the UI.
 
 - [ ] **11. Roll out safely and document operations.** Approve and load the
-  initial catalog, reconcile legacy references, then enable backend enforcement
-  and selection-only forms in a coordinated release. Avoid a window where old
-  free-text writes can introduce unmapped values during migration. Update seed
-  data/setup documentation and explain how administrators create categories.
-  Clear/version the category cache during deployment.
+  initial catalog, reset the disposable products database, then enable backend
+  enforcement and selection-only forms in a coordinated release. Do not retain
+  legacy product data under this rollout. Update seed data/setup documentation
+  and explain how administrators create categories. Clear/version the category
+  cache during deployment.
 
 ### Phase 1 completion criteria
 
 Admins can create and maintain the database-backed category list. Applicants
 and admin-created profiles select only catalog entries, with the same rules
 enforced by the backend. Existing profiles and pending applications have an
-explicit migration outcome. REST, MCP category discovery, and forms share one
-source of truth. AI selection and search behavior remain unchanged.
+explicit reset outcome. REST, MCP category discovery, and forms share one source
+of truth. AI selection and search behavior remain unchanged.
 
 ## Phase 2: Missing-category requests (deferred)
 

@@ -2,12 +2,15 @@ package com.bookstore.productsevice.category;
 
 import com.bookstore.productsevice.model.Category;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.stereotype.Component;
 
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
 public class CategoryIndexInitializer implements CommandLineRunner {
 
     private final MongoTemplate mongoTemplate;
