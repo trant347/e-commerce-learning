@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-5 complete; implementation tasks 6-11 have not started.
+Status: Tasks 1-6 complete; implementation tasks 7-11 have not started.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -89,7 +89,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   ensure old profile-derived Redis entries cannot survive the cutover. A newly
   created category must appear even when it has zero providers.
 
-- [ ] **6. Enforce selection-only writes on the backend.** Validate nonempty
+- [x] **6. Enforce selection-only writes on the backend.** Validate nonempty
   category selections against the catalog during application submission, direct
   TaskMaster creation, and application acceptance. Revalidate pending
   applications before publishing their profiles. Normalize/deduplicate IDs under

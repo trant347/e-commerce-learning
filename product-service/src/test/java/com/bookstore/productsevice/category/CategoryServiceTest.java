@@ -8,6 +8,7 @@ import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -198,6 +199,41 @@ public class CategoryServiceTest {
                 .isInstanceOf(CategoryValidationException.class)
                 .extracting("errorCode")
                 .isEqualTo("invalid_category");
+    }
+
+    @Test
+    public void normalizeAndValidateCategoryIds_arrayOverloadReturnsCanonicalArray() {
+        when(repository.findAllById(any())).thenReturn(List.of(
+                category("plumbing", "Plumbing", "plumbing", "Pipework")));
+
+        String[] result = service.normalizeAndValidateCategoryIds(
+                new String[]{" Plumbing ", "PLUMBING"});
+
+        assertThat(result).containsExactly("plumbing");
+    }
+
+    @Test
+    public void normalizeAndValidateCategoryIds_arrayOverloadRejectsNullArray() {
+        assertThatThrownBy(() ->
+                service.normalizeAndValidateCategoryIds((String[]) null))
+                .isInstanceOf(CategoryValidationException.class)
+                .extracting("errorCode", "fieldErrors")
+                .containsExactly(
+                        "invalid_category",
+                        Map.of("jobCategories", "must contain at least one category"));
+    }
+
+    @Test
+    public void normalizeAndValidateCategoryIds_malformedElementTargetsJobCategories() {
+        assertThatThrownBy(() ->
+                service.normalizeAndValidateCategoryIds(new String[]{"bad category"}))
+                .isInstanceOf(CategoryValidationException.class)
+                .extracting("errorCode", "fieldErrors")
+                .containsExactly(
+                        "invalid_category",
+                        Map.of(
+                                "jobCategories",
+                                "contains invalid category ID: 'bad category'"));
     }
 
     @Test

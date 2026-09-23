@@ -102,6 +102,10 @@ public class TaskMasterController {
                 taskMaster.getHourlyRateUsd(),
                 taskMaster.getDescription());
 
+        String[] categoryIds = categoryService.normalizeAndValidateCategoryIds(
+                taskMaster.getJobCategories());
+        taskMaster.setJobCategories(categoryIds);
+
         try {
             TaskMasterValidator.validate(taskMaster);
         } catch (Exception e) {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -112,7 +113,16 @@ public class CategoryService {
 
         Set<String> normalizedIds = new LinkedHashSet<>();
         for (String categoryId : categoryIds) {
-            normalizedIds.add(normalizeId(categoryId));
+            try {
+                normalizedIds.add(normalizeId(categoryId));
+            } catch (CategoryValidationException exception) {
+                String invalidValue = categoryId == null ? "null" : "'" + categoryId + "'";
+                throw validationError(
+                        "invalid_category",
+                        "Invalid category ID in jobCategories: " + invalidValue + ".",
+                        "jobCategories",
+                        "contains invalid category ID: " + invalidValue);
+            }
         }
 
         Set<String> existingIds = categoryRepository.findAllById(normalizedIds).stream()
@@ -132,6 +142,13 @@ public class CategoryService {
         }
 
         return new ArrayList<>(normalizedIds);
+    }
+
+    public String[] normalizeAndValidateCategoryIds(String[] categoryIds) {
+        Collection<String> categories = categoryIds == null
+                ? null
+                : Arrays.asList(categoryIds);
+        return normalizeAndValidateCategoryIds(categories).toArray(String[]::new);
     }
 
     public String normalizeId(String id) {

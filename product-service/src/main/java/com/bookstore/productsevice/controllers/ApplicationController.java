@@ -1,5 +1,6 @@
 package com.bookstore.productsevice.controllers;
 
+import com.bookstore.productsevice.category.CategoryService;
 import com.bookstore.productsevice.messaging.ApplicationEventPublisher;
 import com.bookstore.productsevice.location.LocationNormalizer;
 import com.bookstore.productsevice.location.NormalizedLocation;
@@ -43,17 +44,20 @@ public class ApplicationController {
     private final ApplicationEventPublisher eventPublisher;
     private final ProductCacheService productCacheService;
     private final LocationNormalizer locationNormalizer;
+    private final CategoryService categoryService;
 
     public ApplicationController(ApplicationRepository applicationRepository,
                                  TaskMasterRepository taskMasterRepository,
                                  ApplicationEventPublisher eventPublisher,
                                  ProductCacheService productCacheService,
-                                 LocationNormalizer locationNormalizer) {
+                                 LocationNormalizer locationNormalizer,
+                                 CategoryService categoryService) {
         this.applicationRepository = applicationRepository;
         this.taskMasterRepository = taskMasterRepository;
         this.eventPublisher = eventPublisher;
         this.productCacheService = productCacheService;
         this.locationNormalizer = locationNormalizer;
+        this.categoryService = categoryService;
     }
 
     // -------------------------------------------------------------------------
@@ -73,6 +77,8 @@ public class ApplicationController {
                     .body(Map.of("error", "You already have a pending application."));
         }
 
+        String[] categoryIds = categoryService.normalizeAndValidateCategoryIds(
+                body.getJobCategories());
         NormalizedLocation location = locationNormalizer.normalizeForWrite(body.getLocation());
         TaskMasterApplication application = new TaskMasterApplication()
                 .setApplicantUsername(username)
@@ -84,7 +90,7 @@ public class ApplicationController {
                 .setDescription(body.getDescription())
                 .setHourlyRateUsd(body.getHourlyRateUsd())
                 .setPhoto(body.getPhoto())
-                .setJobCategories(body.getJobCategories())
+                .setJobCategories(categoryIds)
                 .setStatus(ApplicationStatus.PENDING)
                 .setSubmittedAt(Instant.now());
 
@@ -149,6 +155,10 @@ public class ApplicationController {
                     .body(Map.of("error", "Application is not in PENDING status."));
         }
 
+        String[] categoryIds = categoryService.normalizeAndValidateCategoryIds(
+                application.getJobCategories());
+        application.setJobCategories(categoryIds);
+
         // Create the TaskMaster profile
         NormalizedLocation location = locationNormalizer.normalizeForWrite(application.getLocation());
         TaskMaster taskMaster = new TaskMaster()
@@ -160,7 +170,7 @@ public class ApplicationController {
                 .setDescription(application.getDescription())
                 .setHourlyRateUsd(application.getHourlyRateUsd())
                 .setPhoto(application.getPhoto())
-                .setJobCategories(application.getJobCategories())
+                .setJobCategories(categoryIds)
                 .setRating(0.0)
                 .setOwnerUsername(application.getApplicantUsername());
 
