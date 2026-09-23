@@ -5,6 +5,11 @@
 > Purpose: Replace prompt-level category special cases with a product-owned,
 > deterministic way to map natural-language service requests to TaskMaster
 > categories.
+>
+> Implementation sequence: The database-backed, administrator-managed category
+> catalog described below is Phase 1. Missing-category proposals are Phase 2.
+> Multi-category AI search and natural-language resolution are deferred to
+> Phase 3.
 
 ## Problem
 
@@ -42,9 +47,149 @@ as categories and user vocabulary grow.
 - Requiring a larger language model to make category selection reliable.
 - Silently searching every category when the request cannot be resolved.
 
+## Phase 1 category catalog contract
+
+Phase 1 establishes a category catalog owned by `product-service` and managed
+by marketplace administrators. It does not change AI prompts,
+`search_task_masters` arguments, category ranking, or natural-language
+resolution.
+
+### Persistence and references
+
+- Store catalog entries as `Category` documents in the product-service MongoDB
+  `categories` collection.
+- Do not add a singular `category` field to TaskMaster profiles or
+  applications.
+- Continue storing canonical category IDs in `TaskMaster.jobCategories` and
+  `TaskMasterApplication.jobCategories`. Both fields remain arrays because one
+  provider may offer multiple services.
+- A category exists independently of TaskMaster profiles. Category discovery
+  must not derive the catalog from values found on profiles.
+
+The initial document contract is:
+
+```json
+{
+  "id": "furniture-assembly",
+  "displayName": "Furniture Assembly",
+  "normalizedDisplayName": "furniture assembly",
+  "description": "Assembly and installation of household furniture.",
+  "createdAt": "2026-09-22T20:00:00Z",
+  "createdBy": "admin",
+  "updatedAt": "2026-09-22T20:00:00Z",
+  "updatedBy": "admin"
+}
+```
+
+`normalizedDisplayName` and all audit fields are server-managed and are not
+accepted from client requests.
+
+### Canonical IDs and duplicate handling
+
+- `id` is supplied when an administrator creates a category and is immutable
+  afterward.
+- The server trims and lowercases the supplied ID before validating it.
+- A valid ID is 2-64 characters and matches
+  `^[a-z0-9]+(?:-[a-z0-9]+)*$`. It contains lowercase ASCII letters, numbers,
+  and single hyphens between segments. The server does not guess or
+  transliterate IDs from display names.
+- Category IDs are unique through MongoDB's `_id` constraint. A normalized ID
+  collision returns `409 Conflict`.
+- `displayName` is trimmed, internal whitespace is collapsed, and its
+  case-insensitive normalized value is stored in `normalizedDisplayName`.
+  Display names must be 2-80 characters.
+- `normalizedDisplayName` is unique. Names that differ only by case or
+  repeated whitespace return `409 Conflict`.
+- `description` is trimmed, required, and limited to 500 characters.
+
+Phase 1 allows administrators to edit `displayName` and `description`. It does
+not allow changing `id`, deleting categories, merging categories, retiring
+categories, or editing aliases, object terms, related categories, or required
+profile attributes.
+
+### API contract
+
+Existing category discovery remains backward compatible:
+
+```text
+GET /products/categories
+200 OK -> ["carpentry", "furniture-assembly"]
+```
+
+The response is a sorted array of canonical IDs and remains the source for MCP
+`get_categories`.
+
+Clients that need labels and descriptions use:
+
+```text
+GET /products/categories/metadata
+200 OK -> CategoryResponse[]
+```
+
+`CategoryResponse` contains `id`, `displayName`, and `description`. It does not
+expose internal normalization or audit fields. This endpoint is public like the
+existing category-discovery endpoint so unauthenticated marketplace browsing
+can render category labels.
+
+Administrator mutations use:
+
+```text
+POST /products/admin/categories
+PUT  /products/admin/categories/{id}
+```
+
+Both endpoints require a valid JWT with `ROLE_ADMIN`. Create accepts `id`,
+`displayName`, and `description`. Update accepts only `displayName` and
+`description`; the path ID is immutable. Successful create returns
+`201 Created` with `CategoryResponse`; successful update returns `200 OK` with
+`CategoryResponse`.
+
+Category API errors use this machine-readable shape:
+
+```json
+{
+  "error": "duplicate_category_id",
+  "message": "Category 'carpentry' already exists.",
+  "fieldErrors": {
+    "id": "must be unique"
+  }
+}
+```
+
+`fieldErrors` is optional and is included for field-specific validation
+failures. Defined statuses are:
+
+- `400 Bad Request`: `invalid_category` or `unknown_category`, including
+  malformed fields and profile/application writes containing unknown IDs.
+- `401 Unauthorized`: missing or invalid authentication for admin mutations.
+- `403 Forbidden`: authenticated caller does not have `ROLE_ADMIN`.
+- `404 Not Found`: an update target does not exist.
+- `409 Conflict`: `duplicate_category_id` or
+  `duplicate_category_display_name`.
+
+Backend validation is authoritative. Application submission, direct TaskMaster
+creation, and application acceptance must all reject category IDs that are not
+present in the catalog. Acceptance revalidates pending applications so a stale
+or migrated application cannot publish an invalid profile.
+
+### Phase boundary
+
+Phase 1 includes catalog persistence, legacy/mock-data migration, admin
+management, category discovery, selection-only forms, and backend validation.
+It deliberately excludes:
+
+- Applicant requests for missing categories.
+- Category proposal states and administrative resolution.
+- Aliases, object/skill terms, and related-category metadata.
+- Interim multi-category MCP arguments.
+- AI prompt changes and deterministic natural-language resolution.
+
+These exclusions prevent the catalog ownership refactor from changing AI search
+behavior at the same time.
+
 ## Interim multi-category approach
 
-Before implementing the product-owned resolver, extend
+In Phase 3, before implementing the product-owned resolver, optionally extend
 `search_task_masters` so the AI model can select up to three plausible
 categories instead of requiring one exact category.
 
@@ -128,9 +273,10 @@ Canonical IDs remain the values stored in `TaskMaster.jobCategories`. Aliases
 and related terms are search metadata, not additional stored profile
 categories.
 
-The first implementation may keep this taxonomy in a versioned product-service
-resource file. If categories later become administratively managed, the same
-contract can move to MongoDB without changing MCP clients.
+Canonical categories are stored in the product-service MongoDB `categories`
+collection from Phase 1. Resolver-only metadata such as aliases, objects, and
+relationships is added to that catalog in Phase 3 without changing the
+canonical IDs exposed to MCP clients.
 
 ## Taxonomy ownership and governance
 
@@ -160,8 +306,12 @@ them before publication.
 
 ## Missing-category proposal workflow
 
-TaskMaster registration should continue requiring a category decision, but the
-form must provide a `Category not listed` option. Selecting it requires:
+This workflow is Phase 2 and is not part of the initial catalog refactor.
+Until Phase 2 is deployed, TaskMaster registration requires at least one
+existing catalog category and does not offer a free-text fallback.
+
+In Phase 2, the form provides a `Category not listed` option. Selecting it
+requires:
 
 - A proposed category name.
 - A description of the service and typical work performed.
@@ -350,22 +500,23 @@ Add coverage for:
 
 ## Rollout
 
-1. Add interim MCP and repository support for up to three ordered categories.
-2. Update the AI instructions to select multiple plausible categories when a
-   request overlaps trades, while keeping all categories constrained by the
-   published enum.
-3. Add the taxonomy model and resolver to product-service.
-4. Add the category-proposal model, TaskMaster application fields, applicant
-   form, and admin review workflow.
-5. Extend the MCP contract with `serviceQuery` while retaining exact
+1. Add the MongoDB-backed category catalog and migrate approved legacy, seed,
+   and mock-data category values.
+2. Add administrator category APIs and UI, switch REST/MCP discovery to the
+   catalog, and invalidate the old profile-derived category cache.
+3. Enforce catalog IDs on every TaskMaster/application write and replace
+   free-text category inputs with catalog-backed selection.
+4. Add the Phase 2 missing-category proposal model, applicant form, and admin
+   resolution workflow.
+5. Decide whether Phase 3 needs the interim MCP/repository support for up to
+   three ordered categories or can proceed directly to the resolver.
+6. Add resolver metadata and deterministic category resolution to
+   product-service.
+7. Extend the MCP contract with `serviceQuery` while retaining exact
    `category` compatibility.
-6. Update AI assistant instructions to pass the natural-language service
-   request.
-7. Add tests and compare existing common queries against both the interim and
-   resolver-based behavior.
-8. Deploy product-service, restart AI assistant MCP discovery, and verify live
+8. Update AI assistant instructions to pass the natural-language service
+   request and compare existing common queries against the new behavior.
+9. Deploy product-service, restart AI assistant MCP discovery, and verify live
    searches.
-9. Remove the temporary prompt-level cupboard/carpentry special case.
-10. Remove the model-selected `categories` parameter after callers have migrated
-   to `serviceQuery`, unless exact multi-category search remains useful for
-   trusted non-AI clients.
+10. Remove temporary prompt-level category special cases and, if it was
+    implemented, retire model-selected `categories` after callers migrate.
