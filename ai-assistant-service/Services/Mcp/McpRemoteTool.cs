@@ -10,10 +10,11 @@ namespace ai_assistant_service.Services.Mcp;
 /// The tool metadata (name, description, schema) comes from the remote MCP server;
 /// execution is forwarded via <see cref="McpClientTool.CallAsync"/>.
 /// </summary>
-public sealed class McpRemoteTool : IToolDefinition
+public sealed class McpRemoteTool : IToolDefinition, IParameterEnumConstrainable
 {
     private readonly McpClientTool _mcpTool;
-    private object _parametersSchema;
+    private readonly object _schemaLock = new();
+    private volatile object _parametersSchema;
     private readonly Dictionary<string, Dictionary<string, object>> _propertyOverrides = new();
 
     public McpRemoteTool(McpClientTool mcpTool)
@@ -36,19 +37,24 @@ public sealed class McpRemoteTool : IToolDefinition
     /// Constrains a parameter to a fixed list of values by adding an <c>enum</c> entry
     /// to its schema. Used to bake the live category list into the search tool so small
     /// models (e.g. llama3.2:3b) pick a real value instead of guessing or sending null.
+    /// Called periodically by the category refresher while chat requests read
+    /// <see cref="ParametersSchema"/>, so the schema is rebuilt and swapped atomically.
     /// </summary>
     public void SetParameterEnum(string parameterName, IReadOnlyList<string> values)
     {
         if (string.IsNullOrWhiteSpace(parameterName) || values is null || values.Count == 0) return;
 
-        if (!_propertyOverrides.TryGetValue(parameterName, out var overrides))
+        lock (_schemaLock)
         {
-            overrides = new Dictionary<string, object>();
-            _propertyOverrides[parameterName] = overrides;
-        }
-        overrides["enum"] = values.ToArray();
+            if (!_propertyOverrides.TryGetValue(parameterName, out var overrides))
+            {
+                overrides = new Dictionary<string, object>();
+                _propertyOverrides[parameterName] = overrides;
+            }
+            overrides["enum"] = values.ToArray();
 
-        _parametersSchema = NormalizeSchema(_mcpTool.JsonSchema);
+            _parametersSchema = NormalizeSchema(_mcpTool.JsonSchema);
+        }
     }
 
     public async Task<string> ExecuteAsync(

@@ -138,7 +138,8 @@ spring.ai.mcp.server:
 |-----------|---------|
 | `McpServerConfig` | POCO for MCP endpoint configuration |
 | `McpRemoteTool` | Implements `IToolDefinition`, wraps `McpClientTool` from SDK |
-| `McpToolDiscoveryService` | `BackgroundService` — connects to MCP servers, discovers tools, registers them |
+| `McpToolDiscoveryService` | `BackgroundService` — connects to MCP servers, discovers tools, registers them, then periodically refreshes the category enum |
+| `McpCategoryEnumRefresher` | Calls `get_categories` and applies the result as the `category` enum on `search_task_masters` when it changes |
 | `ToolRegistry` | Updated to `ConcurrentDictionary` — supports dynamic `Register()` at runtime |
 
 ### Discovery Flow
@@ -148,6 +149,19 @@ spring.ai.mcp.server:
 4. Calls `client.ListToolsAsync()` to discover tools
 5. Wraps each as `McpRemoteTool` and calls `ToolRegistry.Register(tool)`
 6. Retries up to 10 times with backoff if the server isn't ready
+7. Injects the live category list into the `search_task_masters` schema, then
+   re-reads it every `McpDiscovery:CategoryRefreshIntervalSeconds` (default 60;
+   `0` disables). Admin-created categories reach AI search without restarting the
+   assistant. Failed or empty refreshes keep the last known list.
+8. The SDK's SSE client does not reconnect after the server restarts. When a
+   `get_categories` call throws or times out (15s), or a server never connected,
+   the service reconnects on the same interval. An empty or error result means
+   the session is still healthy, so it does not reconnect. It targets the server
+   that provided `get_categories` and any server that never connected, then
+   re-registers their tools, replacing wrappers bound to the dead session.
+   Replacement search tools get the last known enum before they are registered,
+   and replaced clients are disposed after a 30s grace period so in-flight calls
+   can finish.
 
 ### Tool Execution
 `McpRemoteTool.ExecuteAsync()` converts string arguments to `Dictionary<string, object?>` and calls `McpClientTool.CallAsync()`, which sends a `tools/call` JSON-RPC request to the remote MCP server over the SSE connection.
@@ -201,3 +215,4 @@ To add MCP to calendar-service (or any other service), follow the same pattern:
 | Retry with backoff on discovery | Product-service may start after AI assistant in Docker Compose |
 | Keep `GetBookingsTool` local | Calendar-service doesn't have MCP yet; migrate when ready |
 | Remove Kafka category consumer | Categories are now part of the MCP tool schema, owned by product-service |
+| Poll `get_categories` for the category enum | Keeps AI search current after admin catalog edits without coupling the assistant to Kafka; product-service evicts its catalog cache on every write, so each poll is cheap and fresh |

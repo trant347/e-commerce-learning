@@ -100,6 +100,7 @@ builder.Services.AddHttpClient<IBookingApiClient, BookingApiClient>((sp, client)
 // Product-service tools are discovered dynamically via MCP below.
 builder.Services.AddSingleton<IToolDefinition, GetBookingsTool>();
 builder.Services.AddSingleton<ToolRegistry>();
+builder.Services.AddSingleton<McpCategoryEnumRefresher>();
 
 // MCP tool discovery — connects to remote MCP servers and registers their tools dynamically.
 builder.Services.AddHostedService<McpToolDiscoveryService>();

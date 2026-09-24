@@ -113,12 +113,13 @@ depends on `GET /products/categories/metadata`, which an old backend lacks.
    docker compose up -d product-service frontend
    ```
 
-5. **Restart the AI assistant** so its MCP discovery reloads the catalog-backed
-   category list:
-
-   ```powershell
-   docker compose restart ai-assistant-service
-   ```
+5. **Wait for the AI assistant to pick up the catalog.** No restart is needed.
+   Every 60 seconds (`McpDiscovery:CategoryRefreshIntervalSeconds`),
+   `ai-assistant-service` re-reads the category list from product-service. If
+   that fails, for example because step 4 replaced the product-service
+   container and dropped the MCP connection, it reconnects to product-service
+   and reloads its tools. Within one or two intervals its log reports
+   `Updated search_task_masters category enum`.
 
 6. **Verify the release:**
    - `GET http://localhost:3000/products/categories` returns the seeded
@@ -195,6 +196,12 @@ identity, and `403` for non-administrators.
 - Adding a category to `seed/categories.json` only affects fresh or reset
   environments and environments missing that ID. Use the admin UI or API for
   live catalogs.
-- The AI assistant reads the category list for its search tool at startup.
-  Restart `ai-assistant-service` after creating categories so AI search can
-  select them. REST search and forms see new categories immediately.
+- The AI assistant refreshes the category list in its search tool every 60
+  seconds, configured by `McpDiscovery:CategoryRefreshIntervalSeconds` in
+  `ai-assistant-service/appsettings.json`. A new category becomes available to
+  AI search within that interval, without a restart. If a refresh fails or
+  times out, the assistant keeps its last known list and reconnects to
+  product-service on the same interval, so it recovers after product-service
+  restarts. An empty catalog keeps the last list without reconnecting. Setting the
+  value to `0` disables both the refresh and the automatic reconnect. REST
+  search and forms see new categories immediately.
