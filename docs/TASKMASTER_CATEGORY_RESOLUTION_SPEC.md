@@ -154,9 +154,12 @@ Add administrator-managed `aliases` to `Category` and metadata DTOs:
 - Aliases are literal service phrases, never regular expressions or executable
   instructions. Prefer specific phrases such as `wooden cabinet repair` over
   broad objects such as `furniture`.
-- The same term may legitimately belong to different categories. Preserve
-  those collisions: the exact resolver must report ambiguity, never choose
-  by insertion order or allow an alias to shadow another category's name.
+- The same normalized term may appear in more than one category, whether as
+  aliases in both or as one category's alias and another's ID or display name.
+  Writes accept these collisions. Every collision is treated as ambiguous: the
+  exact resolver returns all colliding categories as candidates and the
+  assistant asks the user to choose. No entry type takes precedence, and
+  insertion order never selects a category.
 - Descriptions should explain included work and relevant boundaries. They are
   data, not instructions, including when an administrator supplied them.
 - Providers and applicants cannot publish aliases. No automatic alias
@@ -233,9 +236,13 @@ that same snapshot; never combine old descriptions with new IDs.
 - A failed, malformed, or empty response does not overwrite a last-good
   snapshot. Log and expose the degraded state; do not report an empty provider
   search as the result of a catalog failure.
-- In the proposed mode, snapshots older than 5 minutes are unusable for new
-  category decisions. A successful unchanged fetch refreshes their age.
-  With refresh disabled, this expiry still applies.
+- In `catalog-llm` and `hybrid` modes, snapshots older than 5 minutes are
+  unusable for new category decisions. A successful unchanged fetch refreshes
+  their age. These modes therefore require
+  `McpDiscovery:CategoryRefreshIntervalSeconds` between 1 and 300; startup
+  rejects `0` or larger values instead of letting category search stop five
+  minutes after startup. `legacy` mode keeps the current meaning of `0`
+  (refresh and automatic reconnect disabled) and has no snapshot expiry.
 - Without a usable snapshot, block category search and explain temporary
   unavailability. Other independent tools may continue.
 - Preserve reconnection behavior, adapting ownership tracking to the rich
@@ -244,10 +251,16 @@ that same snapshot; never combine old descriptions with new IDs.
 - Reconnect must reapply the last usable schema/context to replacement tools.
 
 The model receives IDs, names, descriptions, and aliases as delimited catalog
-data. Do not concatenate metadata into behavioral instructions. Do not silently
-truncate the catalog: measure serialized prompt size against the deployed
-model's context capacity and fail explicitly if the complete catalog cannot
-fit with the request and reserved response budget.
+data. Do not concatenate metadata into behavioral instructions.
+
+Supported scale for this design is at most 100 categories with up to 20
+aliases each. The current seed catalog has 36 categories (about 4 KB of JSON
+without aliases). Serialized catalog context sent to the model must not exceed
+`CategoryResolution:MaxCatalogContextChars`, default 12,000 characters. Do not
+silently truncate: a snapshot exceeding either limit is rejected, the new mode
+reports degraded readiness, and category search is blocked. Growing beyond
+these limits requires a separate design (for example, pre-filtering candidates)
+rather than larger prompts.
 
 ## 5. Resolution and search orchestration
 
@@ -294,7 +307,7 @@ tool calls must not bypass the same category-search gate. If a
 `not_applicable` flow later requests provider search, obtain a valid category
 decision before executing it.
 
-### Phase 1: catalog-grounded LLM interpretation
+### Hybrid phase 1: catalog-grounded LLM interpretation
 
 1. Capture a usable catalog snapshot and relevant conversation context.
 2. Ask the model to select one category only when the requested work supports
@@ -318,7 +331,7 @@ Remove object-to-category special cases after reviewed catalog descriptions
 and evaluation cases cover those distinctions. Examples must reference actual
 catalog IDs and must not supply a second, hardcoded taxonomy.
 
-### Phase 2: conservative exact-match fast path
+### Hybrid phase 2: conservative exact-match fast path
 
 Add product-owned MCP `resolve_category_exact(query)`:
 
@@ -332,9 +345,11 @@ Add product-owned MCP `resolve_category_exact(query)`:
 ```
 
 The input is the complete current user message, not a model-extracted keyword.
-Require a nonblank string of at most 2,000 characters. Its length limit must
-not reduce the existing chat limit: longer chat messages skip this fast path
-and use the LLM path. Direct invalid calls return `invalid_category_query`.
+Require a nonblank string of at most 2,000 characters. The chat API currently
+has no message length limit, and this feature does not add one: the limit
+applies only to resolver input. Longer chat messages skip this fast path and
+use the hybrid phase 1 LLM path. Direct invalid calls return
+`invalid_category_query`.
 Resolver failures use the same `{error, message}` envelope as search;
 unavailable catalog storage returns `category_catalog_unavailable`, never
 `unmatched`. In non-resolved successful responses, `categoryId` is `null`.
@@ -355,7 +370,7 @@ The assistant invokes this tool before semantic category selection in hybrid
 mode. For `resolved`, lock the category for that request; the model may still
 extract explicit filters from relevant user context and generate the response,
 but cannot silently replace the product decision. For `ambiguous`, clarify;
-for `unmatched`, use the phase-1 LLM path.
+for `unmatched`, use the hybrid phase 1 LLM path.
 
 Do not use the fast path to override an unresolved conflict in conversation
 context. An ambiguous short reply to an earlier question may still require
@@ -366,7 +381,7 @@ If the resolver returns a different version from the captured assistant
 snapshot, refresh once before using it. If versions still disagree, abandon
 that exact result and use the LLM with a usable snapshot, or report catalog
 unavailability. Do not merge snapshots. If only the exact resolver fails,
-fall back to the phase-1 path with an explicit diagnostic; never label that
+fall back to the hybrid phase 1 path with an explicit diagnostic; never label that
 fallback as an exact match.
 
 Keep implementation small: one domain matcher sharing `CategoryService`
@@ -468,10 +483,14 @@ Initial release gates (targets, not measured claims):
   most 5%; correct abstention is at least 95%.
 - Report confusion pairs, no-match rate, clarification rate, and fast-path
   coverage separately. Do not hide regressions in one aggregate score.
-- Compare baseline, phase 1, and hybrid on the same model, catalog, hardware,
+- Compare `legacy`, `catalog-llm`, and `hybrid` modes on the same model, catalog, hardware,
   and prompts; run each prompt three times and report variability.
 - Product exact-matcher execution p95 is at most 20 ms on a warm local fixture
-  of 1,000 categories with up to 20 aliases each, excluding network/Mongo fetch.
+  at the supported ceiling (100 categories with 20 aliases each), excluding
+  network/Mongo fetch.
+- Quality and end-to-end latency are measured with the current catalog plus
+  reviewed aliases, and again with a synthetic catalog at the supported
+  ceiling that stays within `CategoryResolution:MaxCatalogContextChars`.
 - Warm end-to-end service-search p95 is at most 1.2 times baseline, measured
   from request receipt through final answer with identical provider data.
   Report catalog fetch, resolver round trip, and model time separately.
@@ -482,7 +501,9 @@ Initial release gates (targets, not measured claims):
 
 Use one assistant rollout setting, `CategoryResolution:Mode`, with values
 `legacy`, `catalog-llm`, and `hybrid`; default to `legacy` until gates pass.
-Reject unknown configuration values at startup. This is a migration switch,
+Reject unknown configuration values at startup, and in `catalog-llm` or
+`hybrid` mode reject a category refresh interval outside 1-300 seconds
+(section 4). This is a migration switch,
 not a separate taxonomy configuration system.
 
 ### Hybrid phase 1: metadata, ambiguity, and validation
@@ -493,7 +514,7 @@ not a separate taxonomy configuration system.
 3. Review descriptions and aliases for overlapping services.
 4. Add assistant snapshot handling, typed decisions, clarification behavior,
    and prompt/tool alignment behind `catalog-llm`.
-5. Cover failure paths and run baseline versus phase-1 evaluation.
+5. Cover failure paths and evaluate `legacy` versus `catalog-llm`.
 
 Deploy product-service before enabling the new assistant mode. Deploy the
 admin UI only after alias-capable product APIs are available. Older assistants
@@ -505,7 +526,7 @@ silently pretend the feature is enabled.
 
 1. Implement and register `resolve_category_exact` in product-service.
 2. Add the assistant's exact-match branch, collision handling, and bounded
-   fallback to the phase-1 path behind `hybrid`.
+   fallback to the hybrid phase 1 path behind `hybrid`.
 3. Evaluate all three modes and enable hybrid only after the release gates.
 4. Verify metadata updates, provider-empty categories, clarification
    follow-ups, product restarts, and reconnection without restarting AI.

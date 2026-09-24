@@ -39,7 +39,7 @@ hybrid specification. Object terms, related-category scoring, merging,
 retirement, and required profile attributes remain outside the current rollout.
 Removing referenced categories requires an explicit reassignment policy.
 
-## Implementation before Phase 1
+## Implementation before original Phase 1
 
 - `ProductCacheService.getCategories()` derives categories from existing
   TaskMaster profiles rather than an independent catalog.
@@ -50,7 +50,7 @@ Removing referenced categories requires an explicit reassignment policy.
   later into an approved profile. Catalog validation must cover both steps.
 - `page-header` contains a hard-coded service list that can drift from the catalog.
 
-## Phase 1: Admin-owned catalog
+## Original Phase 1: Admin-owned catalog
 
 Tasks are ordered by dependency. Each checkbox is an implementation work item.
 
@@ -105,7 +105,8 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   multi-select in both `ApplyForTaskMaster` and `NewTaskMaster`. Display readable
   names but submit canonical IDs. Handle loading failures and an empty catalog
   explicitly; prevent submission without a valid selection and never fall back
-  to free text. No "Category not listed" submission path exists until Phase 2.
+  to free text. No "Category not listed" submission path exists until the
+  deferred missing-category proposal feature is implemented.
 
 - [x] **9. Align category consumers.** Use catalog metadata where category
   labels are shown in application review and profile flows. Replace the
@@ -130,7 +131,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   and explain how administrators create categories. Clear/version the category
   cache during deployment.
 
-### Phase 1 completion criteria
+### Original Phase 1 completion criteria
 
 Admins can create and maintain the database-backed category list. Applicants
 and admin-created profiles select only catalog entries, with the same rules
@@ -140,7 +141,7 @@ of truth. AI selection and search behavior remain unchanged.
 
 ## Future work: consolidated in the source specification
 
-The old Phase 2/3 checklists are superseded, not completed. See the source
+The original Phase 2/3 checklists are superseded, not completed. See the source
 specification for the proposed hybrid phases, acceptance criteria, and the
 separate deferred missing-category proposal requirements.
 

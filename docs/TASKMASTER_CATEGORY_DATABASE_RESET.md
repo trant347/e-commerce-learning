@@ -215,4 +215,6 @@ identity, and `403` for non-administrators.
   product-service on the same interval, so it recovers after product-service
   restarts. An empty catalog keeps the last list without reconnecting. Setting the
   value to `0` disables both the refresh and the automatic reconnect. REST
-  search and forms see new categories immediately.
+  search and forms see new categories immediately. The proposed
+  `catalog-llm` and `hybrid` resolution modes will require an interval of
+  1-300 seconds; `0` remains valid only for the current behavior.
