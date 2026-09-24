@@ -50,6 +50,7 @@ public class CategoryServiceTest {
         assertThat(result.getCreatedBy()).isEqualTo("admin");
         assertThat(result.getUpdatedAt()).isEqualTo(NOW);
         assertThat(result.getUpdatedBy()).isEqualTo("admin");
+        verify(repository).save(result);
     }
 
     @Test
@@ -135,6 +136,7 @@ public class CategoryServiceTest {
         assertThat(result.getUpdatedAt()).isEqualTo(NOW);
         assertThat(result.getUpdatedBy()).isEqualTo("editor");
         verify(repository).existsByNormalizedDisplayName("fine carpentry");
+        verify(repository).save(existing);
     }
 
     @Test

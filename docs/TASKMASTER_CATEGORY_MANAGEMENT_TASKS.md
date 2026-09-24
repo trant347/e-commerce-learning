@@ -115,7 +115,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   unrelated navigation behavior. Preserve existing ID-based search URLs,
   request parameters, and stored references.
 
-- [ ] **10. Add focused regression coverage.** Cover catalog persistence,
+- [x] **10. Add focused regression coverage.** Cover catalog persistence,
   normalized ID collisions, admin-only writes, unknown/empty selections,
   acceptance-time validation, reset/bootstrap repeatability, and cache refresh
   after changes.
