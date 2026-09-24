@@ -7,6 +7,7 @@ import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.ApplicationRepository;
 import com.bookstore.productsevice.repository.CategoryRepository;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.services.ProductCacheService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ public class ProductDataSeeder {
     private final TaskMasterRepository taskMasterRepository;
     private final ApplicationRepository applicationRepository;
     private final CategoryService categoryService;
+    private final ProductCacheService productCacheService;
     private final LocationNormalizer locationNormalizer;
     private final ObjectMapper objectMapper;
     private final Resource categorySeedResource;
@@ -40,6 +42,7 @@ public class ProductDataSeeder {
                              TaskMasterRepository taskMasterRepository,
                              ApplicationRepository applicationRepository,
                              CategoryService categoryService,
+                             ProductCacheService productCacheService,
                              LocationNormalizer locationNormalizer,
                              ObjectMapper objectMapper) {
         this(
@@ -47,6 +50,7 @@ public class ProductDataSeeder {
                 taskMasterRepository,
                 applicationRepository,
                 categoryService,
+                productCacheService,
                 locationNormalizer,
                 objectMapper,
                 new ClassPathResource("seed/categories.json"),
@@ -57,6 +61,7 @@ public class ProductDataSeeder {
                       TaskMasterRepository taskMasterRepository,
                       ApplicationRepository applicationRepository,
                       CategoryService categoryService,
+                      ProductCacheService productCacheService,
                       LocationNormalizer locationNormalizer,
                       ObjectMapper objectMapper,
                       Resource categorySeedResource,
@@ -65,6 +70,7 @@ public class ProductDataSeeder {
         this.taskMasterRepository = taskMasterRepository;
         this.applicationRepository = applicationRepository;
         this.categoryService = categoryService;
+        this.productCacheService = productCacheService;
         this.locationNormalizer = locationNormalizer;
         this.objectMapper = objectMapper;
         this.categorySeedResource = categorySeedResource;
@@ -83,6 +89,9 @@ public class ProductDataSeeder {
         }
 
         seedMissingCategories(readCategorySeeds());
+        // Invalidate on every startup so a catalog cached by a previous release
+        // (or before a database reset) cannot outlive this deployment.
+        productCacheService.evictCategoryCatalog();
 
         if (taskMasterCount > 0) {
             log.info("Task masters collection already has data; skipping TaskMaster seed.");
@@ -106,6 +115,7 @@ public class ProductDataSeeder {
         }
 
         taskMasterRepository.saveAll(taskMasters);
+        productCacheService.evictOnCreate();
         log.info("Seeded {} task masters from seed/taskMasters.json", taskMasters.size());
     }
 

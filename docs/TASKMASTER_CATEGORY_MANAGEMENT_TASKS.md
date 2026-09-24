@@ -1,6 +1,6 @@
 # TaskMaster Category Management Tasks
 
-Status: Tasks 1-9 complete; implementation tasks 10-11 have not started.
+Status: Phase 1 (tasks 1-11) complete. Phases 2 and 3 are deferred.
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
@@ -41,7 +41,7 @@ Aliases, object terms, related categories, merging, retirement, and required
 profile attributes are deferred. Do not add hard deletion in the initial phase:
 removing referenced categories requires an explicit reassignment policy.
 
-## Current implementation
+## Implementation before Phase 1
 
 - `ProductCacheService.getCategories()` derives categories from existing
   TaskMaster profiles rather than an independent catalog.
@@ -125,7 +125,7 @@ Tasks are ordered by dependency. Each checkbox is an implementation work item.
   application, and the resulting profile retains the canonical ID. Include API
   attempts to submit arbitrary categories without using the UI.
 
-- [ ] **11. Roll out safely and document operations.** Approve and load the
+- [x] **11. Roll out safely and document operations.** Approve and load the
   initial catalog, reset the disposable products database, then enable backend
   enforcement and selection-only forms in a coordinated release. Do not retain
   legacy product data under this rollout. Update seed data/setup documentation

@@ -60,6 +60,8 @@ The core catalog service. Stores and serves TaskMaster profiles and manages the 
 **TaskMaster profiles**
 - Profiles are stored in MongoDB (`task_masters` collection).
 - On first startup, the collection is seeded from `src/main/resources/seed/taskMasters.json` — only when empty, so manually created profiles are never overwritten.
+- Categories come from an admin-managed catalog (`categories` collection) seeded from `src/main/resources/seed/categories.json`. Profiles and applications store canonical category IDs and may select only catalog entries; unknown IDs are rejected. Administrators create and edit categories at `/admin/categories`. See [docs/TASKMASTER_CATEGORY_DATABASE_RESET.md](docs/TASKMASTER_CATEGORY_DATABASE_RESET.md) for the rollout, reset, and category administration procedures.
+- `GET /products/categories` — canonical category IDs; `GET /products/categories/metadata` — IDs with display names and descriptions.
 - `GET /products` — public paginated listing (no auth required).
 - `GET /products?name=` / `?location=` / `?category=` / `?minRate=&maxRate=` / `?minRating=` — filtered queries backed by Spring Data MongoDB derived methods.
 - Faceted search (MongoDB aggregation pipeline) groups results by job category and location.

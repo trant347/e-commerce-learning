@@ -6,11 +6,13 @@ import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.ApplicationRepository;
 import com.bookstore.productsevice.repository.CategoryRepository;
 import com.bookstore.productsevice.repository.TaskMasterRepository;
+import com.bookstore.productsevice.services.ProductCacheService;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.InputStream;
@@ -24,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -36,6 +39,7 @@ public class ProductDataSeederTest {
     private TaskMasterRepository taskMasterRepository;
     private ApplicationRepository applicationRepository;
     private CategoryService categoryService;
+    private ProductCacheService productCacheService;
     private ProductDataSeeder seeder;
 
     @Before
@@ -45,6 +49,7 @@ public class ProductDataSeederTest {
         taskMasterRepository = mock(TaskMasterRepository.class);
         applicationRepository = mock(ApplicationRepository.class);
         categoryService = mock(CategoryService.class);
+        productCacheService = mock(ProductCacheService.class);
 
         ObjectMapper objectMapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -53,6 +58,7 @@ public class ProductDataSeederTest {
                 taskMasterRepository,
                 applicationRepository,
                 categoryService,
+                productCacheService,
                 new LocationNormalizer(),
                 objectMapper,
                 new ClassPathResource("seed/categories.json"),
@@ -85,6 +91,13 @@ public class ProductDataSeederTest {
                 });
         verify(categoryService, times(18))
                 .normalizeAndValidateCategoryIds(any(Collection.class));
+
+        InOrder inOrder = inOrder(categoryService, productCacheService, taskMasterRepository);
+        inOrder.verify(categoryService, times(36))
+                .createCategory(anyString(), anyString(), anyString(), anyString());
+        inOrder.verify(productCacheService).evictCategoryCatalog();
+        inOrder.verify(taskMasterRepository).saveAll(any());
+        inOrder.verify(productCacheService).evictOnCreate();
     }
 
     @Test
@@ -98,6 +111,7 @@ public class ProductDataSeederTest {
         verify(categoryService, never())
                 .createCategory(anyString(), anyString(), anyString(), anyString());
         verify(taskMasterRepository, never()).saveAll(any());
+        verify(productCacheService, never()).evictCategoryCatalog();
     }
 
     @Test
@@ -120,6 +134,8 @@ public class ProductDataSeederTest {
         verify(categoryService, never())
                 .createCategory(anyString(), anyString(), anyString(), anyString());
         verify(taskMasterRepository, never()).saveAll(any());
+        verify(productCacheService).evictCategoryCatalog();
+        verify(productCacheService, never()).evictOnCreate();
     }
 
     @Test
