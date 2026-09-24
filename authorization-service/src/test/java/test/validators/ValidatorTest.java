@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ActiveProfiles("test")
@@ -58,6 +59,20 @@ public class ValidatorTest {
 
         User user = new User().setUsername("tony").setEmail("tony1@gmail.com");
         assertThrows(UsernameNotAvailableException.class, () -> userValidator.validate(user));
+    }
+
+    @Test
+    public void testUsernameNotAvailableIgnoringCase() throws Exception {
+
+        User user = new User().setUsername("Tony").setEmail("tony2@gmail.com");
+        assertThrows(UsernameNotAvailableException.class, () -> userValidator.validate(user));
+    }
+
+    @Test
+    public void testNewUsernameAndEmailAreAccepted() {
+
+        User user = new User().setUsername("mary").setEmail("mary@gmail.com");
+        assertDoesNotThrow(() -> userValidator.validate(user));
     }
 
 

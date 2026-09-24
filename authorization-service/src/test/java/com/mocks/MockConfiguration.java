@@ -55,6 +55,12 @@ public class MockConfiguration {
             }
 
             @Override
+            public boolean existsByUsernameIgnoreCase(String username) {
+                return availableUsers.stream()
+                        .anyMatch(user -> user.getUsername().equalsIgnoreCase(username));
+            }
+
+            @Override
             public List<User> findAll() {
                 return null;
             }

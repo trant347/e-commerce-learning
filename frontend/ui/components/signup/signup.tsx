@@ -70,7 +70,7 @@ export default function() : React.JSX.Element {
                             } catch(e) {
                                 setStatus({
                                     level: ToastLevel.error,
-                                    message: e.data.message || "Failed to create a user",
+                                    message: e?.data?.message || "Failed to create a user",
                                     visible: true
                                 });      
                             }
