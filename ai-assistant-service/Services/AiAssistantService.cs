@@ -87,6 +87,10 @@ public sealed class AiAssistantService : IAiAssistantService
             _logger.LogDebug("Seeded {Count} few-shot example messages into the conversation", examples.Count);
         }
 
+        // User-authored text the model saw in this request. Search filters must come from here,
+        // never from seeded few-shot examples.
+        var userMessages = new List<string?> { request.Message };
+
         // Include only the last exchange (up to 2 messages) for multi-turn context
         if (request.History is { Count: > 0 })
         {
@@ -100,6 +104,10 @@ public sealed class AiAssistantService : IAiAssistantService
                     && (h.Role == "user" || h.Role == "assistant"))
                 {
                     messages.Add(new OllamaChatMessage { Role = h.Role, Content = h.Content });
+                    if (h.Role == "user")
+                    {
+                        userMessages.Add(h.Content);
+                    }
                 }
             }
         }
@@ -144,7 +152,15 @@ public sealed class AiAssistantService : IAiAssistantService
             foreach (var toolCall in assistantMsg.ToolCalls)
             {
                 var toolName = toolCall.Function.Name;
-                var args = toolCall.Function.Arguments;
+                var args = SearchFilterGrounding.RemoveUngroundedFilters(
+                    toolName, toolCall.Function.Arguments, userMessages, out var removedFilters);
+
+                if (removedFilters.Count > 0)
+                {
+                    _logger.LogInformation(
+                        "Dropped search filters not stated by the user: {Filters}",
+                        string.Join(", ", removedFilters));
+                }
 
                 _logger.LogInformation("Executing tool={ToolName} with args={Args}", 
                     toolName, string.Join(", ", args.Select(a => $"{a.Key}={a.Value}")));

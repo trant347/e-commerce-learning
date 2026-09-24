@@ -82,7 +82,7 @@ and server-managed creation/update timestamps and actors.
 | `POST /products/admin/categories` | Create with `id`, `displayName`, `description`; return `201` |
 | `PUT /products/admin/categories/{id}` | Update display name and description; return `200` |
 | MCP `get_categories` | Canonical ID array, unchanged for compatibility |
-| MCP `search_task_masters` | One required `category`; optional location/rate/rating filters; at most 10 providers |
+| MCP `search_task_masters` | Optional `category` (omit for location-only searches); optional location/rate/rating filters; requires a category or location; at most 10 providers |
 
 Admin APIs require a valid JWT with `ROLE_ADMIN`; UI visibility is not
 authorization. Preserve current `400`, `401`, `403`, `404`, and `409` semantics
@@ -112,9 +112,12 @@ and the error envelope:
   response alone does not trigger reconnect.
 - `McpRemoteTool` supplies the enum to Ollama. Neither a schema enum nor the
   registry's scalar normalization is authoritative category validation.
-- `TaskMasterMcpTools` rejects missing categories, but its search path currently
-  passes other values to `ProductCacheService.searchWithFilters` without an
-  authoritative existence check.
+- `TaskMasterMcpTools` rejects a search with neither category nor location, but
+  passes supplied categories to `ProductCacheService.searchWithFilters` without
+  an authoritative existence check.
+- The assistant drops rate/rating filters whose value does not appear in the
+  user's recent messages (`SearchFilterGrounding`). Location is not checked,
+  because models legitimately rewrite it (for example `SF` to `San Francisco`).
 - The assistant's system prompt forces a best category/search, while the
   product tool description permits clarification. These instructions conflict.
 - Descriptions already exist in the catalog and REST metadata, but MCP

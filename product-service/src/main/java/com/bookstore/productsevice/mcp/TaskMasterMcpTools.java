@@ -48,9 +48,12 @@ public class TaskMasterMcpTools {
                     + "item from the returned list by inspecting its hourlyRateUsd or rating field. "
                     + "Choose categories by the object and skill requested: wooden cupboard, cabinet, table, or wooden "
                     + "furniture repair maps to 'carpentry'; flat-pack or IKEA assembly maps to 'furniture-assembly'. "
+                    + "When the user asks for any provider in a place without naming a service, omit category and pass only location. "
                     + "If the user's request does not match any category, do NOT call this tool; ask them to clarify instead.")
     public String searchTaskMasters(
-            @ToolParam(description = "Job category to filter by. REQUIRED. Must be an exact value from get_categories.")
+            @ToolParam(description = "Job category to filter by. Must be an exact value from get_categories. "
+                    + "Omit only when the user did not name a service.",
+                    required = false)
             String category,
             @ToolParam(description = "Optional US city, state name/code, or city and state. "
                     + "Examples: 'Chicago', 'IL', 'Illinois', or 'Chicago, IL'.",
@@ -76,8 +79,8 @@ public class TaskMasterMcpTools {
         Double maxRateVal = parseDoubleOrNull(maxRate);
         Double minRatingVal = parseDoubleOrNull(minRating);
 
-        if (sanitizedCategory == null) {
-            return "{\"error\": \"Please specify what type of service you are looking for so I can help you find the right task master.\"}";
+        if (sanitizedCategory == null && sanitizedLocation == null) {
+            return "{\"error\": \"Please specify the type of service or a location so I can help you find the right task master.\"}";
         }
 
         List<TaskMaster> results;

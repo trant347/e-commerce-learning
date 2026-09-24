@@ -15,6 +15,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 public class TaskMasterMcpToolsTest {
@@ -97,5 +98,32 @@ public class TaskMasterMcpToolsTest {
         assertThat(result)
                 .contains("\"error\":\"invalid_location\"")
                 .contains("\"message\":\"Unsupported state.\"");
+    }
+
+    @Test
+    public void searchTaskMasters_locationWithoutCategory_searchesAllCategoriesInLocation() {
+        ProductCacheService cacheService = mock(ProductCacheService.class);
+        TaskMaster taskMaster = new TaskMaster().setId("tm-2").setName("Mary Johnson");
+        when(cacheService.searchWithFilters(null, "San Francisco", null, null, null, 10))
+                .thenReturn(List.of(taskMaster));
+
+        TaskMasterMcpTools tools = new TaskMasterMcpTools(cacheService, new ObjectMapper());
+
+        String result = tools.searchTaskMasters(null, "San Francisco", null, null, null);
+
+        assertThat(result).contains("\"name\":\"Mary Johnson\"");
+        verify(cacheService).searchWithFilters(
+                isNull(), eq("San Francisco"), isNull(), isNull(), isNull(), eq(10));
+    }
+
+    @Test
+    public void searchTaskMasters_withoutCategoryOrLocation_refusesUnscopedSearch() {
+        ProductCacheService cacheService = mock(ProductCacheService.class);
+        TaskMasterMcpTools tools = new TaskMasterMcpTools(cacheService, new ObjectMapper());
+
+        String result = tools.searchTaskMasters(" ", null, null, "50", "4");
+
+        assertThat(result).contains("\"error\"");
+        verifyNoInteractions(cacheService);
     }
 }

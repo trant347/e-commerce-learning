@@ -116,6 +116,46 @@ public class AiAssistantServiceTests
     }
 
     [Fact]
+    public async Task ChatAsync_DropsRatingFilterTheUserDidNotMention()
+    {
+        var fakeTool = new RecordingTool("search_task_masters", "[]");
+        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
+
+        using var argDoc = JsonDocument.Parse(
+            "{\"category\":\"education\",\"location\":\"San Francisco\",\"minRating\":\"4.5\"}");
+        var args = argDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
+
+        var ollama = new Mock<IOllamaClient>();
+        ollama.SetupSequence(c => c.ChatAsync(
+                It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
+                It.IsAny<IReadOnlyList<object>?>(),
+                It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new OllamaChatMessage
+              {
+                  Role = "assistant",
+                  ToolCalls = new List<OllamaToolCall>
+                  {
+                      new() { Function = new OllamaToolCallFunction { Name = "search_task_masters", Arguments = args } }
+                  }
+              })
+              .ReturnsAsync(new OllamaChatMessage { Role = "assistant", Content = "None found." });
+
+        var svc = new AiAssistantService(
+            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
+
+        await svc.ChatAsync(
+            new ChatRequest { Message = "could you check if any English teacher in San Francisco?" },
+            TestContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(fakeTool.LastArgs);
+        Assert.False(fakeTool.LastArgs!.ContainsKey("minRating"));
+        Assert.Equal("education", fakeTool.LastArgs["category"]);
+        Assert.Equal("San Francisco", fakeTool.LastArgs["location"]);
+    }
+
+    [Fact]
     public async Task ChatAsync_ParsesInlineToolCallFromContent_WhenModelEmitsRawJson()
     {
         // Some small models put the tool call into `content` as plain JSON
@@ -329,6 +369,7 @@ public class AiAssistantServiceTests
         public object ParametersSchema => new { };
         public int CallCount { get; private set; }
         public ToolExecutionContext? LastContext { get; private set; }
+        public IReadOnlyDictionary<string, string>? LastArgs { get; private set; }
 
         public Task<string> ExecuteAsync(
             ToolExecutionContext executionContext,
@@ -336,6 +377,7 @@ public class AiAssistantServiceTests
             CancellationToken cancellationToken)
         {
             LastContext = executionContext;
+            LastArgs = arguments;
             CallCount++;
             return Task.FromResult(_result);
         }

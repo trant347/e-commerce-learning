@@ -63,7 +63,7 @@
     {
       "id": "education",
       "displayName": "Education",
-      "description": "General educational support and learning services."
+      "description": "Teaching and structured lessons, including language teaching such as English or Spanish, and general learning services."
     },
     {
       "id": "electrical",
@@ -173,7 +173,7 @@
     {
       "id": "tutoring",
       "displayName": "Tutoring",
-      "description": "Individual academic instruction and test preparation."
+      "description": "One-on-one help with school subjects, homework, and test preparation. Language teaching belongs in Education."
     },
     {
       "id": "videography",
