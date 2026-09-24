@@ -1,25 +1,22 @@
-# TaskMaster Category Management Tasks
+# TaskMaster Category Management Completion Record
 
-Status: Phase 1 (tasks 1-11) complete. Phases 2 and 3 are deferred.
+Status: **Historical record. Original catalog phase (tasks 1-11) complete.**
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 
-## Scope and sequencing
+The source specification is authoritative for current contracts and the new
+hybrid AI rollout. The phase numbers below refer to the original catalog
+project, not the new hybrid implementation phases. The historical requirement
+to implement missing-category proposals before AI improvements is withdrawn.
+No database reset is required for the hybrid rollout.
 
-Implement the admin-owned category catalog first. TaskMaster applicants select
-existing categories rather than creating marketplace categories through free
-text. Store the catalog in the product-service MongoDB database from the start.
+## Completed scope
 
-This plan intentionally changes the source specification's rollout order:
-
-1. Admin-managed category catalog and selection-only forms.
-2. User requests for missing categories and admin resolution.
-3. AI multi-category search and, separately, deterministic category resolution.
-
-Phase 1 does not change AI prompts, search-tool arguments, ranking, category
-limits, or natural-language resolution. The current `search_task_masters` tool
-accepts one category; the specification proposes up to three, not an existing
-two-category limit. That expansion remains deferred.
+The catalog phase introduced the admin-managed, database-backed catalog and
+selection-only forms. It did not change AI prompts, search-tool arguments,
+ranking, category limits, or natural-language resolution. Single-category
+search remains the contract; the previous proposed expansion to up to three
+categories has been superseded.
 
 ## Finalized data-model contract
 
@@ -37,9 +34,10 @@ ASCII slugs; both IDs and normalized display names are unique. The complete
 normalization, validation, API, and error contract is recorded in the source
 specification.
 
-Aliases, object terms, related categories, merging, retirement, and required
-profile attributes are deferred. Do not add hard deletion in the initial phase:
-removing referenced categories requires an explicit reassignment policy.
+Aliases were excluded from this completed phase and are now proposed in the
+hybrid specification. Object terms, related-category scoring, merging,
+retirement, and required profile attributes remain outside the current rollout.
+Removing referenced categories requires an explicit reassignment policy.
 
 ## Implementation before Phase 1
 
@@ -140,32 +138,13 @@ enforced by the backend. Existing profiles and pending applications have an
 explicit reset outcome. REST, MCP category discovery, and forms share one source
 of truth. AI selection and search behavior remain unchanged.
 
-## Phase 2: Missing-category requests (deferred)
+## Future work: consolidated in the source specification
 
-- [ ] Add `Category not listed` with proposed name, service description, and
-  optional example terms, linked to the application.
-- [ ] Add proposal states `PENDING`, `APPROVED_NEW_CATEGORY`,
-  `MAPPED_TO_EXISTING`, and `REJECTED`, with reviewer, timestamp, resolved
-  category ID, and applicant-visible reason.
-- [ ] Let admins create a canonical category or map the request to an existing
-  category; support rejection with a reason. Alias approval requires the later
-  taxonomy metadata support and must not silently create categories.
-- [ ] Prevent publication/search visibility until all required category
-  decisions are resolved. Store only resolved canonical IDs in profiles.
-- [ ] Add applicant status/notifications, authorization and audit coverage,
-  retry/concurrent-review protection, and end-to-end proposal-resolution tests.
+The old Phase 2/3 checklists are superseded, not completed. See the source
+specification for the proposed hybrid phases, acceptance criteria, and the
+separate deferred missing-category proposal requirements.
 
-## Phase 3: Search and AI evolution (deferred)
-
-- [ ] Revisit whether to implement the interim ordered one-to-three-category
-  search contract or proceed directly to the product-owned resolver.
-- [ ] If implementing interim search, add canonical-ID validation, OR matching,
-  deterministic ranking, deduplication, compatible tool arguments, diagnostics,
-  and ordered cache keys before changing AI instructions.
-- [ ] Add admin-owned aliases, object/skill terms, related categories, and
-  taxonomy versioning for deterministic resolution.
-- [ ] Implement `serviceQuery` resolution, unresolved-category errors, ranking,
-  and cache behavior; then update AI instructions and remove prompt-specific
-  object-to-category workarounds.
-
-These later phases must not be bundled into the Phase 1 catalog refactor.
+The current direction retains single-category search, adds rich catalog
+metadata and clarification first, then introduces conservative exact matching
+with LLM interpretation for other requests. There is no requirement to build
+multi-category search, object/action scoring, or a broad rules engine.

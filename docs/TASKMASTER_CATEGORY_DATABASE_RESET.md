@@ -1,8 +1,19 @@
-# TaskMaster Category Database Reset
+# TaskMaster Category Operations and Original Database Reset
 
-The category-catalog rollout uses a clean reset of the `products` MongoDB
-database instead of an in-place legacy migration. This is appropriate only
-while existing product data is disposable.
+> Scope: The reset and coordinated-release sections describe the **original
+> catalog bootstrap**, not a recurring deployment procedure. The seed and
+> administration sections document current operations.
+>
+> The proposed [hybrid category-resolution rollout](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md)
+> is additive and **does not require a database reset**. Missing aliases read as
+> empty arrays, and existing IDs, profiles, applications, and admin metadata
+> must be preserved. Alias editing and the new resolution modes are proposed,
+> not functionality already available through the interfaces documented here.
+
+The original category-catalog rollout used a clean reset of the `products`
+MongoDB database instead of an in-place legacy migration. This is appropriate
+only while existing product data is disposable and an explicit reset is
+intended. Do not execute these commands for ordinary metadata or AI updates.
 
 The reset deletes:
 

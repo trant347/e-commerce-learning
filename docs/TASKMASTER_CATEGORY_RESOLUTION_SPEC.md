@@ -1,522 +1,567 @@
-# TaskMaster Category Resolution Specification
+# TaskMaster Category Catalog and Hybrid Resolution Specification
 
-> Status: **Proposed**
+> Status: **Catalog implemented; hybrid resolution proposed, not implemented**
 >
-> Purpose: Replace prompt-level category special cases with a product-owned,
-> deterministic way to map natural-language service requests to TaskMaster
-> categories.
+> This is the authoritative category design specification. It consolidates the
+> implemented catalog contract and the proposed hybrid AI matching design.
+> The hybrid rollout has its own phases, independent of the original catalog
+> project's phase numbering.
 >
-> Implementation sequence: The database-backed, administrator-managed category
-> catalog described below is Phase 1. Missing-category proposals are Phase 2.
-> Multi-category AI search and natural-language resolution are deferred to
-> Phase 3.
+> Superseded proposals: interim multi-category search, object/action scoring,
+> related-category expansion, and replacing LLM interpretation with a general
+> deterministic resolver. Missing-category proposals remain a separate deferred
+> feature, not a prerequisite for improving AI matching.
 
-## Problem
+## 1. Problem and decision
 
-The `search_task_masters` tool currently requires the AI model to choose one
-exact category value. This is unreliable when categories overlap or the user
-describes an object rather than a trade.
+The assistant can choose a valid category that does not fit the requested work.
+For example, repairing a wooden cupboard and assembling flat-pack furniture
+require different skills even though both requests mention furniture.
 
-For example:
+Keep the live product-owned catalog. Add descriptions and curated aliases to
+the assistant's category context, allow clarification rather than forcing a
+match, and validate every search category in product-service. Then introduce a
+conservative deterministic fast path for exact, unambiguous requests, retaining
+LLM interpretation for other wording.
 
-- User request: `fix my wooden cupboard`
-- Model-selected category: `home-repair`
-- Relevant TaskMaster category: `carpentry`
+Catalog discovery and intent interpretation solve different problems. Rules
+do not replace the catalog, and an enum does not prove semantic correctness.
 
-The location and budget filters can be correct while the exact category filter
-still removes the appropriate provider. Adding examples such as `cupboard ->
-carpentry` to the system prompt fixes individual phrases, but it does not scale
-as categories and user vocabulary grow.
+### Goals
 
-## Goals
+- Reduce wrong category selections without hiding uncertainty.
+- Preserve exact, single-category searches and existing provider contracts.
+- Keep taxonomy, aliases, and deterministic matching in product-service.
+- Make catalog changes available without prompt edits or service restarts.
+- Measure matching quality, forced matches, clarification, and latency.
 
-- Make category resolution deterministic and owned by `product-service`.
-- Allow natural-language descriptions such as `repair a wooden cabinet`.
-- Support aliases, common objects, skills, and related terminology without
-  changing the AI prompt for every phrase.
-- Search more than one plausible category when appropriate.
-- Preserve exact category searches for callers that already know the category.
-- Keep category taxonomy and search behavior consistent for every client.
-- Let TaskMaster applicants propose a missing service without allowing them to
-  create public marketplace categories directly.
+### Non-goals
 
-## Non-goals
+- Embeddings, vector databases, fuzzy spelling correction, or a larger model.
+- A general keyword/rules engine, object/action scoring, or related-category
+  inference.
+- Searching several categories automatically or dropping a category filter
+  when a search returns no providers.
+- Category deletion, merging, retirement, or new profile attribute schemas.
+- Implementing missing-category proposals in this rollout.
+- Changing booking, payment, provider ranking, or search-result limits.
+- Resetting databases or replacing existing canonical category IDs.
 
-- General-purpose semantic web search.
-- Replacing TaskMaster categories with unrestricted model-generated labels.
-- Requiring a larger language model to make category selection reliable.
-- Silently searching every category when the request cannot be resolved.
+## 2. Current implementation and preserved contracts
 
-## Phase 1 category catalog contract
+The following behavior exists today; it is not work newly introduced by this
+proposal.
 
-Phase 1 establishes a category catalog owned by `product-service` and managed
-by marketplace administrators. It does not change AI prompts,
-`search_task_masters` arguments, category ranking, or natural-language
-resolution.
+### Catalog ownership
 
-### Persistence and references
+`product-service` owns MongoDB `categories`. Categories exist independently of
+providers. `TaskMaster.jobCategories` and application `jobCategories` remain
+arrays of canonical IDs; aliases are never stored as profile category values.
 
-- Store catalog entries as `Category` documents in the product-service MongoDB
-  `categories` collection.
-- Do not add a singular `category` field to TaskMaster profiles or
-  applications.
-- Continue storing canonical category IDs in `TaskMaster.jobCategories` and
-  `TaskMasterApplication.jobCategories`. Both fields remain arrays because one
-  provider may offer multiple services.
-- A category exists independently of TaskMaster profiles. Category discovery
-  must not derive the catalog from values found on profiles.
+`Category` contains `id`, `displayName`, `normalizedDisplayName`, `description`,
+and server-managed creation/update timestamps and actors.
 
-The initial document contract is:
+- IDs are immutable after creation. Input is trimmed and lowercased, must be
+  2-64 characters, and must match `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+- Display names are 2-80 characters after trimming and collapsing whitespace.
+  Their lowercase normalized values are unique.
+- Descriptions are required, trimmed, and 1-500 characters.
+- ID and normalized display-name collisions return `409`.
+- Internal normalization and audit fields are not writable through DTOs or
+  exposed in public metadata.
+- Application submission, direct profile creation, and application acceptance
+  validate category IDs against the catalog.
+
+### Existing HTTP and MCP interfaces
+
+| Interface | Current contract |
+|---|---|
+| `GET /products/categories` | Sorted canonical ID array |
+| `GET /products/categories/metadata` | Public array of `{id, displayName, description}` |
+| `GET /products/admin/categories` | Administrator catalog listing |
+| `POST /products/admin/categories` | Create with `id`, `displayName`, `description`; return `201` |
+| `PUT /products/admin/categories/{id}` | Update display name and description; return `200` |
+| MCP `get_categories` | Canonical ID array, unchanged for compatibility |
+| MCP `search_task_masters` | One required `category`; optional location/rate/rating filters; at most 10 providers |
+
+Admin APIs require a valid JWT with `ROLE_ADMIN`; UI visibility is not
+authorization. Preserve current `400`, `401`, `403`, `404`, and `409` semantics
+and the error envelope:
 
 ```json
 {
-  "id": "furniture-assembly",
-  "displayName": "Furniture Assembly",
-  "normalizedDisplayName": "furniture assembly",
-  "description": "Assembly and installation of household furniture.",
-  "createdAt": "2026-09-22T20:00:00Z",
-  "createdBy": "admin",
-  "updatedAt": "2026-09-22T20:00:00Z",
-  "updatedBy": "admin"
-}
-```
-
-`normalizedDisplayName` and all audit fields are server-managed and are not
-accepted from client requests.
-
-### Canonical IDs and duplicate handling
-
-- `id` is supplied when an administrator creates a category and is immutable
-  afterward.
-- The server trims and lowercases the supplied ID before validating it.
-- A valid ID is 2-64 characters and matches
-  `^[a-z0-9]+(?:-[a-z0-9]+)*$`. It contains lowercase ASCII letters, numbers,
-  and single hyphens between segments. The server does not guess or
-  transliterate IDs from display names.
-- Category IDs are unique through MongoDB's `_id` constraint. A normalized ID
-  collision returns `409 Conflict`.
-- `displayName` is trimmed, internal whitespace is collapsed, and its
-  case-insensitive normalized value is stored in `normalizedDisplayName`.
-  Display names must be 2-80 characters.
-- `normalizedDisplayName` is unique. Names that differ only by case or
-  repeated whitespace return `409 Conflict`.
-- `description` is trimmed, required, and limited to 500 characters.
-
-Phase 1 allows administrators to edit `displayName` and `description`. It does
-not allow changing `id`, deleting categories, merging categories, retiring
-categories, or editing aliases, object terms, related categories, or required
-profile attributes.
-
-### API contract
-
-Existing category discovery remains backward compatible:
-
-```text
-GET /products/categories
-200 OK -> ["carpentry", "furniture-assembly"]
-```
-
-The response is a sorted array of canonical IDs and remains the source for MCP
-`get_categories`.
-
-Clients that need labels and descriptions use:
-
-```text
-GET /products/categories/metadata
-200 OK -> CategoryResponse[]
-```
-
-`CategoryResponse` contains `id`, `displayName`, and `description`. It does not
-expose internal normalization or audit fields. This endpoint is public like the
-existing category-discovery endpoint so unauthenticated marketplace browsing
-can render category labels.
-
-Administrator mutations use:
-
-```text
-POST /products/admin/categories
-PUT  /products/admin/categories/{id}
-```
-
-Both endpoints require a valid JWT with `ROLE_ADMIN`. Create accepts `id`,
-`displayName`, and `description`. Update accepts only `displayName` and
-`description`; the path ID is immutable. Successful create returns
-`201 Created` with `CategoryResponse`; successful update returns `200 OK` with
-`CategoryResponse`.
-
-Category API errors use this machine-readable shape:
-
-```json
-{
-  "error": "duplicate_category_id",
-  "message": "Category 'carpentry' already exists.",
+  "error": "invalid_category",
+  "message": "A human-readable validation message.",
   "fieldErrors": {
-    "id": "must be unique"
+    "id": "A field-specific explanation."
   }
 }
 ```
 
-`fieldErrors` is optional and is included for field-specific validation
-failures. Defined statuses are:
+`fieldErrors` is optional. Existing category errors include `invalid_category`,
+`unknown_category`, `duplicate_category_id`, and
+`duplicate_category_display_name`.
 
-- `400 Bad Request`: `invalid_category` or `unknown_category`, including
-  malformed fields and profile/application writes containing unknown IDs.
-- `401 Unauthorized`: missing or invalid authentication for admin mutations.
-- `403 Forbidden`: authenticated caller does not have `ROLE_ADMIN`.
-- `404 Not Found`: an update target does not exist.
-- `409 Conflict`: `duplicate_category_id` or
-  `duplicate_category_display_name`.
+### Current AI behavior and gaps
 
-Backend validation is authoritative. Application submission, direct TaskMaster
-creation, and application acceptance must all reject category IDs that are not
-present in the catalog. Acceptance revalidates pending applications so a stale
-or migrated application cannot publish an invalid profile.
+- `McpCategoryEnumRefresher` calls `get_categories` and applies IDs to the
+  search tool schema, at startup and on the configured refresh interval
+  (currently 60 seconds), rather than necessarily on every chat request.
+- The refresher retains the previous list on failures or unusable results.
+  Discovery reconnects after failed calls or unavailable tools; an empty
+  response alone does not trigger reconnect.
+- `McpRemoteTool` supplies the enum to Ollama. Neither a schema enum nor the
+  registry's scalar normalization is authoritative category validation.
+- `TaskMasterMcpTools` rejects missing categories, but its search path currently
+  passes other values to `ProductCacheService.searchWithFilters` without an
+  authoritative existence check.
+- The assistant's system prompt forces a best category/search, while the
+  product tool description permits clarification. These instructions conflict.
+- Descriptions already exist in the catalog and REST metadata, but MCP
+  `get_categories` supplies only IDs. Aliases are not implemented.
+- Chat requests carry user/assistant history; the assistant currently uses
+  only the last two history messages. There is no durable category-resolution
+  conversation state.
 
-### Phase boundary
+Implementation anchors: `CategoryService.java`, `TaskMasterMcpTools.java`,
+`ProductCacheService.java`, `McpCategoryEnumRefresher.cs`,
+`McpToolDiscoveryService.cs`, `McpRemoteTool.cs`, `AiAssistantService.cs`, and
+`ai-assistant-service\appsettings.json`.
 
-Phase 1 includes catalog persistence, a clean product-database reset and
-catalog/mock-data bootstrap, admin management, category discovery,
-selection-only forms, and backend validation. It deliberately excludes:
+## 3. Category metadata extension
 
-- Applicant requests for missing categories.
-- Category proposal states and administrative resolution.
-- Aliases, object/skill terms, and related-category metadata.
-- Interim multi-category MCP arguments.
-- AI prompt changes and deterministic natural-language resolution.
-
-These exclusions prevent the catalog ownership refactor from changing AI search
-behavior at the same time.
-
-## Interim multi-category approach
-
-In Phase 3, before implementing the product-owned resolver, optionally extend
-`search_task_masters` so the AI model can select up to three plausible
-categories instead of requiring one exact category.
-
-Example:
-
-```json
-{
-  "categories": [
-    "carpentry",
-    "furniture-assembly",
-    "home-repair"
-  ],
-  "location": "IL",
-  "maxRate": 70
-}
-```
-
-Product-service searches the supplied categories with MongoDB `$in` semantics:
-
-```javascript
-{
-  "jobCategories": {
-    "$in": ["carpentry", "furniture-assembly", "home-repair"]
-  }
-}
-```
-
-Category matching uses OR semantics. Location, rate, and rating filters continue
-to use AND semantics with the category condition. A TaskMaster matching more
-than one requested category appears only once.
-
-Interim constraints:
-
-- Accept between one and three unique categories.
-- Require every value to be a canonical category published by
-  `get_categories`.
-- Preserve the supplied category order and rank matches for the first category
-  ahead of matches found only through later alternatives.
-- Reject unknown categories and requests exceeding the category limit.
-- Keep the singular `category` parameter temporarily for backward
-  compatibility, but reject requests that supply both forms.
-- Include the category or categories that matched each result in tool
-  diagnostics so ranking can be understood.
-- Build cache keys from the ordered, normalized category list plus the other
-  normalized filters.
-
-This improves recall when categories overlap, but it remains model-dependent.
-The model may still omit the correct category or choose categories that are too
-broad. It is therefore an incremental mitigation, not a replacement for the
-product-owned resolver described below.
-
-## Proposed category taxonomy
-
-Product-service owns metadata for each canonical category:
+Reuse existing names and descriptions; do not create a second taxonomy.
+Add administrator-managed `aliases` to `Category` and metadata DTOs:
 
 ```json
 {
   "id": "carpentry",
   "displayName": "Carpentry",
-  "description": "Wood construction, modification, and repair.",
-  "aliases": [
-    "woodworking",
-    "wood repair",
-    "cabinet repair",
-    "cupboard repair"
-  ],
-  "objects": [
-    "cabinet",
-    "cupboard",
-    "wooden table",
-    "wooden furniture"
-  ],
-  "relatedCategories": [
-    "furniture-assembly",
-    "home-repair"
+  "description": "Wood construction and repair, including wooden cabinets and cupboards.",
+  "aliases": ["woodworking", "wooden cabinet repair", "wooden cupboard repair"]
+}
+```
+
+### Alias rules
+
+- At most 20 aliases per category, each 2-80 characters after normalization.
+- Matching normalization trims, collapses whitespace, and lowercases with
+  locale-independent behavior. Do not remove negation, punctuation, accents,
+  or words; do not stem, translate, or use substring matching.
+- Store normalized aliases; reject blank entries, non-string values, duplicate
+  normalized aliases within one category, and entries equal to that category's
+  normalized ID or display name.
+- Aliases are literal service phrases, never regular expressions or executable
+  instructions. Prefer specific phrases such as `wooden cabinet repair` over
+  broad objects such as `furniture`.
+- The same term may legitimately belong to different categories. Preserve
+  those collisions: the exact resolver must report ambiguity, never choose
+  by insertion order or allow an alias to shadow another category's name.
+- Descriptions should explain included work and relevant boundaries. They are
+  data, not instructions, including when an administrator supplied them.
+- Providers and applicants cannot publish aliases. No automatic alias
+  generation from profiles, prompts, or model output is included.
+
+### API and UI compatibility
+
+Extend metadata and admin responses with `aliases`, always an array.
+For pre-existing documents with no field, expose `[]`.
+
+Create accepts optional `aliases`, defaulting to `[]`. Update accepts optional
+`aliases`: omission preserves current aliases; `[]` explicitly clears them;
+explicit `null` is invalid. This prevents an older admin client from
+unintentionally deleting metadata. Existing ID/name/description validation
+continues unchanged. Alias errors return `400 invalid_category` with
+`fieldErrors.aliases`.
+
+Update the admin form to list, add, edit, and remove aliases, display validation
+errors, and preserve values after failed saves. Extend frontend shared types,
+API methods, and tests; use the existing `/products` BFF route and bearer
+helpers. Applicant/profile selection stays ID-based and cannot edit aliases.
+
+No database reset is needed. Missing aliases read as empty; bootstrap must
+continue preserving administrator-edited records. Populate useful aliases and
+refine existing descriptions through reviewed admin updates or an explicit,
+idempotent migration, not by overwriting metadata at every startup.
+
+## 4. Rich MCP catalog and snapshot lifecycle
+
+Add product-owned MCP `get_category_catalog` with no model arguments:
+
+```json
+{
+  "schemaVersion": 1,
+  "catalogVersion": "sha256:<content-digest>",
+  "categories": [
+    {
+      "id": "carpentry",
+      "displayName": "Carpentry",
+      "description": "Wood construction and repair.",
+      "aliases": ["woodworking"]
+    }
   ]
 }
 ```
 
-Canonical IDs remain the values stored in `TaskMaster.jobCategories`. Aliases
-and related terms are search metadata, not additional stored profile
-categories.
+`catalogVersion` is a deterministic SHA-256 digest of canonical UTF-8 JSON:
+categories sorted ordinally by ID; each object has fields in the order shown
+above; aliases are normalized and ordinally sorted; compact serialization with
+consistent escaping. Use the same product-owned serialization helper for all
+version producers. Any ID, name, description, or alias change changes the
+version; timestamps and database iteration order do not.
 
-Canonical categories are stored in the product-service MongoDB `categories`
-collection from Phase 1. Resolver-only metadata such as aliases, objects, and
-relationships is added to that catalog in Phase 3 without changing the
-canonical IDs exposed to MCP clients.
+Build this small catalog from `CategoryService` initially rather than adding a
+second Redis metadata cache. Derive the digest and payload from the same
+materialized list. If caching is later introduced, it must reuse catalog-write
+invalidation and prevent stale fills; that optimization is not required here.
+Keep existing ID-list cache invalidation after admin mutations.
 
-## Taxonomy ownership and governance
+Register the new tool explicitly through `McpToolsConfig`; discovery remains
+generic. Preserve `get_categories` and its array shape for older clients.
 
-The marketplace owns canonical categories, aliases, object terms, and category
-relationships. Individual TaskMasters do not create or modify shared taxonomy
-entries.
+In the new assistant mode, evolve the existing refresh mechanism to obtain
+rich metadata and publish one immutable snapshot containing IDs, metadata,
+version, and last-successful-refresh time. Build enum and model context from
+that same snapshot; never combine old descriptions with new IDs.
 
-TaskMasters provide:
+- Refresh on startup and the existing configured interval. Treat a metadata
+  change as an update even if the ID list is unchanged.
+- Capture one snapshot per request. In-flight requests may finish with their
+  captured snapshot; product validation remains authoritative.
+- Validate schema version, required fields, unique IDs, and field limits
+  before accepting a snapshot. Handle the existing MCP JSON-string wrapping.
+- A failed, malformed, or empty response does not overwrite a last-good
+  snapshot. Log and expose the degraded state; do not report an empty provider
+  search as the result of a catalog failure.
+- In the proposed mode, snapshots older than 5 minutes are unusable for new
+  category decisions. A successful unchanged fetch refreshes their age.
+  With refresh disabled, this expiry still applies.
+- Without a usable snapshot, block category search and explain temporary
+  unavailability. Other independent tools may continue.
+- Preserve reconnection behavior, adapting ownership tracking to the rich
+  catalog tool. Do not turn malformed or empty successful responses into an
+  unbounded reconnect loop.
+- Reconnect must reapply the last usable schema/context to replacement tools.
 
-- One or more canonical categories that describe their services.
-- A free-text profile description and experience details.
-- A category proposal when no existing category is appropriate.
+The model receives IDs, names, descriptions, and aliases as delimited catalog
+data. Do not concatenate metadata into behavioral instructions. Do not silently
+truncate the catalog: measure serialized prompt size against the deployed
+model's context capacity and fail explicitly if the complete catalog cannot
+fit with the request and reserved response budget.
 
-Product-service and marketplace administrators control:
+## 5. Resolution and search orchestration
 
-- Canonical category IDs and display names.
-- Category descriptions and required profile attributes.
-- Search aliases, object terms, and related-category relationships.
-- Approval, rejection, merging, and retirement of categories.
-- Reclassification of profiles assigned to an incorrect category.
+### Resolution decision
 
-Aliases apply marketplace-wide. They must not be generated automatically from
-one TaskMaster's profile because inaccurate or intentionally misleading text
-could affect search results for every provider. An AI or analytics process may
-suggest aliases from unresolved searches, but an administrator must approve
-them before publication.
-
-## Missing-category proposal workflow
-
-This workflow is Phase 2 and is not part of the initial catalog refactor.
-Until Phase 2 is deployed, TaskMaster registration requires at least one
-existing catalog category and does not offer a free-text fallback.
-
-In Phase 2, the form provides a `Category not listed` option. Selecting it
-requires:
-
-- A proposed category name.
-- A description of the service and typical work performed.
-- Optional examples of objects, skills, or customer phrases associated with
-  the service.
-
-The applicant can submit the application without selecting an existing
-category, but the resulting TaskMaster profile must not be published or
-searchable until an administrator resolves the proposal.
-
-Suggested proposal states:
-
-```text
-PENDING
-APPROVED_NEW_CATEGORY
-MAPPED_TO_EXISTING
-REJECTED
-```
-
-Administrative outcomes:
-
-- `APPROVED_NEW_CATEGORY`: Create a canonical category and assign it to the
-  application.
-- `MAPPED_TO_EXISTING`: Assign an existing canonical category. The
-  administrator may also add the proposed wording as an approved alias.
-- `REJECTED`: Do not create the category or publish the profile. Store an
-  applicant-visible reason.
-
-Creating a new category should be reserved for a distinct, reusable service.
-Minor wording differences should normally become aliases, and overlapping
-services should normally map to an existing category.
-
-Suggested proposal data:
+Represent the assistant's category decision as a validated internal record,
+separate from public provider results:
 
 ```json
 {
-  "proposedName": "Furniture restoration",
-  "serviceDescription": "Repair and refinish damaged antique furniture.",
-  "exampleTerms": ["antique chair repair", "wood refinishing"],
-  "status": "PENDING",
-  "resolvedCategoryId": null,
-  "reviewedBy": null,
-  "reviewedAt": null,
-  "resolutionReason": null
+  "status": "resolved",
+  "categoryId": "carpentry",
+  "candidateCategoryIds": [],
+  "clarification": null,
+  "method": "llm",
+  "catalogVersion": "sha256:<content-digest>"
 }
 ```
 
-The proposal should be stored with the TaskMaster application or referenced by
-it so approval of the application and category resolution remain auditable.
-When mapped or approved, product-service writes only the resulting canonical
-category ID to `TaskMaster.jobCategories`.
+| Status | Contract and next action |
+|---|---|
+| `resolved` | Exactly one catalog ID, no candidates or clarification; search may proceed |
+| `needs_clarification` | No selected ID; zero to three valid, distinct candidate IDs and one focused question; no provider search |
+| `no_match` | No selected ID or candidates; explain that no offered service fits and invite a more specific description; no provider search |
+| `not_applicable` | Not a category-search request; continue the existing non-search tool flow |
 
-## Resolution contract
+`method` is `llm` or `exact`. The application supplies method and snapshot
+version; never accept them as trusted model metadata. Do not expose model
+self-reported confidence or invent probability thresholds.
 
-Add a product-domain category resolver with an immutable result:
+Produce the structured decision in the initial model turn used for category
+routing, rather than requiring both a separate classifier call and another
+model call to select the same category. A resolved decision may also carry the
+existing optional search filters in a typed orchestration envelope. Those
+filters remain separate from category resolution and may only reflect values
+explicitly supplied by the user. Then execute the product search and use the
+existing tool-result-grounded final answer generation.
 
-```text
-resolve(serviceDescription) ->
-  normalizedQuery
-  matches[]
-    categoryId
-    matchType
-    score
-```
+This is an internal orchestration change, not a new model-executable domain
+tool or a change to the public `ChatResponse` shape. Use typed parsing and
+validation; extending the Ollama client for structured output, if needed,
+belongs in its existing contract/client layer. Native and inline-recovered
+tool calls must not bypass the same category-search gate. If a
+`not_applicable` flow later requests provider search, obtain a valid category
+decision before executing it.
 
-Suggested match types:
+### Phase 1: catalog-grounded LLM interpretation
 
-- `EXACT_CATEGORY`: direct canonical ID or display-name match.
-- `ALIAS`: an explicit configured phrase match.
-- `OBJECT_SKILL`: an object and requested action match, such as
-  `repair + wooden cupboard`.
-- `RELATED`: a lower-priority related category.
+1. Capture a usable catalog snapshot and relevant conversation context.
+2. Ask the model to select one category only when the requested work supports
+   it. Use descriptions and aliases as context, not hardcoded mapping examples.
+3. Validate the decision's shape, selected ID, and candidate IDs in application
+   code. Reject unknown IDs and contradictory outcomes.
+4. For ambiguity, unsupported work, or multiple independent services, return
+   clarification/no-match without searching. Do not pick the first candidate.
+5. For a valid selection, execute `search_task_masters` with one canonical ID
+   and only explicitly stated optional filters.
+6. Ground the final answer exclusively in actual results.
 
-Scores are deterministic values used for ordering; they are not model
-confidence estimates. Exact category and alias matches must rank above related
-category matches.
+Allow at most one repair attempt for malformed model output or an unknown ID,
+within the existing overall tool-round budget. If repair fails, return a safe,
+explicit inability to resolve the request and log the cause. Never substitute
+the first category, a broad category, or an unfiltered search.
 
-## MCP contract
+Align system prompt, tool descriptions, and few-shot examples: searching is
+mandatory before making provider claims, not before asking a clarification.
+Remove object-to-category special cases after reviewed catalog descriptions
+and evaluation cases cover those distinctions. Examples must reference actual
+catalog IDs and must not supply a second, hardcoded taxonomy.
 
-The interim contract accepts either:
+### Phase 2: conservative exact-match fast path
 
-- `category`: one exact canonical category.
-- `categories`: an ordered list of up to three exact canonical categories.
-
-The final resolver-based contract evolves `search_task_masters` to accept
-either:
-
-- `category`: an optional exact canonical category for trusted callers.
-- `serviceQuery`: the user's natural-language description of the requested
-  work.
-
-The AI assistant should normally pass `serviceQuery`, plus independently
-extracted filters such as location, maximum rate, and minimum rating. It should
-not be responsible for translating the request to one exact category.
-
-Example:
+Add product-owned MCP `resolve_category_exact(query)`:
 
 ```json
 {
-  "serviceQuery": "fix my wooden cupboard",
-  "location": "IL",
-  "maxRate": 70
+  "status": "resolved",
+  "categoryId": "carpentry",
+  "candidateCategoryIds": [],
+  "catalogVersion": "sha256:<content-digest>"
 }
 ```
 
-Product-service resolves the service query and performs the category search.
-The result shape should include the resolved category IDs for diagnostics while
-keeping TaskMaster profile fields unchanged.
+The input is the complete current user message, not a model-extracted keyword.
+Require a nonblank string of at most 2,000 characters. Its length limit must
+not reduce the existing chat limit: longer chat messages skip this fast path
+and use the LLM path. Direct invalid calls return `invalid_category_query`.
+Resolver failures use the same `{error, message}` envelope as search;
+unavailable catalog storage returns `category_catalog_unavailable`, never
+`unmatched`. In non-resolved successful responses, `categoryId` is `null`.
 
-## Search behavior
+Product-service compares the entire normalized input against every canonical
+ID, display name, and alias. Matching is exact equality only. Return:
 
-1. If an exact `category` is supplied, validate and search that category.
-2. Otherwise, resolve `serviceQuery` against the taxonomy.
-3. Search the highest-confidence category matches using an `$in` query against
-   `jobCategories`.
-4. Apply location, rate, and rating filters normally.
-5. Rank exact and alias category matches ahead of related-category matches.
-6. Deduplicate TaskMasters that match multiple resolved categories.
-7. Return a machine-readable `unresolved_service_category` result when there
-   is no acceptable match. Do not remove the category condition and broaden
-   the search to every provider.
+- `resolved`: all matching entries belong to one category.
+- `ambiguous`: matches belong to multiple categories; return all distinct
+  candidate IDs sorted ordinally, with no selected ID.
+- `unmatched`: no exact match; both selected ID and candidates are empty.
 
-For `fix my wooden cupboard`, the expected resolution is:
+Do not strip request templates, infer actions, ignore negations, remove
+punctuation, use fuzzy matching, or score related categories. These conservative
+misses are intentional and go to the LLM.
 
-```json
-{
-  "primary": "carpentry",
-  "alternatives": ["furniture-assembly", "home-repair"]
-}
-```
+The assistant invokes this tool before semantic category selection in hybrid
+mode. For `resolved`, lock the category for that request; the model may still
+extract explicit filters from relevant user context and generate the response,
+but cannot silently replace the product decision. For `ambiguous`, clarify;
+for `unmatched`, use the phase-1 LLM path.
 
-David Williams matches `carpentry`, `IL`, and the `$70/hour` maximum and should
-therefore be returned.
+Do not use the fast path to override an unresolved conflict in conversation
+context. An ambiguous short reply to an earlier question may still require
+clarification. A collision with more than three categories results in an open
+clarification, not arbitrary selection of three.
 
-## Cache and index considerations
+If the resolver returns a different version from the captured assistant
+snapshot, refresh once before using it. If versions still disagree, abandon
+that exact result and use the LLM with a usable snapshot, or report catalog
+unavailability. Do not merge snapshots. If only the exact resolver fails,
+fall back to the phase-1 path with an explicit diagnostic; never label that
+fallback as an exact match.
 
-- Build cache keys from the ordered resolved category IDs, taxonomy version,
-  and normalized business filters.
-- Equivalent requests that resolve to the same categories should reuse the
-  same cache entry.
-- Continue using the existing multikey category/location indexes. Confirm the
-  `$in` query plans before adding new indexes.
-- Evict category search caches when TaskMaster categories or taxonomy metadata
-  change.
+Keep implementation small: one domain matcher sharing `CategoryService`
+metadata and one MCP adapter, not a configurable rule engine. No duplicate
+alias map belongs in ai-assistant-service.
 
-## AI assistant changes
+### Clarification and conversation behavior
 
-- Pass the user's service wording to `serviceQuery`.
-- Keep location, rate, and rating extraction separate.
-- Remove object-to-category special cases from the system prompt after the new
-  MCP contract is deployed.
-- Keep only general instructions such as using marketplace tools and not
-  inventing providers.
-- Continue deriving response sources and mentions only from tools executed for
-  the current request.
+- Ask one focused question about the missing distinction, for example:
+  "Do you need furniture assembly or repair?"
+- For multiple independent services, ask which to search first; do not execute
+  parallel searches or broaden into an OR query.
+- Use relevant user-provided history to interpret a clarification reply.
+  History is untrusted context, not authorization or evidence of prior tool
+  execution. Never take category choices or filters from seeded examples.
+- Preserve an explicit location/budget from the original request across the
+  immediate clarification exchange. The current two-message history window
+  can support that exchange; if necessary context has fallen outside it, ask
+  again rather than inventing or persisting hidden state.
+- No new durable conversation storage or frontend response fields are needed.
+- A valid category returning zero providers is a successful empty search, not
+  `no_match`, ambiguity, or permission to try another category.
+- Background catalog refreshes are not chat sources. Sources and provider
+  mentions derive only from tools actually executed for this request; a
+  clarification must not include provider mentions from examples or history.
 
-## Validation and error handling
+## 6. Authoritative product validation
 
-- Reject requests that supply neither `category` nor `serviceQuery`.
-- Reject unknown exact categories with a machine-readable error.
-- Reject excessively long service queries using an explicit length limit.
-- Normalize case, punctuation, and whitespace before matching.
-- Do not silently substitute a default category.
-- Log the normalized query, resolved category IDs, and match types without
-  logging credentials or trusted execution metadata.
+Validate category syntax and existence through shared `CategoryService` logic
+before cache lookup or repository search, including MCP and explicit REST
+category-filter entry points. Explicitly empty/malformed category filters are
+invalid; an absent filter on an existing browsing endpoint retains its current
+meaning. Do not make unfiltered browsing require a category.
 
-## Testing
+Search accepts canonical IDs, not display names or aliases. Normalize IDs
+under the existing rules; aliases must first resolve to an ID. Unknown IDs
+must fail even if an old cache entry exists.
 
-Add coverage for:
+| Condition | REST category search | MCP search payload |
+|---|---|---|
+| Malformed or required-but-missing category | `400 invalid_category` | `invalid_category` |
+| Well-formed, nonexistent category | `400 unknown_category` | `unknown_category` |
+| Catalog storage unavailable | `503 category_catalog_unavailable` | `category_catalog_unavailable` |
+| Valid category, no providers | Existing success with empty results | `[]` |
 
-- Exact canonical categories.
-- Aliases and common object names.
-- Object/action combinations such as repairing versus assembling furniture.
-- Overlapping categories and deterministic ordering.
-- Unknown or ambiguous requests.
-- Multi-category MongoDB queries and deduplication.
-- Cache-key equivalence and taxonomy-version changes.
-- MCP validation and machine-readable errors.
-- Registration with existing categories and with `Category not listed`.
-- Admin approval as a new category, mapping to an existing category, alias
-  approval, and rejection with a reason.
-- Prevention of profile publication while a required category proposal is
-  unresolved.
-- End-to-end requests including:
-  `fix my wooden cupboard, I live in IL, budget $70/hour`.
+MCP errors use `{error, message}` with optional field details, not an empty
+array or a provider-shaped object. They are tool payloads, not claims about MCP
+transport HTTP statuses. Translate expected domain exceptions explicitly and
+log infrastructure failures through existing service mechanisms.
 
-## Rollout
+The assistant may refresh and repair an unknown-category decision once; this
+shares the repair budget in section 5, rather than adding another loop.
+Cancellation propagates, and the existing round limit remains an upper bound.
+Do not expose raw tool errors or internal names in the user-facing answer.
 
-1. Add the MongoDB-backed category catalog, reset the disposable `products`
-   database, and bootstrap the approved catalog and mock TaskMasters.
-2. Add administrator category APIs and UI, switch REST/MCP discovery to the
-   catalog, and invalidate the old profile-derived category cache.
-3. Enforce catalog IDs on every TaskMaster/application write and replace
-   free-text category inputs with catalog-backed selection.
-4. Add the Phase 2 missing-category proposal model, applicant form, and admin
-   resolution workflow.
-5. Decide whether Phase 3 needs the interim MCP/repository support for up to
-   three ordered categories or can proceed directly to the resolver.
-6. Add resolver metadata and deterministic category resolution to
-   product-service.
-7. Extend the MCP contract with `serviceQuery` while retaining exact
-   `category` compatibility.
-8. Update AI assistant instructions to pass the natural-language service
-   request and compare existing common queries against the new behavior.
-9. Deploy product-service, restart AI assistant MCP discovery, and verify live
-   searches.
-10. Remove temporary prompt-level category special cases and, if it was
-    implemented, retire model-selected `categories` after callers migrate.
+Do not trust a model-supplied snapshot version as authorization. Continue
+passing immutable `ToolExecutionContext` separately from model arguments.
+Search cache keys remain canonical ID plus existing normalized filters;
+metadata-only edits do not change the provider query and need no new
+taxonomy-versioned provider-result cache.
+
+## 7. Observability and evaluation
+
+Record resolution status, method, catalog version/age, duration, repair count,
+and degraded/fallback reason using existing logging and metrics facilities.
+Use bounded metric labels; versions, raw queries, user IDs, and category IDs
+must not become unbounded metric dimensions. Do not add raw prompt logging or
+new telemetry exporters for this feature.
+
+Build a reviewed, versioned fixture of at least 120 prompts: at least 20 each
+for explicit categories/aliases, paraphrases, overlapping categories,
+negation/multiple services, unsupported requests, and clarification follow-ups.
+Freeze the catalog and label acceptable IDs or required abstention before
+comparing systems. Separate tuning examples from held-out evaluation cases.
+
+| Example | Expected behavior |
+|---|---|
+| `carpentry` / `woodworking` | Exact carpentry when uniquely configured |
+| `repair my wooden cupboard` | LLM selects carpentry with appropriate metadata |
+| `assemble an IKEA wardrobe` | Furniture assembly, not carpentry |
+| `clean my upholstered sofa` | Matching cleaning category if offered; otherwise no-match/clarify, not furniture assembly |
+| `help with furniture` | Clarification |
+| `not assembly; repair my wooden table` | No substring fast path; interpret requested repair |
+| `clean my house and fix a leaking tap` | Ask which service to search first |
+| An alias shared by two categories | Clarify, never first-match selection |
+| Unsupported service | No-match/clarification, no unrelated provider search |
+| Known category with no providers | Honest empty results, no category substitution |
+| Original request with explicit budget, followed by a clarification reply | Preserve that budget; do not invent other filters |
+
+Initial release gates (targets, not measured claims):
+
+- 100% of deterministic matcher and validation contract cases pass.
+- 100% of invalid-ID, missing-catalog, and malformed-decision tests prevent
+  provider searches.
+- On held-out unambiguous requests, correct automatic resolution is at least
+  90%; unnecessary clarification counts as a miss, preventing abstention from
+  artificially inflating accuracy.
+- On held-out requests requiring abstention, incorrect forced selection is at
+  most 5%; correct abstention is at least 95%.
+- Report confusion pairs, no-match rate, clarification rate, and fast-path
+  coverage separately. Do not hide regressions in one aggregate score.
+- Compare baseline, phase 1, and hybrid on the same model, catalog, hardware,
+  and prompts; run each prompt three times and report variability.
+- Product exact-matcher execution p95 is at most 20 ms on a warm local fixture
+  of 1,000 categories with up to 20 aliases each, excluding network/Mongo fetch.
+- Warm end-to-end service-search p95 is at most 1.2 times baseline, measured
+  from request receipt through final answer with identical provider data.
+  Report catalog fetch, resolver round trip, and model time separately.
+- If accuracy or latency gates fail, keep the new mode disabled and revise
+  the implementation; do not claim improvement based only on valid IDs.
+
+## 8. Phased implementation and rollout
+
+Use one assistant rollout setting, `CategoryResolution:Mode`, with values
+`legacy`, `catalog-llm`, and `hybrid`; default to `legacy` until gates pass.
+Reject unknown configuration values at startup. This is a migration switch,
+not a separate taxonomy configuration system.
+
+### Hybrid phase 1: metadata, ambiguity, and validation
+
+1. Add alias persistence/DTO validation and backward-compatible admin editing.
+2. Add the rich catalog MCP tool and authoritative search validation. Preserve
+   existing discovery and search success shapes.
+3. Review descriptions and aliases for overlapping services.
+4. Add assistant snapshot handling, typed decisions, clarification behavior,
+   and prompt/tool alignment behind `catalog-llm`.
+5. Cover failure paths and run baseline versus phase-1 evaluation.
+
+Deploy product-service before enabling the new assistant mode. Deploy the
+admin UI only after alias-capable product APIs are available. Older assistants
+continue using `get_categories`. Enabling a new mode without its required
+tools must report readiness/degraded status and block affected searches, not
+silently pretend the feature is enabled.
+
+### Hybrid phase 2: exact matching
+
+1. Implement and register `resolve_category_exact` in product-service.
+2. Add the assistant's exact-match branch, collision handling, and bounded
+   fallback to the phase-1 path behind `hybrid`.
+3. Evaluate all three modes and enable hybrid only after the release gates.
+4. Verify metadata updates, provider-empty categories, clarification
+   follow-ups, product restarts, and reconnection without restarting AI.
+
+Rollback first disables hybrid to `catalog-llm`, or returns the assistant to
+`legacy`. Keep authoritative product validation enabled in every mode.
+Alias fields are additive; do not delete metadata or reset data on rollback.
+Legacy assistant rollback restores the old matching behavior, not the old
+unsafe unknown-category search behavior. Roll back assistant mode before
+removing product capabilities.
+
+## 9. Required implementation coverage
+
+| Surface | Required coverage |
+|---|---|
+| Product category model/service/DTOs | Alias limits, normalization, omission versus clearing, existing documents, immutable IDs, admin authorization |
+| Catalog/MCP registration | Legacy ID-array compatibility, rich schema, metadata-only version changes, deterministic serialization, explicit registration |
+| Search service and controllers | Validation before caches, all category-filter entry points, absent versus empty filters, errors versus empty results |
+| Exact resolver | Entire-input matching, punctuation/negation misses, collisions including alias/name collisions, input limits |
+| Assistant refresher/discovery | Atomic snapshots, malformed/empty responses, expiry, cancellation, reconnect, replacement tools |
+| Assistant orchestration/client | Typed decision validation, bounded repair, native/inline call gate, locked exact result, version mismatch, clarification history, explicit filters |
+| Frontend admin | Alias CRUD UI, omitted legacy fields, loading/save errors, no changes to applicant category semantics |
+| Response integrity | No fabricated providers; no sources/mentions from background refresh or few-shot examples |
+| End-to-end | Admin metadata update affects new decisions; unknown ID rejected; ambiguity searches nothing; clarification preserves user filters |
+
+Use existing Maven, xUnit, Jest, and Playwright infrastructure. Stub Ollama for
+deterministic CI behavior; run real-model quality/latency evaluation separately
+with a recorded configuration. No new lint framework is required.
+
+## 10. Separate deferred feature: missing-category proposals
+
+This remains useful future work, but is not implemented or required here.
+Applicants currently must choose existing categories.
+
+A future proposal design should retain these requirements:
+
+- Capture proposed name, service description, optional example terms, and the
+  linked application.
+- Track `PENDING`, `APPROVED_NEW_CATEGORY`, `MAPPED_TO_EXISTING`, or `REJECTED`,
+  with reviewer, timestamp, resolved category ID, and applicant-visible reason.
+- Permit administrators to create a category, map to an existing one, or
+  reject with a reason. Proposed terms never automatically become aliases.
+- Prevent publishing a profile until its required category decisions are
+  resolved; store only canonical IDs in the resulting profile.
+- Specify authorization, concurrent-review/idempotency behavior, audit,
+  applicant notifications, and tests before implementation.
+
+The previous optional one-to-three-category search and object/skill/related
+category scoring are no longer scheduled requirements. Reintroducing them
+would require a separate design and evidence that the conservative hybrid
+approach is insufficient.
+
+## Related documents
+
+- [Catalog completion record](TASKMASTER_CATEGORY_MANAGEMENT_TASKS.md):
+  historical implementation checklist, not a competing future roadmap.
+- [Catalog operations and original reset guide](TASKMASTER_CATEGORY_DATABASE_RESET.md):
+  administration and explicitly destructive legacy-bootstrap procedures.
+  Do not run the reset for this hybrid rollout.
