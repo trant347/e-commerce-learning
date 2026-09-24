@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -38,7 +39,7 @@ public sealed class OllamaClient : IOllamaClient
         try
         {
             using var response = await _httpClient.PostAsJsonAsync("/api/generate", payload, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response, cancellationToken);
             var body = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: cancellationToken);
             var result = body?.Response ?? "No response from Ollama.";
 
@@ -50,7 +51,7 @@ public sealed class OllamaClient : IOllamaClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error calling Ollama generate API");
-            return "I could not reach the AI model right now.";
+            return DescribeFailure(ex, model, cancellationToken);
         }
     }
 
@@ -78,7 +79,7 @@ public sealed class OllamaClient : IOllamaClient
                 messages.Count, tools?.Count ?? 0);
 
             using var response = await _httpClient.PostAsJsonAsync("/api/chat", payload, _jsonOptions, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response, cancellationToken);
 
             var body = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(
                 _jsonOptions, cancellationToken: cancellationToken);
@@ -93,8 +94,58 @@ public sealed class OllamaClient : IOllamaClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error calling Ollama /api/chat");
-            return new OllamaChatMessage { Role = "assistant", Content = "I could not reach the AI model right now." };
+            return new OllamaChatMessage { Role = "assistant", Content = DescribeFailure(ex, model, cancellationToken) };
         }
+    }
+
+    public const string ModelUnavailableMessage =
+        "The AI model is still being set up and isn't available yet. Please try again in a few minutes.";
+    public const string TimeoutMessage =
+        "The AI model took too long to respond. Please try again.";
+    public const string UnreachableMessage =
+        "I could not reach the AI model right now. Please try again shortly.";
+    public const string ModelErrorMessage =
+        "The AI model ran into a problem answering your request. Please try again shortly.";
+
+    /// <summary>
+    /// Maps a failed Ollama call to a user-facing message. Ollama answers 404 on
+    /// /api/chat and /api/generate when the requested model has not been pulled,
+    /// which happens while <c>ollama-init</c> is still downloading it after a fresh start.
+    /// </summary>
+    private string DescribeFailure(Exception ex, string model, CancellationToken cancellationToken)
+    {
+        if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound })
+        {
+            _logger.LogWarning(
+                "Ollama model '{Model}' is not available yet (404). It may still be downloading; check the ollama-init container.",
+                model);
+            return ModelUnavailableMessage;
+        }
+
+        if (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return TimeoutMessage;
+        }
+
+        if (ex is HttpRequestException { StatusCode: null })
+        {
+            return UnreachableMessage;
+        }
+
+        return ModelErrorMessage;
+    }
+
+    private async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        _logger.LogWarning("Ollama returned {StatusCode}: {Body}",
+            (int)response.StatusCode, body.Length > 300 ? body[..300] + "…" : body);
+        throw new HttpRequestException(
+            $"Ollama returned {(int)response.StatusCode} ({response.StatusCode}).",
+            inner: null,
+            statusCode: response.StatusCode);
     }
 
     // ── Private request/response models ─────────────────────────────────────

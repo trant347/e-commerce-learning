@@ -109,14 +109,58 @@ public class OllamaClientTests
     }
 
     [Fact]
-    public async Task ChatAsync_OnHttpError_ReturnsFallbackMessageInsteadOfThrowing()
+    public async Task ChatAsync_OnModelNotFound_SaysModelIsStillBeingSetUp()
+    {
+        var (client, _) = BuildClient(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("{\"error\":\"model \\\"qwen3:8b\\\" not found, try pulling it first\"}")
+        });
+
+        var msg = await client.ChatAsync("qwen3:8b", new[] { UserMsg }, null, CancellationToken.None);
+
+        Assert.Equal("assistant", msg.Role);
+        Assert.Equal(OllamaClient.ModelUnavailableMessage, msg.Content);
+    }
+
+    [Fact]
+    public async Task ChatAsync_OnServerError_ReturnsModelErrorMessageInsteadOfThrowing()
     {
         var (client, _) = BuildClient(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
         var msg = await client.ChatAsync("qwen3:8b", new[] { UserMsg }, null, CancellationToken.None);
 
         Assert.Equal("assistant", msg.Role);
-        Assert.Contains("could not reach", msg.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(OllamaClient.ModelErrorMessage, msg.Content);
+    }
+
+    [Fact]
+    public async Task ChatAsync_OnConnectionFailure_SaysModelIsUnreachable()
+    {
+        var (client, _) = BuildClient(_ => throw new HttpRequestException("Connection refused"));
+
+        var msg = await client.ChatAsync("qwen3:8b", new[] { UserMsg }, null, CancellationToken.None);
+
+        Assert.Equal(OllamaClient.UnreachableMessage, msg.Content);
+    }
+
+    [Fact]
+    public async Task ChatAsync_OnHttpClientTimeout_SaysModelTookTooLong()
+    {
+        var (client, _) = BuildClient(_ => throw new TaskCanceledException("The request timed out."));
+
+        var msg = await client.ChatAsync("qwen3:8b", new[] { UserMsg }, null, CancellationToken.None);
+
+        Assert.Equal(OllamaClient.TimeoutMessage, msg.Content);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_OnModelNotFound_SaysModelIsStillBeingSetUp()
+    {
+        var (client, _) = BuildClient(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var result = await client.GenerateAsync("qwen3:8b", "system", "hello", CancellationToken.None);
+
+        Assert.Equal(OllamaClient.ModelUnavailableMessage, result);
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────
