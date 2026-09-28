@@ -1,4 +1,4 @@
-# OpenRouter Integration Tasks
+# OpenRouter Integration and Task-Specific Model Tasks
 
 Status: **Planned; implementation tasks are not yet marked complete.**
 
@@ -12,6 +12,13 @@ Reuse product-service's existing MCP server. Keep the booking tool local to the
 assistant; converting calendar-service to MCP is not part of this feature.
 Do not add browser-to-OpenRouter access, streaming, new domain tools, automatic
 model selection, or changes to payment/booking contracts.
+
+Implement a configuration-driven provider/model pair per task, selected by
+explicit backend task IDs. Only existing `chat` becomes a production caller
+here. Category resolution and hiring remain separate features; do not add their
+workflows, prompts, output schemas, or endpoints. Jev/Gemma are not hard-coded or
+assumed-compatible dependencies. Mixed Ollama/OpenRouter task maps are supported;
+synthetic internal callers demonstrate the foundation without adding features.
 
 Each task includes its own tests and completion criteria. Implement, test, verify,
 and commit small working increments rather than postponing tests until the end.
@@ -29,20 +36,28 @@ Paid evaluation and production deployment require separate operator approval.
 
 - [ ] **2. Introduce shared chat contracts and typed failures.**
   Depends on 1. Add `IChatModelClient`, typed messages, tool definitions, calls,
-  results, response metadata, and usage types from spec Section 3. Keep provider
+  results, response metadata, usage types, and per-request output limits from
+  spec Section 3. Add `ITaskChatModelResolver`, `ITaskChatModelClient`, and the
+  immutable `TaskModelProfile` selection contract. Keep provider
   wire DTOs separate and JSON values valid after document disposal. Define
   failure categories supporting Section 7 without raw payloads in exceptions.
   **Done when:** contracts express multiple calls with matching result IDs,
   typed schema/arguments, requested versus resolved models, and safe failures.
 
-- [ ] **3. Add validated model configuration and timeout budgets.**
-  Depends on 2. Add strongly typed `AiModel` and Ollama options. Migrate
+- [ ] **3. Add the task map, resolver, and isolated timeout budgets.**
+  Depends on 2. Add strongly typed `AiModels:Tasks` and Ollama options. Require a
+  complete `chat` profile; permit and validate additional task IDs. Migrate
   `Ollama:Model` and `Ollama:TimeoutSeconds`, including existing Compose mappings,
-  without breaking the current local deployment. Preserve the specified
+  to `AiModels:Tasks:chat` without breaking the current local deployment.
+  Do not introduce the superseded global `AiModel` configuration. Preserve the specified
   appsettings/local Compose timeout values. Introduce separate round and
-  end-to-end budgets with linked cancellation.
-  **Done when:** invalid providers/budgets fail startup, Ollama remains the
-  default, and tests distinguish caller cancellation from deadline expiry.
+  end-to-end budgets with linked cancellation. Resolve profiles into immutable
+  task-bound clients over independently registered adapters; never mutate shared
+  HttpClient state. Fail unknown task resolution before HTTP with diagnostics,
+  not a fallback to chat. Changes require restart/redeployment.
+  **Done when:** missing/incomplete profiles and invalid IDs/providers/budgets
+  fail startup, the default chat mapping remains Ollama, same-provider synthetic
+  tasks select independent models/limits, and cancellation/deadline tests pass.
   Keep OpenRouter unavailable until its adapter and options are wired in task 7.
 
 - [ ] **4. Adapt Ollama to the shared contract.**
@@ -57,8 +72,11 @@ Paid evaluation and production deployment require separate operator approval.
   malformed responses, and connection failures have adapter tests.
 
 - [ ] **5. Migrate orchestration and few-shot examples.**
-  Depends on 2-4. Switch `AiAssistantService` to the shared client and typed
-  definitions. Extend example models/configuration with explicit call/result
+  Depends on 2-4. Have `AiAssistantService` resolve the server-owned `chat` ID once
+  and retain its profile/client through every round/retry. Set the end-to-end
+  deadline once from that profile. Keep task/provider/model selection out of
+  public input and the tool loop. Use typed definitions.
+  Extend example models/configuration with explicit call/result
   IDs and validate missing, duplicate, dangling, or unresolved pairs at startup.
   Keep IDs collision-free in the assembled conversation.
   Preserve prompt/history order, tools on every round, sequential execution,
@@ -66,6 +84,7 @@ Paid evaluation and production deployment require separate operator approval.
   **Done when:** the first request has valid seeded pairs; subsequent requests
   carry the correct IDs/results; successful sources and mentions come only
   from this request's executed tools; orchestration has no Ollama-named types.
+  No category-resolution/hiring caller or model-driven router is introduced.
 
 - [ ] **6. Complete safe failure handling and remove unsafe existing logs.**
   Depends on 4-5. Map failures in `AiAssistantService`, outside the tool loop's
@@ -85,17 +104,22 @@ covered before introducing the external provider.
 
 ## Phase 2: OpenRouter adapter and deployment support
 
-- [ ] **7. Implement OpenRouter configuration and wire translation.**
-  Depends on Phase 1. Add validated OpenRouter options and register exactly one
-  selected implementation at startup. Require its key/model only when selected.
+- [ ] **7. Implement OpenRouter translation and mixed-provider resolution.**
+  Depends on Phase 1. Add validated shared OpenRouter options and independently
+  register its adapter alongside Ollama. Require its key/base URL if any configured
+  task uses it, even when chat uses Ollama; require a model in each profile.
+  All OpenRouter profiles share the server-side key and routing/retry policy.
   Send requests to the full `/api/v1/chat/completions` path with bearer auth,
   optional attribution and hidden visibility, `stream: false`, `max_tokens`,
-  and configured routing options. Never send `think`.
+  and configured routing options. Take the model and output limit from the bound
+  profile, not global defaults. Never send `think`.
   Parse stringified JSON-object arguments, preserve IDs, and serialize tool
   results with `tool_call_id`. Include tools every round. Keep resolved model
   and usage diagnostic-only; public `Model` remains the configured identifier.
   **Done when:** capturing-handler tests verify URLs with either base-URL slash
-  form, headers, routing, output caps, argument types, and multi-call round trips.
+  form, headers, routing, profile-specific output caps, argument types, and
+  multi-call round trips. Synthetic task callers can select different models on
+  one adapter or different providers in the same process without state leakage.
   No real API calls belong in these tests.
 
 - [ ] **8. Implement OpenRouter errors and bounded retries.**
@@ -106,39 +130,52 @@ covered before introducing the external provider.
   Allow at most one configured retry of only the current model request.
   Honor `Retry-After` seconds/dates and shared deadlines; 402 requires both the
   in-flight-budget metadata and a valid header. Never retry cancellation or
-  restart completed tool execution.
+  restart completed tool execution. Never switch task, provider, or model on
+  failure; keep retry/deadline state isolated per invocation.
   **Done when:** tests cover retryable/non-retryable cases, both missing 402
   conditions, invalid headers, over-budget delays, cancellation, and exhaustion.
 
 - [ ] **9. Add metadata-only assistant telemetry.**
   Depends on 6-8. Register the `TaskMaster.AiAssistant` activity source and meter.
   Instrument chat/round duration, tool calls, failures, retries, and available
-  token usage, with provider/requested/resolved model metadata as appropriate.
+  token usage, with validated task ID and provider/requested/resolved model
+  metadata as appropriate. Never use unknown input task names as metric labels.
   Keep generation IDs off metric labels and payloads out of all telemetry.
   Retain disabled-by-default Compose export and configuration-only health checks.
   **Done when:** in-process activity/meter listener tests observe the expected
   metadata without a collector, inference calls, or sensitive payloads.
 
-- [ ] **10. Add the OpenRouter Compose override and deployment instructions.**
+- [ ] **10. Document and wire all-Ollama, OpenRouter-only, and mixed deployments.**
   Depends on 7-8. Keep base Compose on Ollama; implement the override specified
   in Section 6, removing only the Ollama dependency and placing both Ollama
-  services behind an inactive profile. Require an OpenRouter model; map the
-  optional secret without warnings in Ollama mode.
+  services behind an inactive profile for OpenRouter-only use. Require
+  `OPENROUTER_CHAT_MODEL`; map the shared optional secret without warnings for
+  all-Ollama maps. Forward task settings as `AiModels__Tasks__<id>__<setting>`.
+  Document the mixed recipe on base Compose with explicit environment mappings;
+  retain Ollama when any task needs it and provision every selected local model.
+  Host environment entries are not automatically forwarded to containers.
   Update `.env.example` and deployment README with a verified Compose version
   supporting the reset syntax, timeout values, secrets, credit limits, model
-  capability checks, start/stop commands, and full rollback configuration.
-  **Done when:** both configurations render; OpenRouter's active graph has no
-  Ollama services/dependency, other dependencies remain, and default Ollama
-  needs no OpenRouter key. Use fake secrets for rendered-config inspection.
+  capability checks, start/stop commands, shared key limits, and per-task rollback.
+  Never stop infrastructure or remove a key that another task still needs.
+  **Done when:** all three recipes render; OpenRouter-only has no active Ollama
+  services/dependency, mixed retains required services, and all-Ollama needs no
+  OpenRouter key. Use synthetic profiles and fake secrets for mixed-config
+  inspection, not new domain workflows or real credentials.
 
 - [ ] **11. Close automated integration and regression coverage.**
-  Depends on 7-10. Exercise both DI selections and startup validation, seeded
+  Depends on 7-10. Exercise task resolution and startup validation, seeded
   message serialization through the real adapters, multi-round tool execution,
   partial-progress failures, requested/resolved model behavior, and preserved
   auth/controller behavior. Re-run assistant regressions, including category
   grounding, sources, mentions, and tool authorization.
+  Cover simultaneous synthetic tasks with different providers/models/budgets,
+  unknown task failures, missing chat, invalid unused profiles, and any-profile
+  secret requirements. Verify no cross-task transcripts/tools/credentials leak,
+  failure never changes routing, and public input cannot override chat's mapping.
+  Change one profile and restart; verify other task selections are unchanged.
   Review the checklist against every criterion in spec Section 12.
-  **Done when:** the assistant build and test suite pass, both Compose modes
+  **Done when:** the assistant build and test suite pass, all three deployment recipes
   validate, and default CI remains deterministic with no paid OpenRouter calls.
 
 ## Phase 3: Operator-approved non-production evaluation
@@ -149,7 +186,7 @@ covered before introducing the external provider.
   `max_tokens`, and review upstream retention/training terms. Define acceptable
   grounding/tool-selection results, latency, spend, and an observation period
   before evaluating. Keep keys and user payloads out of committed evidence.
-  **Done when:** the model and evaluation criteria are documented, deployment
+  **Done when:** the chat profile/model and evaluation criteria are documented, deployment
   secrets are configured, and operators have a usable rollback procedure.
 
 - [ ] **13. Run smoke scenarios and rehearse rollback.**
@@ -157,17 +194,20 @@ covered before introducing the external provider.
   tool, final answers from tool results, follow-up history, and safe invalid-key
   handling. Compare representative category prompts with Ollama for correctness,
   grounding, latency, and cost. Enable server telemetry explicitly for its smoke
-  scenario. Verify fresh OpenRouter deployment does not start/download Ollama;
-  verify switching an existing stack stops it as documented. Rehearse restoring
-  Ollama's provider, model, URL, timeouts, and services without code changes.
+  scenario. Verify fresh OpenRouter-only deployment does not start/download
+  Ollama. Verify mixed deployment retains it when needed; switching an existing
+  stack stops it only when no profile uses it. Rehearse restoring chat's
+  provider/model/budgets and infrastructure without changing other task mappings.
+  Use synthetic internal harness calls for mixed-profile checks, with no public
+  testing endpoint and no category/hiring implementation.
   **Done when:** non-sensitive evidence records outcomes against the agreed
   criteria, and failures are resolved or explicitly block rollout.
 
 ## Phase 4: Production opt-in
 
-- [ ] **14. Approve, deploy, and monitor the selected provider.**
-  Depends on 13 and explicit deployment approval. Enable OpenRouter only in the
-  intended environment, monitor failures, latency, tool rounds, tokens, and spend,
+- [ ] **14. Approve, deploy, and monitor the selected task mapping.**
+  Depends on 13 and explicit deployment approval. Enable OpenRouter for chat only
+  in the intended environment. Monitor failures, latency, tool rounds, tokens, and spend by task,
   and roll back if agreed criteria are breached. Retain the Ollama deployment
   option throughout the agreed stability period.
   **Done when:** operators accept the rollout against the evaluation criteria.
@@ -188,6 +228,10 @@ dotnet test ai-assistant-service.Tests\ai-assistant-service.Tests.csproj --nolog
 docker compose config --quiet
 docker compose -f docker-compose.yml -f docker-compose.openrouter.yml config --quiet
 ```
+
+Task 10 must document the exact command/environment mappings for the mixed recipe
+and validate it with `docker compose config --quiet` as well. Do not use the
+OpenRouter-only override for mixed profiles that require local Ollama.
 
 Configuration validation alone does not prove service startup, tool execution,
 or absence of model downloads; verify those outcomes in task 13.
