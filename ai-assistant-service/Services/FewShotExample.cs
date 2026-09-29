@@ -24,16 +24,20 @@ public sealed class FewShotTurn
 
     /// <summary>Populated only on assistant turns that demonstrate a tool invocation.</summary>
     public List<FewShotToolCall>? ToolCalls { get; set; }
+
+    public string? ToolCallId { get; set; }
 }
 
 public sealed class FewShotToolCall
 {
+    public string Id { get; set; } = string.Empty;
+
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
     /// Scalar arguments only. Values are bound as strings from configuration and
-    /// converted to JSON string elements when seeded — sufficient for category /
-    /// location / id-style parameters which is all the tools currently accept.
+    /// converted to JSON string elements when seeded. Live model arguments retain
+    /// their original JSON types through the shared chat contracts.
     /// </summary>
     public Dictionary<string, string> Arguments { get; set; } = new();
 }

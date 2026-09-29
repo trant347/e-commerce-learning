@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Specification
 
-> Status: **Proposed, not implemented**
+> Status: **In progress: tasks 1-5 implemented; failure/logging audit and OpenRouter pending**
 >
 > Scope: `ai-assistant-service`, its tests, Docker Compose configuration, and
 > environment documentation.
@@ -9,8 +9,8 @@
 
 ## 1. Problem and decision
 
-The AI assistant currently depends directly on Ollama request/response types,
-configuration, endpoint paths, and failure messages. This prevents selecting a
+Before this migration, the AI assistant depended directly on Ollama request/response types,
+configuration, endpoint paths, and failure messages. This prevented selecting a
 hosted model through OpenRouter without changing the assistant's orchestration
 logic.
 
@@ -82,8 +82,8 @@ Failure handling and cancellation are intentional exceptions: adapters will
 stop fabricating assistant messages on failure. Section 7 defines the replacement
 behavior, including the Ollama messages that remain unchanged.
 
-The current `IOllamaClient`, `OllamaChatMessage`, and `OllamaToolCall` types leak
-Ollama naming into orchestration. Ollama tool-call arguments deserialize as a
+The former `IOllamaClient`, `OllamaChatMessage`, and `OllamaToolCall` types leaked
+Ollama naming into orchestration; task 5 removed them. Ollama tool-call arguments deserialize as a
 JSON object, while OpenRouter returns `function.arguments` as a JSON-encoded
 string. OpenRouter also requires each tool result to reference the originating
 call through `tool_call_id`.
@@ -304,6 +304,10 @@ classDiagram
     }
 
     class AiAssistantService
+    class AssistantPrompt {
+        +Messages
+    }
+    class PromptOptions
     class TaskModelRequestDeadline
 
     AiModelsOptions --> TaskModelProfileCatalog : validated and snapshotted
@@ -321,6 +325,8 @@ classDiagram
     AiAssistantService --> ITaskChatModelResolver : resolves chat once
     AiAssistantService --> ITaskChatModelClient : retains for request
     AiAssistantService --> TaskModelRequestDeadline
+    AiAssistantService --> AssistantPrompt
+    PromptOptions --> AssistantPrompt : validate pairs and snapshot
 ```
 
 The request flow uses one task selection and one end-to-end deadline. Each model
@@ -350,27 +356,29 @@ sequenceDiagram
         Assistant->>TaskClient: ChatAsync(messages, tools, requestToken)
         Note over TaskClient: Link request token with one<br/>TimeoutSeconds round budget
         TaskClient->>Adapter: ChatModelRequest(profile model and output limit)
+        Adapter->>Provider: Chat completion request
+        Provider-->>Adapter: Response or failure
 
-        opt Provider permits a bounded retry
-            Adapter->>Provider: Chat completion attempt
-            Provider-->>Adapter: Retryable failure
+        opt Retryable failure and provider permits a retry
             Adapter->>Provider: Retry same model request<br/>within the same round budget
+            Provider-->>Adapter: Response or failure
         end
 
-        Adapter->>Provider: Chat completion request
-        Provider-->>Adapter: Assistant message or tool calls
         Adapter-->>TaskClient: ChatModelResponse
         TaskClient-->>Assistant: ChatModelResponse
 
         alt Assistant requested tools
             loop Calls execute sequentially
                 Assistant->>Tools: ExecuteAsync(context, name, arguments)
-                Tools-->>Assistant: Result with matching tool-call ID
+                Tools-->>Assistant: Result content
+                Note over Assistant: Append tool message with matching call ID
             end
             Note over Assistant: Append assistant calls and tool results,<br/>then begin the next model round
         else Final assistant content
-            Assistant-->>Controller: ChatResponse
-            Controller-->>Browser: HTTP 200 response
+            break Completed conversation
+                Assistant-->>Controller: ChatResponse
+                Controller-->>Browser: HTTP 200 response
+            end
         end
     end
 ```
@@ -390,12 +398,12 @@ one global `IChatModelClient` chosen by a single provider setting.
 Do not branch on provider or task inside the tool loop. Credentials/base URLs
 belong to provider configuration and never to a browser-facing task profile.
 
-The legacy `GenerateAsync` method is not used by the current orchestration. Do
-not add it to the new interface. Remove it only after confirming there are no
-remaining callers and migrating its tests.
+The unused legacy `GenerateAsync` method was removed in task 4 after inventorying
+its callers and preserving model-not-found coverage. Task 5 removed the remaining
+legacy chat client and contracts after migrating orchestration and its tests.
 
-**Task 4 implementation:** `OllamaChatModelClient` is registered with the task
-resolver; the existing assistant remains on the legacy chat client until task 5.
+**Tasks 4-5 implementation:** `OllamaChatModelClient` is registered with the task
+resolver, and `AiAssistantService` now uses the task-bound client for every round.
 The adapter uses the native `/api/chat` endpoint, `stream: false`, `think: false`,
 and `options.num_predict` for `ChatModelRequest.MaxOutputTokens`. Its dedicated
 HTTP client has an infinite timeout so the task-bound cancellation budget is

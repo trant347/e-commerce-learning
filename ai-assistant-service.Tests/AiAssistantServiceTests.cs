@@ -1,10 +1,11 @@
 using System.Text.Json;
+using ai_assistant_service.Configuration;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -12,340 +13,337 @@ namespace ai_assistant_service.Tests;
 
 public class AiAssistantServiceTests
 {
-    private static IConfiguration BuildConfig(
-        string model = "qwen3:8b",
-        IReadOnlyDictionary<string, string?>? additionalValues = null)
+    [Fact]
+    public async Task Chat_ResolvesChatOnceAndPreservesPromptHistoryToolsAndResultIds()
     {
-        var values = new Dictionary<string, string?>
+        var first = new RecordingTool("search_task_masters", """[{"id":"tm-1","name":"Alice"}]""");
+        var second = new RecordingTool("get_bookings", "[]");
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call("live-search", first.Name), Call("live-bookings", second.Name))
+            : Answer("I found Alice.", "provider-resolved-model")));
+        var (service, resolver) = Service(client, [first, second]);
+        var response = await service.ChatAsync(new ChatRequest
         {
-            ["AiModels:Tasks:chat:Model"]  = model,
-            ["PromptOptions:SystemPrompt"] = "test system prompt"
-        };
+            Message = "new question",
+            History = [
+                new() { Role = "user", Content = "discard this old message" },
+                new() { Role = "user", Content = "recent question" },
+                new() { Role = "assistant", Content = "recent answer" }
+            ]
+        }, Context, CancellationToken.None);
 
-        if (additionalValues is not null)
-        {
-            foreach (var pair in additionalValues)
-            {
-                values[pair.Key] = pair.Value;
-            }
-        }
+        resolver.Verify(r => r.Resolve("chat"), Times.Once);
+        resolver.VerifyNoOtherCalls();
+        Assert.Equal("I found Alice.", response.Answer);
+        Assert.Equal("configured-model", response.Model);
+        Assert.Equal(["search_task_masters", "get_bookings"], response.Sources);
+        Assert.Equal("Alice", Assert.Single(response.Mentions).Name);
+        Assert.Same(Context, first.LastContext);
+        Assert.Same(Context, second.LastContext);
+        Assert.Equal(1, first.CallCount);
+        Assert.Equal(1, second.CallCount);
 
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(values)
-            .Build();
+        var initial = client.Requests[0].Messages;
+        Assert.Equal(["system", "user", "assistant", "tool", "assistant", "user", "assistant", "user"],
+            initial.Select(m => m.Role));
+        Assert.Equal("test system prompt", initial[0].Content);
+        Assert.Equal("recent question", initial[5].Content);
+        Assert.Equal("recent answer", initial[6].Content);
+        Assert.Equal("new question", initial[7].Content);
+        Assert.Equal(Assert.Single(initial[2].ToolCalls!).Id, initial[3].ToolCallId);
+        var followUp = client.Requests[1].Messages;
+        Assert.Equal(["live-search", "live-bookings"],
+            followUp.Skip(initial.Count + 1).Select(m => m.ToolCallId));
+        Assert.Equal(first.Result, followUp[^2].Content);
+        Assert.Equal(second.Result, followUp[^1].Content);
+        Assert.Same(client.Requests[0].Tools, client.Requests[1].Tools);
+        Assert.Equal(2, client.Requests[0].Tools!.Count);
+        Assert.All(client.Requests[0].Tools!, tool =>
+            Assert.Equal(JsonValueKind.Object, tool.Parameters.ValueKind));
+        Assert.Equal(client.Requests[0].Token, client.Requests[1].Token);
     }
 
     [Fact]
-    public async Task ChatAsync_NoToolCalls_ReturnsAssistantContent()
+    public async Task NoLiveTools_DoesNotExposeRegisteredToolsOrSeedMetadata()
     {
-        var ollama = new Mock<IOllamaClient>();
-        ollama.Setup(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new OllamaChatMessage { Role = "assistant", Content = "Hello!" });
+        var tool = new RecordingTool("search_task_masters", "[]");
+        var client = new RecordingClient((_, _) => Task.FromResult(Answer("Hello!")));
+        var (service, _) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest { Message = "hello" }, Context, CancellationToken.None);
 
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, new ToolRegistry(Array.Empty<IToolDefinition>()),
-            NullLogger<AiAssistantService>.Instance);
-
-        var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "hi" }, TestContext(), CancellationToken.None);
-
-        Assert.Equal("Hello!", resp.Answer);
-        Assert.Equal("qwen3:8b", resp.Model);
-        Assert.Empty(resp.Sources);
-        Assert.Empty(resp.Mentions);
-        ollama.Verify(c => c.ChatAsync(
-            "qwen3:8b",
-            It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-            It.IsAny<IReadOnlyList<object>?>(),
-            It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task ChatAsync_WithToolCall_ExecutesToolThenReturnsFinalAnswer()
-    {
-        var fakeTool = new RecordingTool("search_task_masters", "[{\"id\":\"tm-1\",\"name\":\"Alice\"}]");
-        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
-
-        using var argDoc = JsonDocument.Parse("{\"category\":\"Pet Care\"}");
-        var args = argDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
-
-        var toolCallMsg = new OllamaChatMessage
-        {
-            Role = "assistant",
-            ToolCalls = new List<OllamaToolCall>
-            {
-                new()
-                {
-                    Function = new OllamaToolCallFunction
-                    {
-                        Name = "search_task_masters",
-                        Arguments = args
-                    }
-                }
-            }
-        };
-        var finalMsg = new OllamaChatMessage { Role = "assistant", Content = "I found Alice." };
-
-        var ollama = new Mock<IOllamaClient>();
-        ollama.SetupSequence(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .ReturnsAsync(toolCallMsg)
-              .ReturnsAsync(finalMsg);
-
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
-
-        var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "find a pet sitter" }, TestContext(), CancellationToken.None);
-
-        Assert.Equal("I found Alice.", resp.Answer);
-        Assert.Equal(1, fakeTool.CallCount);
-        Assert.Same(TestExecutionContext, fakeTool.LastContext);
-        Assert.Equal(new[] { "search_task_masters" }, resp.Sources);
-        Assert.Single(resp.Mentions);
-        Assert.Equal("tm-1", resp.Mentions[0].Id);
-        Assert.Equal("Alice", resp.Mentions[0].Name);
-    }
-
-    [Fact]
-    public async Task ChatAsync_DropsRatingFilterTheUserDidNotMention()
-    {
-        var fakeTool = new RecordingTool("search_task_masters", "[]");
-        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
-
-        using var argDoc = JsonDocument.Parse(
-            "{\"category\":\"education\",\"location\":\"San Francisco\",\"minRating\":\"4.5\"}");
-        var args = argDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
-
-        var ollama = new Mock<IOllamaClient>();
-        ollama.SetupSequence(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new OllamaChatMessage
-              {
-                  Role = "assistant",
-                  ToolCalls = new List<OllamaToolCall>
-                  {
-                      new() { Function = new OllamaToolCallFunction { Name = "search_task_masters", Arguments = args } }
-                  }
-              })
-              .ReturnsAsync(new OllamaChatMessage { Role = "assistant", Content = "None found." });
-
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
-
-        await svc.ChatAsync(
-            new ChatRequest { Message = "could you check if any English teacher in San Francisco?" },
-            TestContext(),
-            CancellationToken.None);
-
-        Assert.NotNull(fakeTool.LastArgs);
-        Assert.False(fakeTool.LastArgs!.ContainsKey("minRating"));
-        Assert.Equal("education", fakeTool.LastArgs["category"]);
-        Assert.Equal("San Francisco", fakeTool.LastArgs["location"]);
-    }
-
-    [Fact]
-    public async Task ChatAsync_SendsSystemPromptAsFirstMessage()
-    {
-        IReadOnlyList<OllamaChatMessage>? capturedMessages = null;
-
-        var ollama = new Mock<IOllamaClient>();
-        ollama.Setup(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .Callback<string, IReadOnlyList<OllamaChatMessage>, IReadOnlyList<object>?, CancellationToken>(
-                  (_, msgs, _, _) => capturedMessages = msgs.ToList())
-              .ReturnsAsync(new OllamaChatMessage { Role = "assistant", Content = "ok" });
-
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, new ToolRegistry(Array.Empty<IToolDefinition>()),
-            NullLogger<AiAssistantService>.Instance);
-
-        await svc.ChatAsync(
-            new ChatRequest { Message = "hi" }, TestContext(), CancellationToken.None);
-
-        Assert.NotNull(capturedMessages);
-        Assert.Equal("system", capturedMessages![0].Role);
-        Assert.Equal("test system prompt", capturedMessages[0].Content);
-        Assert.Equal("user", capturedMessages[^1].Role);
-        Assert.Equal("hi", capturedMessages[^1].Content);
-    }
-
-    [Fact]
-    public async Task ChatAsync_HaltsAfterMaxRounds_AndReturnsFallbackMessage()
-    {
-        // Tool that always returns valid JSON, paired with a model that always
-        // requests another tool call → exercises the MaxToolRounds (5) guard.
-        var fakeTool = new RecordingTool("search_task_masters", "[]");
-        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
-
-        using var argDoc = JsonDocument.Parse("{\"category\":\"Pet Care\"}");
-        var args = argDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
-
-        OllamaChatMessage MakeToolCall() => new()
-        {
-            Role = "assistant",
-            ToolCalls = new List<OllamaToolCall>
-            {
-                new()
-                {
-                    Function = new OllamaToolCallFunction
-                    {
-                        Name = "search_task_masters",
-                        Arguments = new Dictionary<string, JsonElement>(args)
-                    }
-                }
-            }
-        };
-
-        var ollama = new Mock<IOllamaClient>();
-        ollama.Setup(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .ReturnsAsync(MakeToolCall);
-
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
-
-        var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "loop forever" }, TestContext(), CancellationToken.None);
-
-        Assert.Contains("wasn't able to find a complete answer", resp.Answer);
-        Assert.Equal(5, fakeTool.CallCount);
-        ollama.Verify(c => c.ChatAsync(
-            It.IsAny<string>(),
-            It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-            It.IsAny<IReadOnlyList<object>?>(),
-            It.IsAny<CancellationToken>()),
-            Times.Exactly(5));
-    }
-
-    [Fact]
-    public async Task ChatAsync_ExtractsMentions_FromDoubleEncodedToolResult()
-    {
-        // MCP tool results arrive double-encoded: the JSON array is wrapped in a
-        // JSON string (e.g. "\"[{\\\"id\\\":\\\"tm-1\\\",…}]\"").
-        // Simulate by having the tool return a JSON-serialized string of the array.
-        var innerJson = "[{\"id\":\"tm-1\",\"name\":\"Alice\"}]";
-        var doubleEncoded = JsonSerializer.Serialize(innerJson); // wraps in quotes + escapes
-
-        var fakeTool = new RecordingTool("search_task_masters", doubleEncoded);
-        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
-
-        using var argDoc = JsonDocument.Parse("{\"category\":\"Pet Care\"}");
-        var args = argDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value);
-
-        var toolCallMsg = new OllamaChatMessage
-        {
-            Role = "assistant",
-            ToolCalls = new List<OllamaToolCall>
-            {
-                new()
-                {
-                    Function = new OllamaToolCallFunction
-                    {
-                        Name = "search_task_masters",
-                        Arguments = args
-                    }
-                }
-            }
-        };
-        var finalMsg = new OllamaChatMessage { Role = "assistant", Content = "I found Alice." };
-
-        var ollama = new Mock<IOllamaClient>();
-        ollama.SetupSequence(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .ReturnsAsync(toolCallMsg)
-              .ReturnsAsync(finalMsg);
-
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
-
-        var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "find a pet sitter" }, TestContext(), CancellationToken.None);
-
-        Assert.Equal("I found Alice.", resp.Answer);
-        Assert.Single(resp.Mentions);
-        Assert.Equal("tm-1", resp.Mentions[0].Id);
-        Assert.Equal("Alice", resp.Mentions[0].Name);
-    }
-
-    [Fact]
-    public async Task ChatAsync_DoesNotExposeFewShotSourcesOrMentions()
-    {
-        var config = BuildConfig(additionalValues: new Dictionary<string, string?>
-        {
-            ["PromptOptions:FewShotExamples:0:Description"] = "example",
-            ["PromptOptions:FewShotExamples:0:Turns:0:Role"] = "tool",
-            ["PromptOptions:FewShotExamples:0:Turns:0:Content"] =
-                "[{\"id\":\"seed-1\",\"name\":\"Seeded Example\"}]"
-        });
-        var registeredTool = new RecordingTool("search_task_masters", "[]");
-        var ollama = new Mock<IOllamaClient>();
-        ollama.Setup(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new OllamaChatMessage { Role = "assistant", Content = "No search needed." });
-
-        var svc = new AiAssistantService(
-            config,
-            ollama.Object,
-            new ToolRegistry(new IToolDefinition[] { registeredTool }),
-            NullLogger<AiAssistantService>.Instance);
-
-        var response = await svc.ChatAsync(
-            new ChatRequest { Message = "hello" }, TestContext(), CancellationToken.None);
-
+        Assert.Equal("Hello!", response.Answer);
         Assert.Empty(response.Sources);
         Assert.Empty(response.Mentions);
-        Assert.Equal(0, registeredTool.CallCount);
+        Assert.Equal(0, tool.CallCount);
     }
 
-    private static readonly ToolExecutionContext TestExecutionContext =
-        new("alice", ["calendar.read"], "correlation-1");
-
-    private static ToolExecutionContext TestContext() => TestExecutionContext;
-
-    private sealed class RecordingTool : IToolDefinition
+    [Fact]
+    public async Task Grounding_UsesUserHistoryButNotSeededOrAssistantFilters()
     {
-        private readonly string _result;
-        public RecordingTool(string name, string result) { Name = name; _result = result; }
-        public string Name { get; }
+        var tool = new RecordingTool("search_task_masters", "[]");
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call("call", tool.Name,
+                """{"category":"education","location":"San Francisco","minRating":4.5}"""))
+            : Answer("None found.")));
+        var (service, _) = Service(client, [tool]);
+        await service.ChatAsync(new ChatRequest
+        {
+            Message = "any English teachers?",
+            History = [
+                new() { Role = "user", Content = "in San Francisco" },
+                new() { Role = "assistant", Content = "I'll use a minimum rating of 4.5." }
+            ]
+        }, Context, CancellationToken.None);
+
+        Assert.Equal("education", tool.LastArgs!["category"]);
+        Assert.Equal("San Francisco", tool.LastArgs["location"]);
+        Assert.False(tool.LastArgs.ContainsKey("minRating"));
+    }
+
+    [Fact]
+    public async Task FiveRoundGuard_DoesNotReturnASeededOrHistoricalAnswer()
+    {
+        var tool = new RecordingTool("search_task_masters", "[]");
+        var client = new RecordingClient((round, _) =>
+            Task.FromResult(Calls(Call($"call-{round}", tool.Name))));
+        var (service, _) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest
+        {
+            Message = "loop",
+            History = [new() { Role = "assistant", Content = "historical answer" }]
+        }, Context, CancellationToken.None);
+
+        Assert.Contains("wasn't able to find a complete answer", response.Answer);
+        Assert.Equal(5, tool.CallCount);
+        Assert.Equal(5, client.Requests.Count);
+        Assert.Empty(response.Mentions);
+    }
+
+    [Fact]
+    public async Task DoubleEncodedToolResult_StillProducesRequestLocalMentions()
+    {
+        var tool = new RecordingTool("search_task_masters",
+            JsonSerializer.Serialize("""[{"id":"tm-1","name":"Alice"}]"""));
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call("call", tool.Name)) : Answer("Found Alice.")));
+        var (service, _) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest { Message = "find someone" }, Context, CancellationToken.None);
+        var mention = Assert.Single(response.Mentions);
+        Assert.Equal("tm-1", mention.Id);
+        Assert.Equal("Alice", mention.Name);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DuplicateIds_AreRejectedBeforeAnyToolInTheBatchExecutes(bool collidesWithSeed)
+    {
+        var tool = new RecordingTool("search_task_masters", "[]");
+        var client = new RecordingClient((_, _) => Task.FromResult(Calls(
+            Call("live-call", tool.Name),
+            Call(collidesWithSeed ? "seed_example_0_call_0" : "live-call", tool.Name))));
+        var (service, _) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest { Message = "search" }, Context, CancellationToken.None);
+        Assert.Contains("invalid response", response.Answer);
+        Assert.Equal(0, tool.CallCount);
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
+    }
+
+    [Fact]
+    public async Task MultipleTools_AreAwaitedSequentially()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = new RecordingTool("first", "[]", async token =>
+        {
+            started.SetResult();
+            await release.Task.WaitAsync(token);
+            return "first result";
+        });
+        var second = new RecordingTool("second", "second result");
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call("first-id", first.Name), Call("second-id", second.Name)) : Answer("done")));
+        var (service, _) = Service(client, [first, second]);
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var chat = service.ChatAsync(new ChatRequest { Message = "do both" }, Context, guard.Token);
+        try
+        {
+            await started.Task.WaitAsync(guard.Token);
+            Assert.Equal(0, second.CallCount);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        await chat;
+        Assert.Equal(1, second.CallCount);
+    }
+
+    [Theory]
+    [InlineData(ChatModelFailureCategory.LocalModelUnavailable, 404,
+        "The AI model is still being set up and isn't available yet. Please try again in a few minutes.")]
+    [InlineData(ChatModelFailureCategory.Timeout, null,
+        "The AI model took too long to respond. Please try again.")]
+    [InlineData(ChatModelFailureCategory.ProviderUnavailable, null,
+        "I could not reach the AI model right now. Please try again shortly.")]
+    [InlineData(ChatModelFailureCategory.ProviderUnavailable, 500,
+        "The AI model ran into a problem answering your request. Please try again shortly.")]
+    [InlineData(ChatModelFailureCategory.ProtocolError, 200,
+        "The AI assistant returned an invalid response. Please try again.")]
+    public async Task ModelFailureAfterToolExecution_KeepsSafeTextAndClearsMetadata(
+        ChatModelFailureCategory category, int? status, string answer)
+    {
+        var tool = new RecordingTool("search_task_masters", """[{"id":"live","name":"Alice"}]""");
+        var client = new RecordingClient((round, _) => round == 1
+            ? Task.FromResult(Calls(Call("call", tool.Name)))
+            : throw new ChatModelException(category, new ChatModelFailureMetadata(httpStatusCode: status)));
+        var (service, resolver) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest { Message = "search" }, Context, CancellationToken.None);
+
+        Assert.Equal(answer, response.Answer);
+        Assert.Equal("configured-model", response.Model);
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
+        Assert.Equal(1, tool.CallCount);
+        resolver.Verify(r => r.Resolve("chat"), Times.Once);
+    }
+
+    [Fact]
+    public async Task ToolFailure_KeepsResultIdAndLetsModelFinish()
+    {
+        var tool = new RecordingTool("search_task_masters", "", _ => throw new HttpRequestException("unavailable"));
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call("failed-call", tool.Name)) : Answer("The data is unavailable.")));
+        var (service, _) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest { Message = "search" }, Context, CancellationToken.None);
+        var result = client.Requests[1].Messages[^1];
+        Assert.Equal("failed-call", result.ToolCallId);
+        Assert.Contains("tool_unavailable", result.Content);
+        Assert.Equal("The data is unavailable.", response.Answer);
+        Assert.Empty(response.Mentions);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CallerCancellation_PropagatesFromModelAndTool(bool duringTool)
+    {
+        using var caller = new CancellationTokenSource();
+        Task<string> Cancel(CancellationToken token)
+        {
+            caller.Cancel();
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult("unreachable");
+        }
+        var tool = new RecordingTool("search_task_masters", "", Cancel);
+        var client = new RecordingClient(async (_, token) =>
+        {
+            if (duringTool) return Calls(Call("call", tool.Name));
+            await Cancel(token);
+            return Answer("unreachable");
+        });
+        var (service, _) = Service(client, [tool]);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.ChatAsync(new ChatRequest { Message = "hello" }, Context, caller.Token));
+        Assert.Single(client.Requests);
+    }
+
+    [Fact]
+    public async Task RequestDeadline_CoversToolExecutionAndDoesNotStartAnotherRound()
+    {
+        var tool = new RecordingTool("search_task_masters", "", async token =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return "unreachable";
+        });
+        var client = new RecordingClient((_, _) => Task.FromResult(Calls(Call("call", tool.Name))),
+            requestTimeoutSeconds: 1);
+        var (service, _) = Service(client, [tool]);
+        var response = await service.ChatAsync(new ChatRequest { Message = "search" }, Context, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("The AI model took too long to respond. Please try again.", response.Answer);
+        Assert.Single(client.Requests);
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
+    }
+
+    private static readonly ToolExecutionContext Context = new("alice", ["calendar.read"], "correlation-1");
+
+    private static (AiAssistantService, Mock<ITaskChatModelResolver>) Service(
+        RecordingClient client, IReadOnlyList<IToolDefinition> tools)
+    {
+        var resolver = new Mock<ITaskChatModelResolver>(MockBehavior.Strict);
+        resolver.Setup(r => r.Resolve("chat")).Returns(client);
+        var prompt = new AssistantPrompt(Options.Create(new PromptOptions
+        {
+            SystemPrompt = "test system prompt",
+            FewShotExamples = [new FewShotExample
+            {
+                Turns = [
+                    new() { Role = "user", Content = "a landscaper with a rating of at least 4.5" },
+                    new() { Role = "assistant", ToolCalls = [new()
+                    {
+                        Id = "seed_example_0_call_0", Name = "search_task_masters",
+                        Arguments = new() { ["category"] = "landscaping", ["minRating"] = "4.5" }
+                    }] },
+                    new() { Role = "tool", ToolCallId = "seed_example_0_call_0",
+                        Content = """[{"id":"seed-1","name":"Seeded Example"}]""" },
+                    new() { Role = "assistant", Content = "Seeded final answer." }
+                ]
+            }]
+        }));
+        return (new AiAssistantService(prompt, resolver.Object,
+            new ToolRegistry(tools), NullLogger<AiAssistantService>.Instance), resolver);
+    }
+
+    private static ChatModelToolCall Call(string id, string name, string arguments = "{}")
+    {
+        using var document = JsonDocument.Parse(arguments);
+        return new ChatModelToolCall(id, name, document.RootElement);
+    }
+
+    private static ChatModelResponse Calls(params ChatModelToolCall[] calls) =>
+        new(new ChatModelMessage("assistant", null, calls));
+    private static ChatModelResponse Answer(string content, string? resolvedModel = null) =>
+        new(new ChatModelMessage("assistant", content), resolvedModel: resolvedModel);
+
+    private sealed class RecordingClient(
+        Func<int, CancellationToken, Task<ChatModelResponse>> respond,
+        int requestTimeoutSeconds = 300) : ITaskChatModelClient
+    {
+        public TaskModelProfile Profile { get; } =
+            new("chat", "Ollama", "configured-model", 1, requestTimeoutSeconds, 128);
+        public List<(IReadOnlyList<ChatModelMessage> Messages, IReadOnlyList<ChatModelTool>? Tools,
+            CancellationToken Token)> Requests { get; } = [];
+
+        public Task<ChatModelResponse> ChatAsync(
+            IReadOnlyList<ChatModelMessage> messages, IReadOnlyList<ChatModelTool>? tools,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add((messages.ToArray(), tools, cancellationToken));
+            return respond(Requests.Count, cancellationToken);
+        }
+    }
+
+    private sealed class RecordingTool(
+        string name, string result, Func<CancellationToken, Task<string>>? execute = null) : IToolDefinition
+    {
+        public string Name => name;
+        public string Result => result;
         public string Description => "test tool";
-        public object ParametersSchema => new { };
+        public object ParametersSchema => new { type = "object" };
         public int CallCount { get; private set; }
         public ToolExecutionContext? LastContext { get; private set; }
         public IReadOnlyDictionary<string, string>? LastArgs { get; private set; }
 
-        public Task<string> ExecuteAsync(
-            ToolExecutionContext executionContext,
-            IReadOnlyDictionary<string, string> arguments,
-            CancellationToken cancellationToken)
+        public Task<string> ExecuteAsync(ToolExecutionContext context,
+            IReadOnlyDictionary<string, string> arguments, CancellationToken cancellationToken)
         {
-            LastContext = executionContext;
+            LastContext = context;
             LastArgs = arguments;
             CallCount++;
-            return Task.FromResult(_result);
+            return execute?.Invoke(cancellationToken) ?? Task.FromResult(result);
         }
     }
 }

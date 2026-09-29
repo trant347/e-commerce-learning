@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-4 are complete. Provider-neutral orchestration and OpenRouter remain pending.**
+Status: **In progress; tasks 1-5 are complete. The failure/logging audit and OpenRouter remain pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -179,12 +179,12 @@ Paid evaluation and production deployment require separate operator approval.
     failures, and real DI resolution with two synthetic task profiles.
     No Ollama server or paid calls are needed.
 
-  **Transition boundary:** The running assistant still uses `IOllamaClient`
-  until task 5 migrates its messages and seeded examples. The new adapter already
-  works through the resolver; legacy error presentation and log cleanup remain
-  in task 6. OpenRouter remains unavailable until task 7.
+  **Historical task 4 transition boundary:** The assistant still used
+  `IOllamaClient` while the new adapter was usable through the resolver.
+  Task 5 below completes that migration; task 6 retains the logging audit.
+  OpenRouter remains unavailable until task 7.
 
-- [ ] **5. Migrate orchestration and few-shot examples.**
+- [x] **5. Migrate orchestration and few-shot examples.**
   Depends on 2-4. Have `AiAssistantService` resolve the server-owned `chat` ID once
   and retain its profile/client through every round/retry. Set the end-to-end
   deadline once from that profile. Keep task/provider/model selection out of
@@ -198,6 +198,37 @@ Paid evaluation and production deployment require separate operator approval.
   carry the correct IDs/results; successful sources and mentions come only
   from this request's executed tools; orchestration has no Ollama-named types.
   No category-resolution/hiring caller or model-driven router is introduced.
+
+  **Implemented 2026-09-28:**
+
+  - `AiAssistantService` resolves the server-owned `chat` task once and retains
+    the selected client/profile. One linked request deadline covers prompt
+    assembly, every model round, and sequential tool execution. Provider model,
+    limits, and round budgets remain inside the task-bound client.
+  - Added validated `PromptOptions` and an immutable `AssistantPrompt` snapshot.
+    Few-shot call/result IDs are explicit in configuration. Startup rejects
+    missing IDs, duplicate calls/results, dangling results, and unresolved
+    calls before another turn or the end of an example. IDs are unique across
+    examples; live IDs are checked against the assembled conversation before
+    executing any tool in a returned batch.
+  - Shared message/tool contracts now carry the complete conversation; result
+    messages reference their originating call IDs. Prompt/history order, the
+    five-round guard, user-only filter grounding, trusted execution context,
+    and request-local sources/mentions are preserved. Exhaustion cannot return
+    a seeded or historical answer.
+  - Removed `IOllamaClient`, the legacy client, and their wire types/registration.
+    Their HTTP behavior is covered by adapter tests; friendly error responses
+    are now covered at the service boundary. Minimal failure mapping and
+    cancellation propagation were included to avoid regressions when activating
+    the typed adapter. Task 6 still owns the remaining logging audit and broader
+    failure/cancellation checks.
+  - Tests cover startup rejection, sequential multi-call execution, ID pairing,
+    selection isolation from public input, grounding, partial-progress failures,
+    deadlines, and metadata isolation. Integration tests load the actual
+    appsettings examples and run the real resolver/adapter for both native and
+    inline calls, with only the provider HTTP response stubbed.
+    The full assistant suite passes 146 tests; the existing NU1902 dependency
+    advisory remains unchanged.
 
 - [ ] **6. Complete safe failure handling and remove unsafe existing logs.**
   Depends on 4-5. Map failures in `AiAssistantService`, outside the tool loop's

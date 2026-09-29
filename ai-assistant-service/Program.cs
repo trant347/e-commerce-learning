@@ -1,7 +1,6 @@
 using ai_assistant_service.Auth;
 using ai_assistant_service.Configuration;
 using ai_assistant_service.Services;
-using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Mcp;
@@ -12,7 +11,6 @@ using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using Microsoft.Extensions.Options;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -81,15 +79,6 @@ builder.Services.AddCors(options =>
                    .AllowAnyMethod()
                    .AllowAnyHeader();
     });
-});
-
-builder.Services.AddHttpClient<IOllamaClient, OllamaClient>((sp, client) =>
-{
-    var ollama = sp.GetRequiredService<IOptions<OllamaOptions>>().Value;
-    var chatProfile = sp.GetRequiredService<TaskModelProfileCatalog>().GetRequired("chat");
-
-    client.BaseAddress = new Uri(ollama.BaseUrl!);
-    client.Timeout = TimeSpan.FromSeconds(chatProfile.TimeoutSeconds);
 });
 
 builder.Services.AddHttpClient<IBookingApiClient, BookingApiClient>((sp, client) =>

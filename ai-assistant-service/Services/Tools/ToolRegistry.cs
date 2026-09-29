@@ -35,7 +35,7 @@ public sealed class ToolRegistry
             StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>All registered tools — used to build the Ollama "tools" array.</summary>
+    /// <summary>All registered tools — used to build shared model tool definitions.</summary>
     public IReadOnlyCollection<IToolDefinition> All => _tools.Values.ToList();
 
     /// <summary>Look up a tool by the name the LLM returned in its tool_call.</summary>

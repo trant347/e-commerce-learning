@@ -14,7 +14,7 @@ public interface IToolDefinition
 
     /// <summary>
     /// JSON Schema object describing the tool's parameters.
-    /// Serialised directly into the Ollama /api/chat "tools" array.
+    /// Converted to a typed shared definition before provider serialization.
     /// </summary>
     object ParametersSchema { get; }
 

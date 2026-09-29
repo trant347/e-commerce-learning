@@ -184,8 +184,7 @@ public sealed class OllamaChatModelClient : IChatModelClient
                 : null);
     }
 
-    // Also used by the temporary legacy client until orchestration migrates.
-    internal static ChatModelToolCall? RecoverInlineCall(
+    private static ChatModelToolCall? RecoverInlineCall(
         string? content,
         IReadOnlySet<string> allowedNames,
         ISet<string> usedIds)

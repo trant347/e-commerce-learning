@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ai_assistant_service.Contracts;
+using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
 
@@ -7,11 +8,10 @@ namespace ai_assistant_service.Services;
 
 public sealed class AiAssistantService : IAiAssistantService
 {
-    private readonly IConfiguration _configuration;
-    private readonly IOllamaClient _ollamaClient;
+    private readonly ITaskChatModelResolver _modelResolver;
     private readonly ToolRegistry _toolRegistry;
     private readonly ILogger<AiAssistantService> _logger;
-    private readonly Lazy<IReadOnlyList<OllamaChatMessage>> _seededExamples;
+    private readonly AssistantPrompt _prompt;
 
     // To keep prompts concise, only include the last 2 messages from history (if any) as context for the model.
     private const int MaxChatMemorySize = 2;
@@ -20,21 +20,45 @@ public sealed class AiAssistantService : IAiAssistantService
     private const int MaxToolRounds = 5;
 
     public AiAssistantService(
-        IConfiguration configuration,
-        IOllamaClient ollamaClient,
+        AssistantPrompt prompt,
+        ITaskChatModelResolver modelResolver,
         ToolRegistry toolRegistry,
         ILogger<AiAssistantService> logger)
     {
-        _configuration = configuration;
-        _ollamaClient = ollamaClient;
+        _prompt = prompt;
+        _modelResolver = modelResolver;
         _toolRegistry = toolRegistry;
         _logger = logger;
-        _seededExamples = new Lazy<IReadOnlyList<OllamaChatMessage>>(LoadFewShotExamples);
     }
 
     public async Task<ChatResponse> ChatAsync(
         ChatRequest request,
         ToolExecutionContext executionContext,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var client = _modelResolver.Resolve("chat");
+        using var deadline = TaskModelRequestDeadline.Create(client.Profile, cancellationToken);
+        try
+        {
+            return await RunConversationAsync(request, executionContext, client, deadline.Token);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return FailureResponse(client.Profile, ChatModelFailureCategory.Timeout);
+        }
+        catch (ChatModelException exception)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return FailureResponse(client.Profile, exception.Category, exception.Metadata.HttpStatusCode);
+        }
+    }
+
+    private async Task<ChatResponse> RunConversationAsync(
+        ChatRequest request,
+        ToolExecutionContext executionContext,
+        ITaskChatModelClient client,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -43,49 +67,19 @@ public sealed class AiAssistantService : IAiAssistantService
             executionContext.AuthorizedScopes.Count,
             request.Message?.Length ?? 0);
 
-        var model = _configuration["AiModels:Tasks:chat:Model"] ?? "llama3.2:3b";
-        var systemPrompt = _configuration["PromptOptions:SystemPrompt"]
-            ?? "You are a TaskMaster marketplace assistant.";
-
-        _logger.LogInformation("Using model={Model}, systemPrompt length={SystemPromptLength}", 
-            model, systemPrompt.Length);
-
-        // Build the Ollama tools array from registered tools
+        var model = client.Profile.Model;
         var toolDefinitions = _toolRegistry.All
-            .Select(t => (object)new
-            {
-                type = "function",
-                function = new
-                {
-                    name = t.Name,
-                    description = t.Description,
-                    parameters = t.ParametersSchema
-                }
-            })
+            .Select(t => new ChatModelTool(
+                t.Name, t.Description, JsonSerializer.SerializeToElement(t.ParametersSchema)))
             .ToList();
 
         _logger.LogInformation("Registered {ToolCount} tools: {ToolNames}", 
             toolDefinitions.Count, 
             string.Join(", ", _toolRegistry.All.Select(t => t.Name)));
 
-        _logger.LogDebug("Tool schemas being sent to Ollama: {ToolSchemas}",
-            JsonSerializer.Serialize(toolDefinitions));
-
-        // Seed the conversation
-        var messages = new List<OllamaChatMessage>
-        {
-            new() { Role = "system", Content = systemPrompt }
-        };
-
-        // Append static few-shot examples (loaded once from PromptOptions:FewShotExamples).
-        // These teach the model the tool-calling channel and final-answer style without
-        // bloating the system prompt or polluting the user-visible chat history.
-        var examples = _seededExamples.Value;
-        if (examples.Count > 0)
-        {
-            messages.AddRange(examples);
-            _logger.LogDebug("Seeded {Count} few-shot example messages into the conversation", examples.Count);
-        }
+        var messages = new List<ChatModelMessage>(_prompt.Messages);
+        var usedCallIds = messages.SelectMany(message => message.ToolCalls ?? [])
+            .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
 
         // User-authored text the model saw in this request. Search filters must come from here,
         // never from seeded few-shot examples.
@@ -103,7 +97,7 @@ public sealed class AiAssistantService : IAiAssistantService
                 if (!string.IsNullOrWhiteSpace(h.Content) 
                     && (h.Role == "user" || h.Role == "assistant"))
                 {
-                    messages.Add(new OllamaChatMessage { Role = h.Role, Content = h.Content });
+                    messages.Add(new ChatModelMessage(h.Role, h.Content));
                     if (h.Role == "user")
                     {
                         userMessages.Add(h.Content);
@@ -112,10 +106,11 @@ public sealed class AiAssistantService : IAiAssistantService
             }
         }
 
-        messages.Add(new OllamaChatMessage { Role = "user", Content = request.Message });
+        messages.Add(new ChatModelMessage(ChatModelRoles.User, request.Message));
         var hadToolExecutionFailure = false;
         var executedToolNames = new List<string>();
-        var executedToolMessages = new List<OllamaChatMessage>();
+        var executedToolMessages = new List<ChatModelMessage>();
+        string? finalContent = null;
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)
@@ -123,13 +118,22 @@ public sealed class AiAssistantService : IAiAssistantService
             _logger.LogInformation("Starting tool-calling round {Round}/{MaxRounds}, message count={MessageCount}", 
                 round + 1, MaxToolRounds, messages.Count);
 
-            var assistantMsg = await _ollamaClient.ChatAsync(model, messages, toolDefinitions, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var response = await client.ChatAsync(messages, toolDefinitions, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var assistantMsg = response.Message;
+            if (assistantMsg.Role != ChatModelRoles.Assistant
+                || (assistantMsg.ToolCalls ?? []).Any(call => !usedCallIds.Add(call.Id)))
+            {
+                throw new ChatModelException(ChatModelFailureCategory.ProtocolError);
+            }
             messages.Add(assistantMsg);
 
             // No tool calls → model has produced its final answer
             if (assistantMsg.ToolCalls is not { Count: > 0 })
             {
                 _logger.LogInformation("No tool calls in round {Round}, ending loop with final answer", round + 1);
+                finalContent = assistantMsg.Content;
                 break;
             }
 
@@ -139,9 +143,10 @@ public sealed class AiAssistantService : IAiAssistantService
             // Execute each requested tool and feed results back
             foreach (var toolCall in assistantMsg.ToolCalls)
             {
-                var toolName = toolCall.Function.Name;
+                cancellationToken.ThrowIfCancellationRequested();
+                var toolName = toolCall.Name;
                 var args = SearchFilterGrounding.RemoveUngroundedFilters(
-                    toolName, toolCall.Function.Arguments, userMessages, out var removedFilters);
+                    toolName, toolCall.Arguments, userMessages, out var removedFilters);
 
                 if (removedFilters.Count > 0)
                 {
@@ -150,13 +155,7 @@ public sealed class AiAssistantService : IAiAssistantService
                         string.Join(", ", removedFilters));
                 }
 
-                _logger.LogInformation("Executing tool={ToolName} with args={Args}", 
-                    toolName, string.Join(", ", args.Select(a => $"{a.Key}={a.Value}")));
-
-                if (!executedToolNames.Contains(toolName, StringComparer.Ordinal))
-                {
-                    executedToolNames.Add(toolName);
-                }
+                _logger.LogInformation("Executing tool={ToolName}", toolName);
 
                 string result;
                 try
@@ -166,6 +165,12 @@ public sealed class AiAssistantService : IAiAssistantService
                         toolName,
                         args,
                         cancellationToken);
+                    if (!executedToolNames.Contains(toolName, StringComparer.Ordinal))
+                        executedToolNames.Add(toolName);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -178,26 +183,17 @@ public sealed class AiAssistantService : IAiAssistantService
                 _logger.LogInformation("Tool={ToolName} returned result length={ResultLength}", 
                     toolName, result?.Length ?? 0);
 
-                var toolMessage = new OllamaChatMessage
-                {
-                    Role    = "tool",
-                    Content = result
-                };
+                cancellationToken.ThrowIfCancellationRequested();
+                var toolMessage = new ChatModelMessage(ChatModelRoles.Tool, result, toolCallId: toolCall.Id);
                 messages.Add(toolMessage);
                 executedToolMessages.Add(toolMessage);
             }
         }
 
-        // The last assistant message with real content is the final answer.
-        // If the loop exhausted all rounds without a conclusive answer, say so explicitly.
+        // Seeded and historical answers are never a fallback for an exhausted live loop.
         const string defaultFallback = "I wasn't able to find a complete answer — the data may be unavailable or the request needs more detail. Please try rephrasing.";
 
-        var finalContent = messages
-            .LastOrDefault(m => m.Role == "assistant"
-                             && m.ToolCalls is not { Count: > 0 }
-                             && !string.IsNullOrWhiteSpace(m.Content))
-            ?.Content
-            ?? defaultFallback;
+        finalContent ??= defaultFallback;
 
         if (hadToolExecutionFailure && string.Equals(finalContent, defaultFallback, StringComparison.Ordinal))
         {
@@ -208,6 +204,7 @@ public sealed class AiAssistantService : IAiAssistantService
             finalContent.Length, messages.Count);
 
         var mentions = ExtractMentions(executedToolMessages);
+        cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInformation("Extracted {MentionCount} task master mentions from tool results", mentions.Count);
 
         return new ChatResponse
@@ -219,66 +216,31 @@ public sealed class AiAssistantService : IAiAssistantService
         };
     }
 
-    /// <summary>
-    /// Materialises the configured few-shot examples into the message shape the Ollama
-    /// chat endpoint expects. Each turn is mapped to an <see cref="OllamaChatMessage"/>;
-    /// assistant turns with <c>ToolCalls</c> demonstrate proper use of the native
-    /// tool-call channel, which is the format we want the live model to mimic.
-    /// </summary>
-    private IReadOnlyList<OllamaChatMessage> LoadFewShotExamples()
+    private ChatResponse FailureResponse(
+        TaskModelProfile profile, ChatModelFailureCategory category, int? httpStatusCode = null)
     {
-        var examples = _configuration
-            .GetSection("PromptOptions:FewShotExamples")
-            .Get<List<FewShotExample>>() ?? new List<FewShotExample>();
-
-        var seeded = new List<OllamaChatMessage>();
-        foreach (var example in examples)
+        _logger.LogWarning(
+            "Chat failed for task={TaskId}, provider={Provider}, model={Model}, category={Category}, status={Status}",
+            profile.TaskId, profile.Provider, profile.Model, category, httpStatusCode);
+        var answer = category switch
         {
-            if (example.Turns is not { Count: > 0 }) continue;
-
-            foreach (var turn in example.Turns)
-            {
-                if (string.IsNullOrWhiteSpace(turn.Role)) continue;
-
-                var msg = new OllamaChatMessage
-                {
-                    Role = turn.Role,
-                    Content = turn.Content
-                };
-
-                if (turn.ToolCalls is { Count: > 0 })
-                {
-                    msg.ToolCalls = turn.ToolCalls
-                        .Where(tc => !string.IsNullOrWhiteSpace(tc.Name))
-                        .Select(tc => new OllamaToolCall
-                        {
-                            Function = new OllamaToolCallFunction
-                            {
-                                Name = tc.Name,
-                                Arguments = tc.Arguments.ToDictionary(
-                                    kvp => kvp.Key,
-                                    kvp => JsonSerializer.SerializeToElement(kvp.Value))
-                            }
-                        })
-                        .ToList();
-                }
-
-                seeded.Add(msg);
-            }
-
-            _logger.LogInformation(
-                "Loaded few-shot example '{Description}' with {TurnCount} turns",
-                example.Description ?? "(unnamed)", example.Turns.Count);
-        }
-
-        return seeded;
+            ChatModelFailureCategory.LocalModelUnavailable =>
+                "The AI model is still being set up and isn't available yet. Please try again in a few minutes.",
+            ChatModelFailureCategory.Timeout => "The AI model took too long to respond. Please try again.",
+            ChatModelFailureCategory.ProviderUnavailable when httpStatusCode is null =>
+                "I could not reach the AI model right now. Please try again shortly.",
+            ChatModelFailureCategory.ProtocolError =>
+                "The AI assistant returned an invalid response. Please try again.",
+            _ => "The AI model ran into a problem answering your request. Please try again shortly."
+        };
+        return new ChatResponse { Answer = answer, Model = profile.Model };
     }
 
     /// <summary>
     /// Scans tool-role messages for JSON arrays of task masters and extracts id+name pairs.
     /// The product-service returns a JSON array of TaskMaster objects, each with "id" and "name".
     /// </summary>
-    private List<TaskMasterMention> ExtractMentions(IEnumerable<OllamaChatMessage> messages)
+    private List<TaskMasterMention> ExtractMentions(IEnumerable<ChatModelMessage> messages)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mentions = new List<TaskMasterMention>();

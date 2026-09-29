@@ -1,3 +1,4 @@
+using ai_assistant_service.Services;
 using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
@@ -23,6 +24,12 @@ public static class AiModelServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<AiModelsOptions>, AiModelsOptionsValidator>();
         services.AddSingleton<TaskModelProfileCatalog>();
         services.AddSingleton<ITaskChatModelResolver, TaskChatModelResolver>();
+
+        services.AddOptions<PromptOptions>()
+            .Bind(configuration.GetSection(PromptOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<PromptOptions>, PromptOptionsValidator>();
+        services.AddSingleton<AssistantPrompt>();
 
         services.AddHttpClient<OllamaChatModelClient>((provider, client) =>
         {
