@@ -22,39 +22,6 @@ public sealed class OllamaClient : IOllamaClient
         _logger = logger;
     }
 
-    // ── Legacy single-turn generate ──────────────────────────────────────────
-    public async Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Calling Ollama /api/generate with model={Model}, promptLength={PromptLength}", 
-            model, userPrompt?.Length ?? 0);
-
-        var payload = new OllamaGenerateRequest
-        {
-            Model = model,
-            Prompt = userPrompt,
-            System = systemPrompt,
-            Stream = false
-        };
-
-        try
-        {
-            using var response = await _httpClient.PostAsJsonAsync("/api/generate", payload, cancellationToken);
-            await EnsureSuccessAsync(response, cancellationToken);
-            var body = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: cancellationToken);
-            var result = body?.Response ?? "No response from Ollama.";
-
-            _logger.LogInformation("Ollama /api/generate completed successfully, responseLength={ResponseLength}", 
-                result.Length);
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error calling Ollama generate API");
-            return DescribeFailure(ex, model, cancellationToken);
-        }
-    }
-
     // ── Multi-turn chat with tool-calling ────────────────────────────────────
     public async Task<OllamaChatMessage> ChatAsync(
         string model,
@@ -86,6 +53,27 @@ public sealed class OllamaClient : IOllamaClient
 
             var message = body?.Message ?? new OllamaChatMessage { Role = "assistant", Content = "No response from Ollama." };
 
+            if (message.ToolCalls is not { Count: > 0 })
+            {
+                var allowedNames = (tools ?? []).Select(tool => JsonSerializer.SerializeToElement(tool))
+                    .Select(tool => tool.GetProperty("function").GetProperty("name").GetString()!)
+                    .ToHashSet(StringComparer.Ordinal);
+                var inline = OllamaChatModelClient.RecoverInlineCall(
+                    message.Content, allowedNames, new HashSet<string>(StringComparer.Ordinal));
+                if (inline is not null)
+                {
+                    message.Content = null;
+                    message.ToolCalls = [new OllamaToolCall
+                    {
+                        Function = new OllamaToolCallFunction
+                        {
+                            Name = inline.Name,
+                            Arguments = inline.Arguments.ToDictionary(pair => pair.Key, pair => pair.Value)
+                        }
+                    }];
+                }
+            }
+
             _logger.LogInformation("Ollama /api/chat completed successfully: role={Role}, has_tool_calls={HasToolCalls}, contentLength={ContentLength}",
                 message.Role, message.ToolCalls?.Count > 0, message.Content?.Length ?? 0);
 
@@ -109,7 +97,7 @@ public sealed class OllamaClient : IOllamaClient
 
     /// <summary>
     /// Maps a failed Ollama call to a user-facing message. Ollama answers 404 on
-    /// /api/chat and /api/generate when the requested model has not been pulled,
+    /// /api/chat when the requested model has not been pulled,
     /// which happens while <c>ollama-init</c> is still downloading it after a fresh start.
     /// </summary>
     private string DescribeFailure(Exception ex, string model, CancellationToken cancellationToken)
@@ -149,27 +137,6 @@ public sealed class OllamaClient : IOllamaClient
     }
 
     // ── Private request/response models ─────────────────────────────────────
-
-    private sealed class OllamaGenerateRequest
-    {
-        [JsonPropertyName("model")]
-        public string Model { get; set; } = string.Empty;
-
-        [JsonPropertyName("prompt")]
-        public string Prompt { get; set; } = string.Empty;
-
-        [JsonPropertyName("system")]
-        public string System { get; set; } = string.Empty;
-
-        [JsonPropertyName("stream")]
-        public bool Stream { get; set; }
-    }
-
-    private sealed class OllamaGenerateResponse
-    {
-        [JsonPropertyName("response")]
-        public string Response { get; set; } = string.Empty;
-    }
 
     private sealed class OllamaChatRequest
     {

@@ -394,6 +394,20 @@ The legacy `GenerateAsync` method is not used by the current orchestration. Do
 not add it to the new interface. Remove it only after confirming there are no
 remaining callers and migrating its tests.
 
+**Task 4 implementation:** `OllamaChatModelClient` is registered with the task
+resolver; the existing assistant remains on the legacy chat client until task 5.
+The adapter uses the native `/api/chat` endpoint, `stream: false`, `think: false`,
+and `options.num_predict` for `ChatModelRequest.MaxOutputTokens`. Its dedicated
+HTTP client has an infinite timeout so the task-bound cancellation budget is
+authoritative. It never retries or fabricates assistant messages on failure.
+
+Ollama wire messages do not require OpenRouter's `tool_call_id`. The adapter
+retains stable IDs internally and resolves each result's ID to the originating
+call's name when writing Ollama's `tool_name`. It rejects an unresolvable result
+before HTTP rather than guessing the association. See the native
+[chat API](https://docs.ollama.com/api/chat) and
+[tool-calling examples](https://docs.ollama.com/capabilities/tool-calling).
+
 ### Tool-call identity
 
 Every internal tool call must have a non-empty ID.

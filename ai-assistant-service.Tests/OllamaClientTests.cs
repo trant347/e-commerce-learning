@@ -154,13 +154,17 @@ public class OllamaClientTests
     }
 
     [Fact]
-    public async Task GenerateAsync_OnModelNotFound_SaysModelIsStillBeingSetUp()
+    public async Task ChatAsync_LegacyPathRecoversInlineCallsBeforeOrchestration()
     {
-        var (client, _) = BuildClient(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var (client, _) = BuildClient(StubAssistantResponse(
+            """{"name":"get_categories","parameters":{}}"""));
 
-        var result = await client.GenerateAsync("qwen3:8b", "system", "hello", CancellationToken.None);
+        var result = await client.ChatAsync("qwen3:8b", [UserMsg],
+            [new { type = "function", function = new { name = "get_categories" } }],
+            CancellationToken.None);
 
-        Assert.Equal(OllamaClient.ModelUnavailableMessage, result);
+        Assert.Null(result.Content);
+        Assert.Equal("get_categories", Assert.Single(result.ToolCalls!).Function.Name);
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────

@@ -5,9 +5,6 @@ namespace ai_assistant_service.Services.Contracts;
 
 public interface IOllamaClient
 {
-    /// <summary>Legacy single-turn generate (kept for compatibility).</summary>
-    Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken cancellationToken);
-
     /// <summary>
     /// Multi-turn chat with optional tool definitions.
     /// Returns the assistant message; tool_calls are populated when the model wants to invoke a tool.

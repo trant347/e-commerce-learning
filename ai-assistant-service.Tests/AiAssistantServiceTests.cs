@@ -156,40 +156,6 @@ public class AiAssistantServiceTests
     }
 
     [Fact]
-    public async Task ChatAsync_ParsesInlineToolCallFromContent_WhenModelEmitsRawJson()
-    {
-        // Some small models put the tool call into `content` as plain JSON
-        // instead of using the native tool_calls field. Make sure we recover.
-        var fakeTool = new RecordingTool("get_categories", "[\"Pet Care\"]");
-        var registry = new ToolRegistry(new IToolDefinition[] { fakeTool });
-
-        var inlineCall = new OllamaChatMessage
-        {
-            Role = "assistant",
-            Content = "{\"name\": \"get_categories\", \"parameters\": {}}"
-        };
-        var finalMsg = new OllamaChatMessage { Role = "assistant", Content = "Pet Care is available." };
-
-        var ollama = new Mock<IOllamaClient>();
-        ollama.SetupSequence(c => c.ChatAsync(
-                It.IsAny<string>(),
-                It.IsAny<IReadOnlyList<OllamaChatMessage>>(),
-                It.IsAny<IReadOnlyList<object>?>(),
-                It.IsAny<CancellationToken>()))
-              .ReturnsAsync(inlineCall)
-              .ReturnsAsync(finalMsg);
-
-        var svc = new AiAssistantService(
-            BuildConfig(), ollama.Object, registry, NullLogger<AiAssistantService>.Instance);
-
-        var resp = await svc.ChatAsync(
-            new ChatRequest { Message = "what categories?" }, TestContext(), CancellationToken.None);
-
-        Assert.Equal("Pet Care is available.", resp.Answer);
-        Assert.Equal(1, fakeTool.CallCount);
-    }
-
-    [Fact]
     public async Task ChatAsync_SendsSystemPromptAsFirstMessage()
     {
         IReadOnlyList<OllamaChatMessage>? capturedMessages = null;

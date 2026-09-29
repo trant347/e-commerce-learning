@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **Planned; implementation tasks are not yet marked complete.**
+Status: **In progress; tasks 1-4 are complete. Provider-neutral orchestration and OpenRouter remain pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -140,7 +140,7 @@ Paid evaluation and production deployment require separate operator approval.
     full assistant suite passes 81 tests, and `docker compose config --quiet`
     renders successfully with a placeholder JWT secret.
 
-- [ ] **4. Adapt Ollama to the shared contract.**
+- [x] **4. Adapt Ollama to the shared contract.**
   Depends on 2-3. Implement `OllamaChatModelClient`, preserving `/api/chat`,
   `think: false`, optional tools, and zero automatic retries. Generate missing
   call IDs. Move inline-call recovery into the adapter and validate tool names
@@ -150,6 +150,39 @@ Paid evaluation and production deployment require separate operator approval.
   relevant tests rather than dropping failure coverage.
   **Done when:** native and inline calls, IDs, timeouts, unavailable models,
   malformed responses, and connection failures have adapter tests.
+
+  **Implemented 2026-09-28:**
+
+  - Registered `OllamaChatModelClient` independently with the task resolver.
+    Its HTTP client has no separate timeout; the bound task supplies the round
+    cancellation budget. Calls use `/api/chat`, `stream: false`, `think: false`,
+    optional native tool definitions, and `options.num_predict` for the profile's
+    output limit. No automatic retries are added.
+  - Native and recovered inline calls are checked against the request's tool
+    definitions. Missing IDs are generated; supplied IDs are retained and checked
+    for collisions with other calls and conversation history. Parsed arguments
+    retain their JSON types and survive response-document disposal.
+  - Follow-up requests translate internal result IDs to Ollama's `tool_name`
+    using preceding calls, preserving message order instead of guessing which
+    result belongs to which call. Provider wire DTOs remain private to the adapter.
+  - Malformed/empty/incomplete output, invalid arguments, unavailable models,
+    HTTP and transport failures produce safe typed exceptions rather than
+    assistant text. Caller cancellation propagates. Diagnostic metadata retains
+    status and requested model, not provider response bodies or inner exceptions.
+  - Removed unused `GenerateAsync` and its wire DTOs; model-not-found coverage
+    remains in both the legacy chat tests and the new adapter status tests.
+    Inline recovery moved out of `AiAssistantService` and is shared by the new
+    adapter and the temporary legacy client. Its orchestration test moved to
+    the provider boundary, with compatibility coverage for the legacy path.
+  - Capturing-handler tests exercise actual serialization/parsing, multi-call
+    follow-up requests, inline formats, invalid output, cancellation, no-retry
+    failures, and real DI resolution with two synthetic task profiles.
+    No Ollama server or paid calls are needed.
+
+  **Transition boundary:** The running assistant still uses `IOllamaClient`
+  until task 5 migrates its messages and seeded examples. The new adapter already
+  works through the resolver; legacy error presentation and log cleanup remain
+  in task 6. OpenRouter remains unavailable until task 7.
 
 - [ ] **5. Migrate orchestration and few-shot examples.**
   Depends on 2-4. Have `AiAssistantService` resolve the server-owned `chat` ID once
