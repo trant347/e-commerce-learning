@@ -43,7 +43,7 @@ public sealed class AiAssistantService : IAiAssistantService
             executionContext.AuthorizedScopes.Count,
             request.Message?.Length ?? 0);
 
-        var model = _configuration["Ollama:Model"] ?? "llama3.2:3b";
+        var model = _configuration["AiModels:Tasks:chat:Model"] ?? "llama3.2:3b";
         var systemPrompt = _configuration["PromptOptions:SystemPrompt"]
             ?? "You are a TaskMaster marketplace assistant.";
 

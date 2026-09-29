@@ -1,5 +1,7 @@
 using ai_assistant_service.Auth;
+using ai_assistant_service.Configuration;
 using ai_assistant_service.Services;
+using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Mcp;
@@ -10,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Microsoft.Extensions.Options;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -68,6 +71,7 @@ builder.Services.AddLogging();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddAiModelRouting(builder.Configuration);
 
 builder.Services.AddCors(options =>
 {
@@ -81,12 +85,11 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddHttpClient<IOllamaClient, OllamaClient>((sp, client) =>
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = config["Ollama:BaseUrl"] ?? "http://localhost:11434";
-    var timeoutSeconds = int.TryParse(config["Ollama:TimeoutSeconds"], out var value) ? value : 60;
+    var ollama = sp.GetRequiredService<IOptions<OllamaOptions>>().Value;
+    var chatProfile = sp.GetRequiredService<TaskModelProfileCatalog>().GetRequired("chat");
 
-    client.BaseAddress = new Uri(baseUrl);
-    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+    client.BaseAddress = new Uri(ollama.BaseUrl!);
+    client.Timeout = TimeSpan.FromSeconds(chatProfile.TimeoutSeconds);
 });
 
 builder.Services.AddHttpClient<IBookingApiClient, BookingApiClient>((sp, client) =>

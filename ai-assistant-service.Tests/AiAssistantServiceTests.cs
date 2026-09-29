@@ -18,7 +18,7 @@ public class AiAssistantServiceTests
     {
         var values = new Dictionary<string, string?>
         {
-            ["Ollama:Model"]               = model,
+            ["AiModels:Tasks:chat:Model"]  = model,
             ["PromptOptions:SystemPrompt"] = "test system prompt"
         };
 

@@ -34,7 +34,7 @@ Paid evaluation and production deployment require separate operator approval.
   **Done when:** affected files and callers are accounted for, and unrelated
   failures are distinguishable from regressions introduced by the feature.
 
-  **Baseline recorded 2026-09-28:**
+  **Baseline recorded 2026-09-28 (historical pre-migration snapshot):**
 
   - `AiAssistantService` is the only production caller of `IOllamaClient`. It
     calls `ChatAsync` for every model round and directly constructs, mutates,
@@ -102,7 +102,7 @@ Paid evaluation and production deployment require separate operator approval.
     Existing Ollama runtime contracts, registration, configuration, and callers
     are unchanged.
 
-- [ ] **3. Add the task map, resolver, and isolated timeout budgets.**
+- [x] **3. Add the task map, resolver, and isolated timeout budgets.**
   Depends on 2. Add strongly typed `AiModels:Tasks` and Ollama options. Require a
   complete `chat` profile; permit and validate additional task IDs. Migrate
   `Ollama:Model` and `Ollama:TimeoutSeconds`, including existing Compose mappings,
@@ -117,6 +117,28 @@ Paid evaluation and production deployment require separate operator approval.
   fail startup, the default chat mapping remains Ollama, same-provider synthetic
   tasks select independent models/limits, and cancellation/deadline tests pass.
   Keep OpenRouter unavailable until its adapter and options are wired in task 7.
+
+  **Implemented 2026-09-28:**
+
+  - Added strongly typed `AiModels:Tasks` and Ollama connection options with
+    startup validation for the required `chat` profile, every additional
+    profile, canonical task IDs, supported providers, models, positive budgets,
+    budget ordering, output limits, and the Ollama base URL. OpenRouter profiles
+    fail validation explicitly until task 7 wires that provider.
+  - Added an immutable startup profile catalog, independently registered
+    provider-client registrations, deterministic task resolver, and task-bound
+    clients. Unknown tasks fail before adapter execution with no fallback to
+    `chat`; same-provider tasks keep independent model and output-limit values.
+  - Added linked per-round cancellation that maps internal expiry to a typed
+    timeout while preserving caller cancellation, plus a separate linked
+    end-to-end request deadline for orchestration to adopt in task 5.
+  - Migrated application, legacy caller, tests, and base Compose settings from
+    `Ollama:Model`/`Ollama:TimeoutSeconds` to `AiModels:Tasks:chat`. Appsettings
+    retains 60/300-second round/request budgets; local Compose retains a
+    600-second round budget and uses the specified 3000-second request budget.
+  - Focused validation, isolation, unknown-task, and deadline tests pass. The
+    full assistant suite passes 81 tests, and `docker compose config --quiet`
+    renders successfully with a placeholder JWT secret.
 
 - [ ] **4. Adapt Ollama to the shared contract.**
   Depends on 2-3. Implement `OllamaChatModelClient`, preserving `/api/chat`,

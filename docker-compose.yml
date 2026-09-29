@@ -313,8 +313,11 @@ services:
     image: ai-assistant-service:latest
     environment:
     - Ollama__BaseUrl=http://ollama:11434
-    - Ollama__Model=qwen3:8b
-    - Ollama__TimeoutSeconds=600
+    - AiModels__Tasks__chat__Provider=Ollama
+    - AiModels__Tasks__chat__Model=qwen3:8b
+    - AiModels__Tasks__chat__TimeoutSeconds=600
+    - AiModels__Tasks__chat__RequestTimeoutSeconds=3000
+    - AiModels__Tasks__chat__MaxOutputTokens=1024
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
     - Redis__ConnectionString=redis:6379
