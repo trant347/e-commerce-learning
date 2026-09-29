@@ -27,12 +27,49 @@ Paid evaluation and production deployment require separate operator approval.
 
 ## Phase 1: Provider-neutral assistant, with Ollama still working
 
-- [ ] **1. Establish the baseline and migration inventory.**
+- [x] **1. Establish the baseline and migration inventory.**
   Locate all callers and tests of `IOllamaClient`, Ollama message types, and
   `GenerateAsync`; inspect model/timeout settings and seeded examples.
   Run the existing assistant tests and record any pre-existing failures.
   **Done when:** affected files and callers are accounted for, and unrelated
   failures are distinguishable from regressions introduced by the feature.
+
+  **Baseline recorded 2026-09-28:**
+
+  - `AiAssistantService` is the only production caller of `IOllamaClient`. It
+    calls `ChatAsync` for every model round and directly constructs, mutates,
+    and inspects `OllamaChatMessage`, `OllamaToolCall`, and
+    `OllamaToolCallFunction`. It also owns inline tool-call recovery, tool
+    definition projection, tool-result messages, and mention extraction over
+    Ollama-named messages.
+  - `OllamaClient` is the only implementation and `Program.cs` contains its
+    only production registration. `GenerateAsync` has no production caller;
+    its sole caller is the model-not-found regression test in
+    `OllamaClientTests`, so its failure coverage must be migrated before the
+    legacy method is removed.
+  - `AiAssistantServiceTests` is the only suite mocking `IOllamaClient` or
+    directly assembling Ollama tool-call messages. `OllamaClientTests` is the
+    only adapter/wire-format suite using the Ollama message types directly.
+  - The model is read by `AiAssistantService` from `Ollama:Model`, with a
+    `llama3.2:3b` code fallback. The HTTP base URL and timeout are read during
+    client registration from `Ollama:BaseUrl` and `Ollama:TimeoutSeconds`, with
+    `http://localhost:11434` and 60-second code fallbacks.
+  - `appsettings.json` configures `qwen3:8b`, a 60-second timeout, and
+    `http://host.docker.internal:11434`. Base Compose overrides the URL for the
+    `ollama` service, keeps `qwen3:8b`, and raises the timeout to 600 seconds;
+    `ollama-init` pulls that same model. `appsettings.Development.json` changes
+    logging only.
+  - The single configured few-shot example is bound through
+    `FewShotExample`/`FewShotTurn`/`FewShotToolCall`, then materialized by
+    `AiAssistantService` into Ollama messages. Its assistant tool call and
+    following tool result currently have no call/result IDs, which task 5 must
+    migrate and validate.
+  - Baseline command:
+    `dotnet test ai-assistant-service.Tests\ai-assistant-service.Tests.csproj --nologo --verbosity normal`.
+    Result: 59 passed, 0 failed, 0 skipped. The pre-existing build warnings are
+    NU1902 for `OpenTelemetry.Exporter.OpenTelemetryProtocol` 1.11.2
+    (GHSA-4625-4j76-fww9) and CS8601 at
+    `Services\Clients\OllamaClient.cs:34`; neither is a test failure.
 
 - [ ] **2. Introduce shared chat contracts and typed failures.**
   Depends on 1. Add `IChatModelClient`, typed messages, tool definitions, calls,
