@@ -228,6 +228,153 @@ The current chat task retains the existing tool set and authorization. Future
 structured category decisions or hiring actions require their own contracts
 and capability validation; they are not implemented by this foundation.
 
+### Architecture diagrams
+
+The following class diagram shows the provider-neutral boundary. Configuration
+is validated and snapshotted once, the resolver binds a task profile to an
+independently registered provider adapter, and orchestration uses only the
+task-bound interface.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class AiModelsOptions {
+        +Tasks
+    }
+
+    class TaskModelProfileCatalog {
+        +Profiles
+        +TryGet(taskId)
+        +GetRequired(taskId)
+    }
+
+    class TaskModelProfile {
+        +TaskId
+        +Provider
+        +Model
+        +TimeoutSeconds
+        +RequestTimeoutSeconds
+        +MaxOutputTokens
+    }
+
+    class ITaskChatModelResolver {
+        <<interface>>
+        +Resolve(taskId) ITaskChatModelClient
+    }
+
+    class TaskChatModelResolver {
+        -catalog
+        -providerClients
+        +Resolve(taskId) ITaskChatModelClient
+    }
+
+    class ITaskChatModelClient {
+        <<interface>>
+        +Profile TaskModelProfile
+        +ChatAsync(messages, tools, cancellationToken)
+    }
+
+    class TaskChatModelClient {
+        +Profile TaskModelProfile
+        -providerClient
+        +ChatAsync(messages, tools, cancellationToken)
+    }
+
+    class IChatModelClient {
+        <<interface>>
+        +ChatAsync(request, cancellationToken)
+    }
+
+    class OllamaChatModelClient
+    class OpenRouterChatModelClient
+
+    class ChatModelRequest {
+        +Model
+        +Messages
+        +Tools
+        +MaxOutputTokens
+    }
+
+    class ChatModelResponse {
+        +Message
+        +ProviderRequestId
+        +ResolvedModel
+        +Usage
+    }
+
+    class AiAssistantService
+    class TaskModelRequestDeadline
+
+    AiModelsOptions --> TaskModelProfileCatalog : validated and snapshotted
+    TaskModelProfileCatalog "1" o-- "*" TaskModelProfile
+    ITaskChatModelResolver <|.. TaskChatModelResolver
+    TaskChatModelResolver --> TaskModelProfileCatalog
+    TaskChatModelResolver --> IChatModelClient : selects by provider
+    ITaskChatModelClient <|.. TaskChatModelClient
+    TaskChatModelClient --> TaskModelProfile
+    TaskChatModelClient --> IChatModelClient
+    IChatModelClient <|.. OllamaChatModelClient
+    IChatModelClient <|.. OpenRouterChatModelClient
+    IChatModelClient ..> ChatModelRequest
+    IChatModelClient ..> ChatModelResponse
+    AiAssistantService --> ITaskChatModelResolver : resolves chat once
+    AiAssistantService --> ITaskChatModelClient : retains for request
+    AiAssistantService --> TaskModelRequestDeadline
+```
+
+The request flow uses one task selection and one end-to-end deadline. Each model
+round receives a smaller linked deadline; retries remain inside that same round
+budget. Tool execution returns to orchestration and is never restarted by an
+adapter retry.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Browser
+    participant Controller as AiAssistantController
+    participant Assistant as AiAssistantService
+    participant Resolver as ITaskChatModelResolver
+    participant TaskClient as ITaskChatModelClient
+    participant Adapter as IChatModelClient
+    participant Provider as Ollama / OpenRouter
+    participant Tools as ToolRegistry
+
+    Browser->>Controller: POST chat request
+    Controller->>Assistant: ChatAsync(request, executionContext, callerToken)
+    Assistant->>Resolver: Resolve("chat")
+    Resolver-->>Assistant: task-bound client + immutable profile
+    Note over Assistant: Create one request-wide deadline<br/>from RequestTimeoutSeconds
+
+    loop Up to five model/tool rounds
+        Assistant->>TaskClient: ChatAsync(messages, tools, requestToken)
+        Note over TaskClient: Link request token with one<br/>TimeoutSeconds round budget
+        TaskClient->>Adapter: ChatModelRequest(profile model and output limit)
+
+        opt Provider permits a bounded retry
+            Adapter->>Provider: Chat completion attempt
+            Provider-->>Adapter: Retryable failure
+            Adapter->>Provider: Retry same model request<br/>within the same round budget
+        end
+
+        Adapter->>Provider: Chat completion request
+        Provider-->>Adapter: Assistant message or tool calls
+        Adapter-->>TaskClient: ChatModelResponse
+        TaskClient-->>Assistant: ChatModelResponse
+
+        alt Assistant requested tools
+            loop Calls execute sequentially
+                Assistant->>Tools: ExecuteAsync(context, name, arguments)
+                Tools-->>Assistant: Result with matching tool-call ID
+            end
+            Note over Assistant: Append assistant calls and tool results,<br/>then begin the next model round
+        else Final assistant content
+            Assistant-->>Controller: ChatResponse
+            Controller-->>Browser: HTTP 200 response
+        end
+    end
+```
+
 ### Implementations
 
 Implement:
