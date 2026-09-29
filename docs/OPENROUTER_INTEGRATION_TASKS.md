@@ -71,7 +71,7 @@ Paid evaluation and production deployment require separate operator approval.
     (GHSA-4625-4j76-fww9) and CS8601 at
     `Services\Clients\OllamaClient.cs:34`; neither is a test failure.
 
-- [ ] **2. Introduce shared chat contracts and typed failures.**
+- [x] **2. Introduce shared chat contracts and typed failures.**
   Depends on 1. Add `IChatModelClient`, typed messages, tool definitions, calls,
   results, response metadata, usage types, and per-request output limits from
   spec Section 3. Add `ITaskChatModelResolver`, `ITaskChatModelClient`, and the
@@ -80,6 +80,27 @@ Paid evaluation and production deployment require separate operator approval.
   failure categories supporting Section 7 without raw payloads in exceptions.
   **Done when:** contracts express multiple calls with matching result IDs,
   typed schema/arguments, requested versus resolved models, and safe failures.
+
+  **Implemented 2026-09-28:**
+
+  - Added immutable provider-neutral request, response, message, tool,
+    tool-call, usage, task-profile, resolver, and client contracts under
+    `Services\Contracts`. Inputs are snapshotted so callers cannot mutate an
+    in-flight contract through retained lists or dictionaries.
+  - Tool schemas and tool-call arguments require JSON objects and clone retained
+    `JsonElement` values, keeping them valid after source documents are disposed.
+    Messages represent multiple stable call IDs and matching tool-result IDs;
+    whole-conversation duplicate/dangling-pair validation remains in task 5.
+  - Added semantic failure categories and allowlisted diagnostic metadata
+    without arbitrary provider messages, response bodies, or retry policy.
+    Provider status mapping, retry decisions, and presentation remain assigned
+    to tasks 4, 6, and 8.
+  - Added focused contract tests covering JSON lifetime, typed scalar argument
+    values, immutable snapshots/profiles, intrinsic invalid states, multiple
+    calls/results, requested versus resolved models, usage metadata, and every
+    failure category. The full assistant suite passes 80 tests with no failures.
+    Existing Ollama runtime contracts, registration, configuration, and callers
+    are unchanged.
 
 - [ ] **3. Add the task map, resolver, and isolated timeout budgets.**
   Depends on 2. Add strongly typed `AiModels:Tasks` and Ollama options. Require a
