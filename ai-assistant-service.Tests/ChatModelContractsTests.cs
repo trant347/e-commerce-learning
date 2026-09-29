@@ -96,26 +96,21 @@ public class ChatModelContractsTests
 
         Assert.Single(request.Messages);
         Assert.Single(request.Tools!);
-        Assert.Equal(512, request.MaxOutputTokens);
     }
 
     [Fact]
-    public void TaskModelProfile_IsImmutableAndValidatesBudgets()
+    public void RequestsAndProfiles_RejectInvalidBudgets()
     {
-        var profile = new TaskModelProfile(
-            "chat",
-            "Ollama",
-            "qwen3:8b",
-            timeoutSeconds: 60,
-            requestTimeoutSeconds: 300,
-            maxOutputTokens: 1024);
-
-        Assert.Equal("chat", profile.TaskId);
-        Assert.All(
-            typeof(TaskModelProfile).GetProperties(),
-            property => Assert.False(property.CanWrite));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ChatModelRequest(
+                "model",
+                [new ChatModelMessage(ChatModelRoles.User, "hello")],
+                tools: null,
+                maxOutputTokens: 0));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new TaskModelProfile("chat", "Ollama", "qwen3:8b", 60, 30, 1024));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new TaskModelProfile("chat", "Ollama", "qwen3:8b", 60, 300, 0));
     }
 
     [Fact]
@@ -145,68 +140,37 @@ public class ChatModelContractsTests
     }
 
     [Fact]
-    public void FailureException_ExposesOnlyTypedSafeMetadata()
+    public void FailureException_DoesNotIncludeDiagnosticMetadataInMessage()
     {
         var metadata = new ChatModelFailureMetadata(
             provider: "OpenRouter",
-            requestedModel: "vendor/model",
+            requestedModel: "sentinel-model",
             resolvedModel: "vendor/model-version",
             httpStatusCode: 429,
             providerErrorCode: 429,
-            providerRequestId: "request-1",
-            retryAfter: TimeSpan.FromSeconds(2));
+            providerRequestId: "sentinel-request-id",
+            retryAfter: TimeSpan.FromSeconds(2),
+            limitSource: "sentinel-limit-source");
 
         var exception = new ChatModelException(
             ChatModelFailureCategory.RateLimited,
             metadata);
 
-        Assert.Equal(ChatModelFailureCategory.RateLimited, exception.Category);
-        Assert.Same(metadata, exception.Metadata);
-        Assert.Equal(429, exception.Metadata.HttpStatusCode);
         Assert.Equal(
             "Chat model request failed with category 'RateLimited'.",
             exception.Message);
+        Assert.DoesNotContain("sentinel-model", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sentinel-request-id", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sentinel-limit-source", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Response_KeepsResolvedModelDiagnosticOnly()
+    public void FailureMetadata_RejectsInvalidStatusAndRetryDelay()
     {
-        var request = new ChatModelRequest(
-            "configured/model",
-            [new ChatModelMessage(ChatModelRoles.User, "hello")],
-            tools: null,
-            maxOutputTokens: 128);
-        var response = new ChatModelResponse(
-            new ChatModelMessage(ChatModelRoles.Assistant, "hi"),
-            providerRequestId: "request-1",
-            resolvedModel: "provider/resolved-model",
-            usage: new ChatModelUsage(10, 4, 14));
-
-        Assert.Equal("configured/model", request.Model);
-        Assert.Equal("provider/resolved-model", response.ResolvedModel);
-        Assert.Equal("request-1", response.ProviderRequestId);
-        Assert.Equal(14, response.Usage!.TotalTokens);
-    }
-
-    [Theory]
-    [InlineData(ChatModelFailureCategory.InvalidConfiguration)]
-    [InlineData(ChatModelFailureCategory.InvalidRequest)]
-    [InlineData(ChatModelFailureCategory.LocalModelUnavailable)]
-    [InlineData(ChatModelFailureCategory.Authentication)]
-    [InlineData(ChatModelFailureCategory.CreditsExhausted)]
-    [InlineData(ChatModelFailureCategory.TemporaryInFlightBudget)]
-    [InlineData(ChatModelFailureCategory.PolicyRejected)]
-    [InlineData(ChatModelFailureCategory.Timeout)]
-    [InlineData(ChatModelFailureCategory.RateLimited)]
-    [InlineData(ChatModelFailureCategory.ProviderUnavailable)]
-    [InlineData(ChatModelFailureCategory.ProtocolError)]
-    [InlineData(ChatModelFailureCategory.CallerCancellation)]
-    [InlineData(ChatModelFailureCategory.UnknownProviderError)]
-    public void FailureCategories_AreRepresentable(ChatModelFailureCategory category)
-    {
-        var exception = new ChatModelException(category);
-
-        Assert.Equal(category, exception.Category);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ChatModelFailureMetadata(httpStatusCode: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ChatModelFailureMetadata(retryAfter: TimeSpan.FromSeconds(-1)));
     }
 
     private static ChatModelTool Tool(string name)

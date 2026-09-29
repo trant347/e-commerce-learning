@@ -96,9 +96,9 @@ Paid evaluation and production deployment require separate operator approval.
     Provider status mapping, retry decisions, and presentation remain assigned
     to tasks 4, 6, and 8.
   - Added focused contract tests covering JSON lifetime, typed scalar argument
-    values, immutable snapshots/profiles, intrinsic invalid states, multiple
-    calls/results, requested versus resolved models, usage metadata, and every
-    failure category. The full assistant suite passes 80 tests with no failures.
+    values, immutable snapshots, intrinsic invalid states, multiple
+    calls/results, budget validation, and failure-metadata safety. The full
+    assistant suite passes 67 tests with no failures.
     Existing Ollama runtime contracts, registration, configuration, and callers
     are unchanged.
 
