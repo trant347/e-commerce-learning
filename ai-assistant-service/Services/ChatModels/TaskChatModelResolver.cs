@@ -5,6 +5,11 @@ using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services.ChatModels;
 
+/// <summary>
+/// Converts the validated task-map options into an immutable runtime snapshot.
+/// Keeping this snapshot separate from configuration binding prevents model,
+/// provider, and budget changes from affecting requests until the service restarts.
+/// </summary>
 public sealed class TaskModelProfileCatalog
 {
     private readonly IReadOnlyDictionary<string, TaskModelProfile> _profiles;
@@ -41,6 +46,11 @@ public sealed class TaskModelProfileCatalog
     }
 }
 
+/// <summary>
+/// Associates one independently registered provider adapter with its canonical
+/// provider name. This avoids selecting a global client or mutating shared client
+/// state when different tasks use different providers.
+/// </summary>
 public sealed record ChatModelClientRegistration
 {
     public ChatModelClientRegistration(string provider, IChatModelClient client)
@@ -58,6 +68,11 @@ public sealed record ChatModelClientRegistration
     public IChatModelClient Client { get; }
 }
 
+/// <summary>
+/// Resolves an explicit backend task ID to its configured profile and provider
+/// adapter. It deliberately has no fallback behavior, so an unknown task or
+/// unavailable adapter fails before any model request is sent.
+/// </summary>
 public sealed class TaskChatModelResolver : ITaskChatModelResolver
 {
     private readonly TaskModelProfileCatalog _catalog;
@@ -102,6 +117,11 @@ public sealed class TaskChatModelResolver : ITaskChatModelResolver
     }
 }
 
+/// <summary>
+/// Binds a single immutable task profile to a provider adapter. It ensures callers
+/// cannot override the selected model or output limit and applies a fresh
+/// per-round timeout without changing shared adapter or HTTP client settings.
+/// </summary>
 public sealed class TaskChatModelClient : ITaskChatModelClient
 {
     private readonly IChatModelClient _client;
@@ -148,6 +168,11 @@ public sealed class TaskChatModelClient : ITaskChatModelClient
     }
 }
 
+/// <summary>
+/// Creates the request-wide deadline that spans prompt preparation, model rounds,
+/// and tool execution. It is separate from the per-round timeout so orchestration
+/// can enforce one non-resetting end-to-end budget for the entire request.
+/// </summary>
 public static class TaskModelRequestDeadline
 {
     public static CancellationTokenSource Create(
