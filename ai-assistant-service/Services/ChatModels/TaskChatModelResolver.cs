@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using ai_assistant_service.Configuration;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Telemetry;
 using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services.ChatModels;
@@ -125,6 +126,7 @@ public sealed class TaskChatModelResolver : ITaskChatModelResolver
 public sealed class TaskChatModelClient : ITaskChatModelClient
 {
     private readonly IChatModelClient _client;
+    private int _roundCount;
 
     public TaskChatModelClient(TaskModelProfile profile, IChatModelClient client)
     {
@@ -152,19 +154,33 @@ public sealed class TaskChatModelClient : ITaskChatModelClient
             Profile.MaxOutputTokens,
             TimeSpan.FromSeconds(Profile.TimeoutSeconds));
 
+        using var telemetry = AiAssistantTelemetry.StartModelRound(
+            Profile,
+            Interlocked.Increment(ref _roundCount),
+            cancellationToken);
         try
         {
-            return await _client.ChatAsync(request, linkedCancellation.Token);
+            var response = await _client.ChatAsync(request, linkedCancellation.Token);
+            telemetry.Succeeded(response);
+            return response;
         }
         catch (OperationCanceledException)
             when (!cancellationToken.IsCancellationRequested
                   && roundTimeout.IsCancellationRequested)
         {
-            throw new ChatModelException(
+            var timeout = new ChatModelException(
                 ChatModelFailureCategory.Timeout,
                 new ChatModelFailureMetadata(
                     provider: Profile.Provider,
                     requestedModel: Profile.Model));
+            telemetry.Failed(timeout);
+            throw timeout;
+        }
+        catch (ChatModelException exception)
+            when (exception.Category != ChatModelFailureCategory.CallerCancellation)
+        {
+            telemetry.Failed(exception);
+            throw;
         }
     }
 }

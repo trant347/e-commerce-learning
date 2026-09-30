@@ -4,6 +4,7 @@ using ai_assistant_service.Services;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Mcp;
+using ai_assistant_service.Services.Telemetry;
 using ai_assistant_service.Services.Tools;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -21,10 +22,12 @@ var otelEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(otelServiceName))
     .WithTracing(tracing => tracing
+        .AddSource(AiAssistantTelemetry.Name)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(opt => opt.Endpoint = new Uri(otelEndpoint)))
     .WithMetrics(metrics => metrics
+        .AddMeter(AiAssistantTelemetry.Name)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddOtlpExporter(opt => opt.Endpoint = new Uri(otelEndpoint)));

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ai_assistant_service.Configuration;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Telemetry;
 using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services.Clients;
@@ -198,6 +199,14 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
         {
             return false;
         }
+
+        AiAssistantTelemetry.RecordRetry(
+            ChatModelProviders.OpenRouter,
+            request.Model,
+            failure.Category,
+            failure.Metadata.HttpStatusCode,
+            retryCount + 1,
+            delay);
 
         if (delay > TimeSpan.Zero)
         {

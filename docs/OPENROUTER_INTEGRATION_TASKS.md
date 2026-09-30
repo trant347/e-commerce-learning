@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-8 are complete. Telemetry and deployment work remain pending.**
+Status: **In progress; tasks 1-9 are complete. Deployment and integration work remain pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -344,7 +344,7 @@ covered before introducing the external provider.
     delay formats and budgets, cancellation, retry exhaustion, policy/truncation,
     and proof that retrying a post-tool model round does not re-execute the tool.
 
-- [ ] **9. Add metadata-only assistant telemetry.**
+- [x] **9. Add metadata-only assistant telemetry.**
   Depends on 6-8. Register the `TaskMaster.AiAssistant` activity source and meter.
   Instrument chat/round duration, tool calls, failures, retries, and available
   token usage, with validated task ID and provider/requested/resolved model
@@ -353,6 +353,27 @@ covered before introducing the external provider.
   Retain disabled-by-default Compose export and configuration-only health checks.
   **Done when:** in-process activity/meter listener tests observe the expected
   metadata without a collector, inference calls, or sensitive payloads.
+
+  **Implemented 2026-09-30:**
+
+  - Added `AiAssistantTelemetry` with an `ActivitySource` and `Meter` named
+    `TaskMaster.AiAssistant`, registered through `AddSource`/`AddMeter`. Compose
+    keeps `OTEL_SDK_DISABLED=true`; `/health` remains configuration-only.
+  - `AiAssistantService` records an `ai.chat` activity plus chat duration,
+    handled-failure, and tool-call metrics. The task-bound client records an
+    `ai.model.round` activity per model round for every task, with round number,
+    duration, outcome/error category/HTTP status, retry count, and token usage.
+  - OpenRouter retries record a counter and a round activity event through an
+    async-local round scope, so task labels come only from the validated profile.
+  - Metric labels are limited to task ID, provider, requested model, outcome,
+    error category, HTTP status, token type, and registered tool names.
+    Resolved models and request/generation IDs are trace attributes only.
+    Caller cancellation is recorded as `canceled`, not a failure.
+  - Non-parallel listener tests cover a real OpenRouter tool round with retry and
+    usage, handled provider failures, rejected invented tool names, concurrent
+    synthetic mixed-provider tasks, unknown tasks, and caller cancellation, and
+    assert that no prompt, argument, result, completion, user, or key sentinel
+    appears in any activity or metric value.
 
 - [ ] **10. Document and wire all-Ollama, OpenRouter-only, and mixed deployments.**
   Depends on 7-8. Keep base Compose on Ollama; implement the override specified

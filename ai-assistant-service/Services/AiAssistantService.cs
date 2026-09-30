@@ -3,6 +3,7 @@ using ai_assistant_service.Configuration;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Telemetry;
 using ai_assistant_service.Services.Tools;
 
 namespace ai_assistant_service.Services;
@@ -39,15 +40,17 @@ public sealed class AiAssistantService : IAiAssistantService
     {
         cancellationToken.ThrowIfCancellationRequested();
         var client = _modelResolver.Resolve("chat");
+        using var telemetry = AiAssistantTelemetry.StartChat(client.Profile, cancellationToken);
         using var deadline = TaskModelRequestDeadline.Create(client.Profile, cancellationToken);
         try
         {
-            return await RunConversationAsync(request, executionContext, client, deadline.Token);
+            return await RunConversationAsync(
+                request, executionContext, client, telemetry, deadline.Token);
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return FailureResponse(client.Profile, ChatModelFailureCategory.Timeout);
+            return FailureResponse(client.Profile, telemetry, ChatModelFailureCategory.Timeout);
         }
         catch (ChatModelException exception)
             when (exception.Category == ChatModelFailureCategory.CallerCancellation)
@@ -61,7 +64,7 @@ public sealed class AiAssistantService : IAiAssistantService
         catch (ChatModelException exception)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return FailureResponse(client.Profile, exception.Category, exception.Metadata);
+            return FailureResponse(client.Profile, telemetry, exception.Category, exception.Metadata);
         }
     }
 
@@ -69,6 +72,7 @@ public sealed class AiAssistantService : IAiAssistantService
         ChatRequest request,
         ToolExecutionContext executionContext,
         ITaskChatModelClient client,
+        AiAssistantTelemetry.ChatTelemetry telemetry,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -128,6 +132,7 @@ public sealed class AiAssistantService : IAiAssistantService
                 round + 1, MaxToolRounds, messages.Count);
 
             cancellationToken.ThrowIfCancellationRequested();
+            telemetry.RoundStarted();
             var response = await client.ChatAsync(messages, toolDefinitions, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var assistantMsg = response.Message;
@@ -165,6 +170,8 @@ public sealed class AiAssistantService : IAiAssistantService
                 }
 
                 _logger.LogInformation("Executing tool={ToolName}", toolName);
+                var registeredToolName = _toolRegistry.Get(toolName)?.Name
+                    ?? AiAssistantTelemetry.UnregisteredTool;
 
                 string result;
                 try
@@ -174,6 +181,7 @@ public sealed class AiAssistantService : IAiAssistantService
                         toolName,
                         args,
                         cancellationToken);
+                    telemetry.ToolCallCompleted(registeredToolName, succeeded: true);
                     if (!executedToolNames.Contains(toolName, StringComparer.Ordinal))
                         executedToolNames.Add(toolName);
                 }
@@ -184,6 +192,7 @@ public sealed class AiAssistantService : IAiAssistantService
                 catch (Exception exception)
                 {
                     hadToolExecutionFailure = true;
+                    telemetry.ToolCallCompleted(registeredToolName, succeeded: false);
                     _logger.LogError(
                         "Tool execution failed for tool={ToolName}, exception type={ExceptionType}",
                         toolName,
@@ -205,6 +214,7 @@ public sealed class AiAssistantService : IAiAssistantService
         // Seeded and historical answers are never a fallback for an exhausted live loop.
         const string defaultFallback = "I wasn't able to find a complete answer — the data may be unavailable or the request needs more detail. Please try rephrasing.";
 
+        var roundLimitReached = finalContent is null;
         finalContent ??= defaultFallback;
 
         if (hadToolExecutionFailure && string.Equals(finalContent, defaultFallback, StringComparison.Ordinal))
@@ -219,6 +229,7 @@ public sealed class AiAssistantService : IAiAssistantService
         cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInformation("Extracted {MentionCount} task master mentions from tool results", mentions.Count);
 
+        telemetry.Succeeded(roundLimitReached);
         return new ChatResponse
         {
             Answer   = finalContent,
@@ -230,9 +241,11 @@ public sealed class AiAssistantService : IAiAssistantService
 
     private ChatResponse FailureResponse(
         TaskModelProfile profile,
+        AiAssistantTelemetry.ChatTelemetry telemetry,
         ChatModelFailureCategory category,
         ChatModelFailureMetadata? metadata = null)
     {
+        telemetry.Failed(category, metadata?.HttpStatusCode);
         _logger.LogWarning(
             "Chat failed for task={TaskId}, provider={Provider}, model={Model}, category={Category}, status={Status}, provider request ID={ProviderRequestId}",
             profile.TaskId,
