@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-5 are complete. The failure/logging audit and OpenRouter remain pending.**
+Status: **In progress; tasks 1-7 are complete. OpenRouter error/retry handling and deployment work remain pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -264,7 +264,7 @@ covered before introducing the external provider.
 
 ## Phase 2: OpenRouter adapter and deployment support
 
-- [ ] **7. Implement OpenRouter translation and mixed-provider resolution.**
+- [x] **7. Implement OpenRouter translation and mixed-provider resolution.**
   Depends on Phase 1. Add validated shared OpenRouter options and independently
   register its adapter alongside Ollama. Require its key/base URL if any configured
   task uses it, even when chat uses Ollama; require a model in each profile.
@@ -281,6 +281,27 @@ covered before introducing the external provider.
   multi-call round trips. Synthetic task callers can select different models on
   one adapter or different providers in the same process without state leakage.
   No real API calls belong in these tests.
+
+  **Implemented 2026-09-29:**
+
+  - Added validated shared `OpenRouterOptions` for the base URL, server-side key,
+    optional attribution, routing privacy/settings, and the future bounded retry
+    limit. OpenRouter settings are required only when at least one task selects
+    OpenRouter; all-Ollama maps still start without its key or URL.
+  - Registered `OpenRouterChatModelClient` independently from Ollama. The task
+    resolver can now bind different tasks to different providers or different
+    models/output limits on the shared OpenRouter adapter without mutable state.
+  - Added non-streaming Chat Completions translation for messages, definitions,
+    assistant tool calls, matching `tool_call_id` results, routing settings,
+    attribution headers, resolved-model/request diagnostics, and token usage.
+    Native stringified arguments must parse as JSON objects and retain their
+    original value types and IDs.
+  - Capturing-handler tests cover both base-URL slash forms, bearer/attribution
+    headers, hidden visibility, privacy routing, absence of `think`, per-profile
+    output limits, multi-call follow-up serialization, malformed arguments, and
+    all-OpenRouter/mixed-provider resolution. No live OpenRouter request is made.
+  - Full OpenRouter status/envelope classification and bounded retries remain
+    owned by Task 8; Task 7 surfaces non-success responses without retrying.
 
 - [ ] **8. Implement OpenRouter errors and bounded retries.**
   Depends on 7. Handle every status/category in spec Section 7, including HTTP

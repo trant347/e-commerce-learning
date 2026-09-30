@@ -40,6 +40,38 @@ public class TaskChatModelResolverTests
     }
 
     [Fact]
+    public async Task MixedProviderTasks_ResolveIndependentAdapters()
+    {
+        var ollama = new RecordingChatModelClient();
+        var openRouter = new RecordingChatModelClient();
+        var catalog = new TaskModelProfileCatalog(
+            Options.Create(new AiModelsOptions
+            {
+                Tasks = new Dictionary<string, TaskModelOptions>
+                {
+                    ["chat"] = Profile("ollama-model", 128),
+                    ["synthetic"] = Profile(
+                        "openrouter-model",
+                        32,
+                        provider: ChatModelProviders.OpenRouter)
+                }
+            }));
+        var resolver = new TaskChatModelResolver(
+            catalog,
+            [
+                new ChatModelClientRegistration(ChatModelProviders.Ollama, ollama),
+                new ChatModelClientRegistration(ChatModelProviders.OpenRouter, openRouter)
+            ]);
+        var messages = new[] { new ChatModelMessage(ChatModelRoles.User, "hello") };
+
+        await resolver.Resolve("chat").ChatAsync(messages, null, CancellationToken.None);
+        await resolver.Resolve("synthetic").ChatAsync(messages, null, CancellationToken.None);
+
+        Assert.Equal("ollama-model", Assert.Single(ollama.Requests).Model);
+        Assert.Equal("openrouter-model", Assert.Single(openRouter.Requests).Model);
+    }
+
+    [Fact]
     public void UnknownTask_FailsWithoutFallingBackOrCallingProvider()
     {
         var adapter = new RecordingChatModelClient();
@@ -131,10 +163,11 @@ public class TaskChatModelResolverTests
     private static TaskModelOptions Profile(
         string model,
         int maxOutputTokens,
-        int timeoutSeconds = 10) =>
+        int timeoutSeconds = 10,
+        string provider = ChatModelProviders.Ollama) =>
         new()
         {
-            Provider = "Ollama",
+            Provider = provider,
             Model = model,
             TimeoutSeconds = timeoutSeconds,
             RequestTimeoutSeconds = 30,

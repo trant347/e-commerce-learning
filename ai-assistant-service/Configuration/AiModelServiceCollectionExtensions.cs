@@ -17,6 +17,10 @@ public static class AiModelServiceCollectionExtensions
             .Bind(configuration.GetSection(OllamaOptions.SectionName));
 
         services
+            .AddOptions<OpenRouterOptions>()
+            .Bind(configuration.GetSection(OpenRouterOptions.SectionName));
+
+        services
             .AddOptions<AiModelsOptions>()
             .Bind(configuration.GetSection(AiModelsOptions.SectionName))
             .ValidateOnStart();
@@ -31,15 +35,26 @@ public static class AiModelServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<PromptOptions>, PromptOptionsValidator>();
         services.AddSingleton<AssistantPrompt>();
 
-        services.AddHttpClient<OllamaChatModelClient>((provider, client) =>
+        services.AddHttpClient<OllamaChatModelClient>((serviceProvider, httpClient) =>
         {
-            var options = provider.GetRequiredService<IOptions<OllamaOptions>>().Value;
-            client.BaseAddress = new Uri(options.BaseUrl!);
-            client.Timeout = Timeout.InfiniteTimeSpan;
+            var options = serviceProvider.GetRequiredService<IOptions<OllamaOptions>>().Value;
+            if (Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseAddress))
+            {
+                httpClient.BaseAddress = baseAddress;
+            }
+            httpClient.Timeout = Timeout.InfiniteTimeSpan;
         });
         services.AddSingleton(provider => new ChatModelClientRegistration(
             ChatModelProviders.Ollama,
             provider.GetRequiredService<OllamaChatModelClient>()));
+
+        services.AddHttpClient<OpenRouterChatModelClient>(httpClient =>
+        {
+            httpClient.Timeout = Timeout.InfiniteTimeSpan;
+        });
+        services.AddSingleton(provider => new ChatModelClientRegistration(
+            ChatModelProviders.OpenRouter,
+            provider.GetRequiredService<OpenRouterChatModelClient>()));
 
         return services;
     }

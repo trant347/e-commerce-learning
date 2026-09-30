@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Specification
 
-> Status: **In progress: tasks 1-6 implemented; OpenRouter pending**
+> Status: **In progress: tasks 1-7 implemented; OpenRouter errors, retries, telemetry, and deployment pending**
 >
 > Scope: `ai-assistant-service`, its tests, Docker Compose configuration, and
 > environment documentation.
@@ -415,6 +415,16 @@ call's name when writing Ollama's `tool_name`. It rejects an unresolvable result
 before HTTP rather than guessing the association. See the native
 [chat API](https://docs.ollama.com/api/chat) and
 [tool-calling examples](https://docs.ollama.com/capabilities/tool-calling).
+
+**Task 7 implementation:** `OpenRouterChatModelClient` is independently
+registered with an infinite `HttpClient` timeout and uses the same task-bound
+budgets as Ollama. It sends the full `/api/v1/chat/completions` endpoint,
+server-side bearer authentication, optional attribution/hidden visibility,
+privacy-preserving provider routing, `stream: false`, and each profile's model
+and output limit. It preserves native tool-call IDs, serializes arguments as the
+required JSON string, emits matching `tool_call_id` values for results, and maps
+resolved-model/request/usage fields only into diagnostic response metadata.
+Full status/envelope classification and bounded retries remain Task 8.
 
 ### Tool-call identity
 

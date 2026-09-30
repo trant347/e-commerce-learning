@@ -41,7 +41,24 @@ public class AiModelOptionsValidationTests
         aiModels.Tasks["synthetic"].Model = "model-b";
 
         var validator = new AiModelsOptionsValidator(
-            Options.Create(new OllamaOptions { BaseUrl = "http://ollama:11434" }));
+            Options.Create(new OllamaOptions { BaseUrl = "http://ollama:11434" }),
+            Options.Create(new OpenRouterOptions()));
+        var result = validator.Validate(Options.DefaultName, aiModels);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void Validator_AcceptsMixedProviderMapWithSharedOpenRouterSettings()
+    {
+        var aiModels = ValidAiModels();
+        aiModels.Tasks["synthetic"] = ValidProfile();
+        aiModels.Tasks["synthetic"].Provider = "OpenRouter";
+        aiModels.Tasks["synthetic"].Model = "vendor/tool-model";
+
+        var validator = new AiModelsOptionsValidator(
+            Options.Create(new OllamaOptions { BaseUrl = "http://ollama:11434" }),
+            Options.Create(ValidOpenRouter()));
         var result = validator.Validate(Options.DefaultName, aiModels);
 
         Assert.True(result.Succeeded);
@@ -51,13 +68,16 @@ public class AiModelOptionsValidationTests
     [MemberData(nameof(InvalidConfigurations))]
     public void Validator_RejectsInvalidProfiles(
         string expectedError,
-        Action<AiModelsOptions, OllamaOptions> mutate)
+        Action<AiModelsOptions, OllamaOptions, OpenRouterOptions> mutate)
     {
         var aiModels = ValidAiModels();
         var ollama = new OllamaOptions { BaseUrl = "http://ollama:11434" };
-        mutate(aiModels, ollama);
+        var openRouter = ValidOpenRouter();
+        mutate(aiModels, ollama, openRouter);
 
-        var validator = new AiModelsOptionsValidator(Options.Create(ollama));
+        var validator = new AiModelsOptionsValidator(
+            Options.Create(ollama),
+            Options.Create(openRouter));
         var result = validator.Validate(Options.DefaultName, aiModels);
 
         Assert.True(result.Failed);
@@ -66,13 +86,13 @@ public class AiModelOptionsValidationTests
             failure => failure.Contains(expectedError, StringComparison.Ordinal));
     }
 
-    public static TheoryData<string, Action<AiModelsOptions, OllamaOptions>>
+    public static TheoryData<string, Action<AiModelsOptions, OllamaOptions, OpenRouterOptions>>
         InvalidConfigurations() =>
         new()
         {
             {
                 "invalid task identifier",
-                (options, _) =>
+                (options, _, _) =>
                 {
                     options.Tasks.Remove("chat");
                     options.Tasks["Chat"] = ValidProfile();
@@ -80,23 +100,19 @@ public class AiModelOptionsValidationTests
             },
             {
                 "Provider must be Ollama or OpenRouter",
-                (options, _) => options.Tasks["chat"].Provider = "Unknown"
-            },
-            {
-                "OpenRouter, which is not available",
-                (options, _) => options.Tasks["chat"].Provider = "OpenRouter"
+                (options, _, _) => options.Tasks["chat"].Provider = "Unknown"
             },
             {
                 "Model is required",
-                (options, _) => options.Tasks["chat"].Model = " "
+                (options, _, _) => options.Tasks["chat"].Model = " "
             },
             {
                 "RequestTimeoutSeconds must be at least TimeoutSeconds",
-                (options, _) => options.Tasks["chat"].RequestTimeoutSeconds = 5
+                (options, _, _) => options.Tasks["chat"].RequestTimeoutSeconds = 5
             },
             {
                 "AiModels:Tasks:synthetic:MaxOutputTokens",
-                (options, _) =>
+                (options, _, _) =>
                 {
                     options.Tasks["synthetic"] = ValidProfile();
                     options.Tasks["synthetic"].MaxOutputTokens = 0;
@@ -104,9 +120,72 @@ public class AiModelOptionsValidationTests
             },
             {
                 "Ollama:BaseUrl",
-                (_, ollama) => ollama.BaseUrl = "not-a-url"
+                (_, ollama, _) => ollama.BaseUrl = "not-a-url"
+            },
+            {
+                "OpenRouter:BaseUrl",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.BaseUrl = "not-a-url";
+                }
+            },
+            {
+                "OpenRouter:ApiKey",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.ApiKey = " ";
+                }
+            },
+            {
+                "OpenRouter:HttpReferer",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.HttpReferer = "not-a-url";
+                }
+            },
+            {
+                "OpenRouter:AppTitle",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.HttpReferer = "https://taskmaster.example";
+                    openRouter.AppTitle = " ";
+                }
+            },
+            {
+                "OpenRouter:RequireParameters",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.RequireParameters = false;
+                }
+            },
+            {
+                "OpenRouter:DataCollection",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.DataCollection = "allow";
+                }
+            },
+            {
+                "OpenRouter:MaxRetries",
+                (options, _, openRouter) =>
+                {
+                    UseOpenRouter(options);
+                    openRouter.MaxRetries = 2;
+                }
             }
         };
+
+    private static void UseOpenRouter(AiModelsOptions options)
+    {
+        options.Tasks["chat"].Provider = "OpenRouter";
+        options.Tasks["chat"].Model = "vendor/tool-model";
+    }
 
     private static AiModelsOptions ValidAiModels() =>
         new()
@@ -125,5 +204,17 @@ public class AiModelOptionsValidationTests
             TimeoutSeconds = 10,
             RequestTimeoutSeconds = 30,
             MaxOutputTokens = 128
+        };
+
+    private static OpenRouterOptions ValidOpenRouter() =>
+        new()
+        {
+            BaseUrl = "https://openrouter.ai/api/v1",
+            ApiKey = "test-key",
+            AppTitle = "TaskMaster Hub",
+            AllowFallbacks = true,
+            RequireParameters = true,
+            DataCollection = "deny",
+            MaxRetries = 1
         };
 }

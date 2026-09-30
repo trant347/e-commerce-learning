@@ -26,6 +26,20 @@ public sealed class OllamaOptions
     public string? BaseUrl { get; set; }
 }
 
+public sealed class OpenRouterOptions
+{
+    public const string SectionName = "OpenRouter";
+
+    public string? BaseUrl { get; set; }
+    public string? ApiKey { get; set; }
+    public string? HttpReferer { get; set; }
+    public string? AppTitle { get; set; }
+    public bool AllowFallbacks { get; set; } = true;
+    public bool RequireParameters { get; set; } = true;
+    public string DataCollection { get; set; } = "deny";
+    public int MaxRetries { get; set; } = 1;
+}
+
 public static class ChatModelProviders
 {
     public const string Ollama = "Ollama";
@@ -53,10 +67,14 @@ public static class ChatModelProviders
 public sealed partial class AiModelsOptionsValidator : IValidateOptions<AiModelsOptions>
 {
     private readonly OllamaOptions _ollamaOptions;
+    private readonly OpenRouterOptions _openRouterOptions;
 
-    public AiModelsOptionsValidator(IOptions<OllamaOptions> ollamaOptions)
+    public AiModelsOptionsValidator(
+        IOptions<OllamaOptions> ollamaOptions,
+        IOptions<OpenRouterOptions> openRouterOptions)
     {
         _ollamaOptions = ollamaOptions.Value;
+        _openRouterOptions = openRouterOptions.Value;
     }
 
     public ValidateOptionsResult Validate(string? name, AiModelsOptions options)
@@ -75,6 +93,7 @@ public sealed partial class AiModelsOptionsValidator : IValidateOptions<AiModels
         }
 
         var usesOllama = false;
+        var usesOpenRouter = false;
         foreach (var pair in options.Tasks)
         {
             var taskId = pair.Key;
@@ -99,14 +118,13 @@ public sealed partial class AiModelsOptionsValidator : IValidateOptions<AiModels
                 errors.Add(
                     $"AiModels:Tasks:{taskId}:Provider must be Ollama or OpenRouter.");
             }
-            else if (provider == ChatModelProviders.OpenRouter)
+            else if (provider == ChatModelProviders.Ollama)
             {
-                errors.Add(
-                    $"AiModels:Tasks:{taskId}:Provider selects OpenRouter, which is not available in this build.");
+                usesOllama = true;
             }
             else
             {
-                usesOllama = true;
+                usesOpenRouter = true;
             }
 
             if (string.IsNullOrWhiteSpace(profile.Model))
@@ -140,6 +158,52 @@ public sealed partial class AiModelsOptionsValidator : IValidateOptions<AiModels
         {
             errors.Add(
                 "Ollama:BaseUrl must be an absolute HTTP or HTTPS URL when an Ollama task is configured.");
+        }
+
+        if (usesOpenRouter)
+        {
+            if (!IsValidHttpUrl(_openRouterOptions.BaseUrl))
+            {
+                errors.Add(
+                    "OpenRouter:BaseUrl must be an absolute HTTP or HTTPS URL when an OpenRouter task is configured.");
+            }
+
+            if (string.IsNullOrWhiteSpace(_openRouterOptions.ApiKey))
+            {
+                errors.Add(
+                    "OpenRouter:ApiKey is required when an OpenRouter task is configured.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(_openRouterOptions.HttpReferer)
+                && !IsValidHttpUrl(_openRouterOptions.HttpReferer))
+            {
+                errors.Add("OpenRouter:HttpReferer must be an absolute HTTP or HTTPS URL.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(_openRouterOptions.HttpReferer)
+                && string.IsNullOrWhiteSpace(_openRouterOptions.AppTitle))
+            {
+                errors.Add(
+                    "OpenRouter:AppTitle is required when OpenRouter:HttpReferer is configured.");
+            }
+
+            if (!_openRouterOptions.RequireParameters)
+            {
+                errors.Add("OpenRouter:RequireParameters must be true.");
+            }
+
+            if (!string.Equals(
+                    _openRouterOptions.DataCollection,
+                    "deny",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add("OpenRouter:DataCollection must be 'deny'.");
+            }
+
+            if (_openRouterOptions.MaxRetries is < 0 or > 1)
+            {
+                errors.Add("OpenRouter:MaxRetries must be 0 or 1.");
+            }
         }
 
         return errors.Count == 0
