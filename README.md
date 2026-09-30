@@ -14,7 +14,7 @@ A TaskMaster marketplace that uses micro-services architecture. Users can browse
 - **calendar-service**: Booking management
 - **authentication-service**: User authentication
 - **notification-service**: Real-time notifications
-- **ai-assistant-service**: AI-powered chat assistant (Ollama)
+- **ai-assistant-service**: AI-powered chat assistant (local Ollama by default; OpenRouter optional — see [AI assistant deployment](docs/AI_ASSISTANT_DEPLOYMENT.md))
 
 ---
 

@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-9 are complete. Deployment and integration work remain pending.**
+Status: **In progress; tasks 1-10 are complete. Integration coverage and evaluation remain pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -375,7 +375,7 @@ covered before introducing the external provider.
     assert that no prompt, argument, result, completion, user, or key sentinel
     appears in any activity or metric value.
 
-- [ ] **10. Document and wire all-Ollama, OpenRouter-only, and mixed deployments.**
+- [x] **10. Document and wire all-Ollama, OpenRouter-only, and mixed deployments.**
   Depends on 7-8. Keep base Compose on Ollama; implement the override specified
   in Section 6, removing only the Ollama dependency and placing both Ollama
   services behind an inactive profile for OpenRouter-only use. Require
@@ -392,6 +392,27 @@ covered before introducing the external provider.
   services/dependency, mixed retains required services, and all-Ollama needs no
   OpenRouter key. Use synthetic profiles and fake secrets for mixed-config
   inspection, not new domain workflows or real credentials.
+
+  **Implemented 2026-09-30:**
+
+  - Base Compose stays on Ollama and now maps the shared optional
+    `OpenRouter__ApiKey=${OPENROUTER_API_KEY:-}` and `OpenRouter__HttpReferer`,
+    so all-Ollama renders with no key and no missing-variable warning.
+  - Added `docker-compose.openrouter.yml`: it selects OpenRouter for `chat` with
+    60/300 s budgets, requires `OPENROUTER_CHAT_MODEL` and `OPENROUTER_API_KEY`,
+    removes only the Ollama edge with `!reset`, and puts `ollama`/`ollama-init`
+    behind the inactive `local-ollama` profile.
+  - Added [AI assistant deployment](AI_ASSISTANT_DEPLOYMENT.md) with all three
+    recipes, the verified Compose version (v5.1.4), budgets, secrets, credit limits,
+    model capability checks, switching and stop commands, local-model
+    provisioning, shared-key limits, and per-task rollback. Updated `.env.example`
+    and linked the guide from the root README.
+  - Verified with `.env.example` and fake secrets: all-Ollama renders without a key;
+    OpenRouter-only fails without its variables, and otherwise lists no Ollama
+    services and keeps the other assistant dependencies; the documented mixed
+    override keeps Ollama and both task profiles.
+  - A startup test applies each recipe's container environment (including both
+    mixed directions with synthetic tasks) and verifies the per-task providers.
 
 - [ ] **11. Close automated integration and regression coverage.**
   Depends on 7-10. Exercise task resolution and startup validation, seeded

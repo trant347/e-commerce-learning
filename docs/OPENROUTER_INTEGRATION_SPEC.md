@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Specification
 
-> Status: **In progress: tasks 1-9 implemented; deployment pending**
+> Status: **In progress: tasks 1-10 implemented; integration coverage and evaluation pending**
 >
 > Scope: `ai-assistant-service`, its tests, Docker Compose configuration, and
 > environment documentation.

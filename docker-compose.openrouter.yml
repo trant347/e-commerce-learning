@@ -1,0 +1,24 @@
+# OpenRouter-only override for the AI assistant.
+# Usage (see docs/AI_ASSISTANT_DEPLOYMENT.md):
+#   docker compose -f docker-compose.yml -f docker-compose.openrouter.yml up -d --build
+# Requires a Compose version that supports the !reset tag. Always inspect the merged
+# graph first with: docker compose -f docker-compose.yml -f docker-compose.openrouter.yml config --quiet
+services:
+  # Keep local inference infrastructure available only through an explicitly
+  # enabled profile, so this recipe neither starts Ollama nor downloads its model.
+  ollama:
+    profiles: [local-ollama]
+  ollama-init:
+    profiles: [local-ollama]
+
+  ai-assistant-service:
+    environment:
+      AiModels__Tasks__chat__Provider: OpenRouter
+      AiModels__Tasks__chat__Model: ${OPENROUTER_CHAT_MODEL:?OPENROUTER_CHAT_MODEL must be set to a tool-capable OpenRouter model slug}
+      AiModels__Tasks__chat__TimeoutSeconds: "60"
+      AiModels__Tasks__chat__RequestTimeoutSeconds: "300"
+      AiModels__Tasks__chat__MaxOutputTokens: "1024"
+      OpenRouter__ApiKey: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY must be set for OpenRouter-only deployments}
+    # Remove only the inherited Ollama edge; other dependencies are retained.
+    depends_on:
+      ollama: !reset null

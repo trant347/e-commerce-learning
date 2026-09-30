@@ -318,6 +318,9 @@ services:
     - AiModels__Tasks__chat__TimeoutSeconds=600
     - AiModels__Tasks__chat__RequestTimeoutSeconds=3000
     - AiModels__Tasks__chat__MaxOutputTokens=1024
+    # Shared by every OpenRouter task. Optional here: an all-Ollama task map needs no key.
+    - OpenRouter__ApiKey=${OPENROUTER_API_KEY:-}
+    - OpenRouter__HttpReferer=${OPENROUTER_HTTP_REFERER:-}
     - ExternalServices__ProductServiceBaseUrl=http://product-service:8080
     - ExternalServices__BookingServiceBaseUrl=http://calendar-service:8080
     - Redis__ConnectionString=redis:6379

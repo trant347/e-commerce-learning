@@ -1,4 +1,5 @@
 using ai_assistant_service.Configuration;
+using ai_assistant_service.Services.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -31,6 +32,93 @@ public class AiModelOptionsValidationTests
             () => host.StartAsync());
 
         Assert.Contains("chat", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("all-ollama")]
+    [InlineData("openrouter-only")]
+    [InlineData("mixed-openrouter-chat")]
+    [InlineData("mixed-ollama-chat")]
+    public async Task DeploymentRecipeEnvironment_StartsAndResolvesEachTaskProvider(string recipe)
+    {
+        // Mirrors the container environment rendered by the recipes in
+        // docs/AI_ASSISTANT_DEPLOYMENT.md, with fake secrets and synthetic tasks.
+        var environment = new Dictionary<string, string?>
+        {
+            ["Ollama__BaseUrl"] = "http://ollama:11434",
+            ["AiModels__Tasks__chat__Provider"] = "Ollama",
+            ["AiModels__Tasks__chat__Model"] = "qwen3:8b",
+            ["AiModels__Tasks__chat__TimeoutSeconds"] = "600",
+            ["AiModels__Tasks__chat__RequestTimeoutSeconds"] = "3000",
+            ["AiModels__Tasks__chat__MaxOutputTokens"] = "1024",
+            ["OpenRouter__ApiKey"] = "",
+            ["OpenRouter__HttpReferer"] = ""
+        };
+        var openRouterChat = new Dictionary<string, string?>
+        {
+            ["AiModels__Tasks__chat__Provider"] = "OpenRouter",
+            ["AiModels__Tasks__chat__Model"] = "vendor/fake-model",
+            ["AiModels__Tasks__chat__TimeoutSeconds"] = "60",
+            ["AiModels__Tasks__chat__RequestTimeoutSeconds"] = "300",
+            ["AiModels__Tasks__chat__MaxOutputTokens"] = "1024",
+            ["OpenRouter__ApiKey"] = "fake-test-key"
+        };
+        var expected = new Dictionary<string, string> { ["chat"] = "Ollama" };
+
+        switch (recipe)
+        {
+            case "openrouter-only":
+                Merge(environment, openRouterChat);
+                expected["chat"] = "OpenRouter";
+                break;
+            case "mixed-openrouter-chat":
+                Merge(environment, openRouterChat);
+                Merge(environment, SyntheticTask("synthetic_local", "Ollama", "qwen3:8b"));
+                expected["chat"] = "OpenRouter";
+                expected["synthetic_local"] = "Ollama";
+                break;
+            case "mixed-ollama-chat":
+                Merge(environment, SyntheticTask("synthetic_remote", "OpenRouter", "vendor/fake-model"));
+                environment["OpenRouter__ApiKey"] = "fake-test-key";
+                expected["synthetic_remote"] = "OpenRouter";
+                break;
+        }
+
+        using var host = new HostBuilder()
+            .ConfigureAppConfiguration(configuration => configuration
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json")
+                .AddInMemoryCollection(environment.ToDictionary(
+                    pair => pair.Key.Replace("__", ":", StringComparison.Ordinal),
+                    pair => pair.Value)))
+            .ConfigureServices((context, services) =>
+                services.AddAiModelRouting(context.Configuration))
+            .Build();
+
+        await host.StartAsync();
+        var resolver = host.Services.GetRequiredService<ITaskChatModelResolver>();
+        foreach (var (taskId, provider) in expected)
+        {
+            Assert.Equal(provider, resolver.Resolve(taskId).Profile.Provider);
+        }
+        await host.StopAsync();
+
+        static void Merge(Dictionary<string, string?> target, Dictionary<string, string?> values)
+        {
+            foreach (var (key, value) in values)
+            {
+                target[key] = value;
+            }
+        }
+
+        static Dictionary<string, string?> SyntheticTask(string taskId, string provider, string model) => new()
+        {
+            [$"AiModels__Tasks__{taskId}__Provider"] = provider,
+            [$"AiModels__Tasks__{taskId}__Model"] = model,
+            [$"AiModels__Tasks__{taskId}__TimeoutSeconds"] = "60",
+            [$"AiModels__Tasks__{taskId}__RequestTimeoutSeconds"] = "300",
+            [$"AiModels__Tasks__{taskId}__MaxOutputTokens"] = "256"
+        };
     }
 
     [Fact]
