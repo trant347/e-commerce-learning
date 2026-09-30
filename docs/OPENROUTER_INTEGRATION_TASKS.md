@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-7 are complete. OpenRouter error/retry handling and deployment work remain pending.**
+Status: **In progress; tasks 1-8 are complete. Telemetry and deployment work remain pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -300,10 +300,10 @@ covered before introducing the external provider.
     headers, hidden visibility, privacy routing, absence of `think`, per-profile
     output limits, multi-call follow-up serialization, malformed arguments, and
     all-OpenRouter/mixed-provider resolution. No live OpenRouter request is made.
-  - Full OpenRouter status/envelope classification and bounded retries remain
-    owned by Task 8; Task 7 surfaces non-success responses without retrying.
+  - Full OpenRouter status/envelope classification and bounded retries were
+    subsequently completed by Task 8.
 
-- [ ] **8. Implement OpenRouter errors and bounded retries.**
+- [x] **8. Implement OpenRouter errors and bounded retries.**
   Depends on 7. Handle every status/category in spec Section 7, including HTTP
   200 error envelopes before reading choices. Reject malformed/empty output,
   invalid arguments, missing names/IDs, truncated completions, and policy blocks
@@ -315,6 +315,34 @@ covered before introducing the external provider.
   failure; keep retry/deadline state isolated per invocation.
   **Done when:** tests cover retryable/non-retryable cases, both missing 402
   conditions, invalid headers, over-budget delays, cancellation, and exhaustion.
+
+  **Implemented 2026-09-29:**
+
+  - OpenRouter HTTP failures and HTTP 200 error envelopes now map to typed
+    categories without retaining raw provider messages or metadata. Numeric
+    provider codes are authoritative while the actual HTTP status remains
+    diagnostic metadata; malformed envelopes and unsafe finish reasons fail
+    before any tool execution.
+  - The adapter retries only timeout, rate-limit, temporary in-flight-budget,
+    transport, and provider-unavailable failures. Retries repeat the same model
+    request at most `MaxRetries` times and never restart orchestration or completed
+    tools. Ollama remains at zero adapter retries.
+  - Valid delta-seconds and HTTP-date `Retry-After` values are honored. Other
+    retryable failures use bounded exponential backoff with jitter. A 402 retries
+    only with both `openrouter_in_flight_budget` metadata and a valid header.
+    Delays that cannot fit inside the original round timeout return the surfaced
+    failure without sending another request.
+  - Caller cancellation propagates during HTTP and retry delays. Internal provider
+    timeouts remain typed and retryable while budget remains. Retry logs contain
+    only validated model/category/status/request-ID/count/delay metadata.
+  - `AiAssistantService` now selects OpenRouter-specific safe busy, unavailable,
+    policy, and invalid-output text while retaining the existing Ollama messages.
+    Tests cover failures after successful tool execution and clear sources and
+    mentions in every handled-failure response.
+  - Capturing-handler and real orchestration tests cover all specified statuses,
+    200 envelopes, unknown/invalid errors, both 402 prerequisites, invalid headers,
+    delay formats and budgets, cancellation, retry exhaustion, policy/truncation,
+    and proof that retrying a post-tool model round does not re-execute the tool.
 
 - [ ] **9. Add metadata-only assistant telemetry.**
   Depends on 6-8. Register the `TaskMaster.AiAssistant` activity source and meter.

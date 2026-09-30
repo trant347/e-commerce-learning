@@ -149,7 +149,8 @@ public sealed class TaskChatModelClient : ITaskChatModelClient
             Profile.Model,
             messages,
             tools,
-            Profile.MaxOutputTokens);
+            Profile.MaxOutputTokens,
+            TimeSpan.FromSeconds(Profile.TimeoutSeconds));
 
         try
         {

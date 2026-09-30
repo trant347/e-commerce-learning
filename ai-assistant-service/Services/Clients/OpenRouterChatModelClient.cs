@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,13 +23,16 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
 
     private readonly HttpClient _httpClient;
     private readonly OpenRouterOptions _options;
+    private readonly ILogger<OpenRouterChatModelClient> _logger;
 
     public OpenRouterChatModelClient(
         HttpClient httpClient,
-        IOptions<OpenRouterOptions> options)
+        IOptions<OpenRouterOptions> options,
+        ILogger<OpenRouterChatModelClient> logger)
     {
         _httpClient = httpClient;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<ChatModelResponse> ChatAsync(
@@ -35,6 +40,88 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var startedAt = Stopwatch.GetTimestamp();
+        var retryCount = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await SendAsync(request, cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                var failure = Failure(ChatModelFailureCategory.Timeout, request.Model);
+                if (!await TryDelayForRetryAsync(
+                        failure,
+                        request,
+                        startedAt,
+                        retryCount,
+                        cancellationToken))
+                {
+                    throw failure;
+                }
+            }
+            catch (HttpRequestException)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var failure = Failure(
+                    ChatModelFailureCategory.ProviderUnavailable,
+                    request.Model);
+                if (!await TryDelayForRetryAsync(
+                        failure,
+                        request,
+                        startedAt,
+                        retryCount,
+                        cancellationToken))
+                {
+                    throw failure;
+                }
+            }
+            catch (IOException)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var failure = Failure(
+                    ChatModelFailureCategory.ProviderUnavailable,
+                    request.Model);
+                if (!await TryDelayForRetryAsync(
+                        failure,
+                        request,
+                        startedAt,
+                        retryCount,
+                        cancellationToken))
+                {
+                    throw failure;
+                }
+            }
+            catch (JsonException)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                throw Failure(ChatModelFailureCategory.ProtocolError, request.Model);
+            }
+            catch (ChatModelException failure)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!await TryDelayForRetryAsync(
+                        failure,
+                        request,
+                        startedAt,
+                        retryCount,
+                        cancellationToken))
+                {
+                    throw;
+                }
+            }
+
+            retryCount++;
+        }
+    }
+
+    private async Task<ChatModelResponse> SendAsync(
+        ChatModelRequest request,
+        CancellationToken cancellationToken)
+    {
         var endpoint = new Uri(
             $"{_options.BaseUrl!.Trim().TrimEnd('/')}/chat/completions",
             UriKind.Absolute);
@@ -53,44 +140,158 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
             message.Headers.TryAddWithoutValidation("X-OpenRouter-App-Visibility", "hidden");
         }
 
-        try
+        using var response = await _httpClient.SendAsync(message, cancellationToken);
+        var status = (int)response.StatusCode;
+        var retryAfter = ParseRetryAfter(response);
+        using var document = await ReadResponseAsync(
+            response,
+            requireJson: response.IsSuccessStatusCode,
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
         {
-            using var response = await _httpClient.SendAsync(message, cancellationToken);
-            var status = (int)response.StatusCode;
-            if (!response.IsSuccessStatusCode)
+            if (document is not null
+                && document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("error", out _))
             {
-                throw Failure(
-                    ChatModelFailureCategory.UnknownProviderError,
+                throw ParseError(
+                    document.RootElement,
                     request.Model,
-                    status);
+                    status,
+                    retryAfter);
             }
 
-            using var document = await response.Content.ReadFromJsonAsync<JsonDocument>(
-                JsonOptions,
-                cancellationToken);
-            var result = ParseResponse(document?.RootElement ?? default, request);
-            cancellationToken.ThrowIfCancellationRequested();
-            return result;
+            throw Failure(
+                Classify(status, limitSource: null, retryAfter),
+                request.Model,
+                status,
+                providerErrorCode: null,
+                retryAfter: retryAfter);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+
+        return ParseResponse(
+            document?.RootElement ?? default,
+            request,
+            status,
+            retryAfter);
+    }
+
+    private async Task<bool> TryDelayForRetryAsync(
+        ChatModelException failure,
+        ChatModelRequest request,
+        long startedAt,
+        int retryCount,
+        CancellationToken cancellationToken)
+    {
+        if (retryCount >= _options.MaxRetries
+            || request.RoundTimeout is null
+            || !IsRetryable(failure.Category))
         {
-            throw Failure(ChatModelFailureCategory.Timeout, request.Model);
+            return false;
         }
-        catch (HttpRequestException)
+
+        var delay = failure.Metadata.RetryAfter
+            ?? BackoffWithJitter(retryCount);
+        var elapsed = Stopwatch.GetElapsedTime(startedAt);
+        var remaining = request.RoundTimeout.Value - elapsed;
+        if (remaining <= TimeSpan.Zero || delay >= remaining)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            throw Failure(ChatModelFailureCategory.ProviderUnavailable, request.Model);
+            return false;
         }
-        catch (IOException)
+
+        if (delay > TimeSpan.Zero)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            throw Failure(ChatModelFailureCategory.ProviderUnavailable, request.Model);
+            _logger.LogWarning(
+                "Retrying OpenRouter model={Model}, category={Category}, status={Status}, provider request ID={ProviderRequestId}, retry={RetryCount}, delay milliseconds={DelayMilliseconds}",
+                request.Model,
+                failure.Category,
+                failure.Metadata.HttpStatusCode,
+                failure.Metadata.ProviderRequestId,
+                retryCount + 1,
+                delay.TotalMilliseconds);
+            await Task.Delay(delay, cancellationToken);
         }
-        catch (JsonException)
+        else
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            throw Failure(ChatModelFailureCategory.ProtocolError, request.Model);
+            _logger.LogWarning(
+                "Retrying OpenRouter model={Model}, category={Category}, status={Status}, provider request ID={ProviderRequestId}, retry={RetryCount}, delay milliseconds=0",
+                request.Model,
+                failure.Category,
+                failure.Metadata.HttpStatusCode,
+                failure.Metadata.ProviderRequestId,
+                retryCount + 1);
         }
+
+        return true;
+    }
+
+    private static bool IsRetryable(ChatModelFailureCategory category) =>
+        category is ChatModelFailureCategory.TemporaryInFlightBudget
+            or ChatModelFailureCategory.Timeout
+            or ChatModelFailureCategory.RateLimited
+            or ChatModelFailureCategory.ProviderUnavailable;
+
+    private static TimeSpan BackoffWithJitter(int retryCount)
+    {
+        var exponentialMilliseconds = 200 * Math.Pow(2, retryCount);
+        var jitterMilliseconds = Random.Shared.Next(25, 101);
+        return TimeSpan.FromMilliseconds(
+            Math.Min(exponentialMilliseconds + jitterMilliseconds, 2_000));
+    }
+
+    private static async Task<JsonDocument?> ReadResponseAsync(
+        HttpResponseMessage response,
+        bool requireJson,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            return await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
+        }
+        catch (JsonException) when (!requireJson)
+        {
+            return null;
+        }
+    }
+
+    private static TimeSpan? ParseRetryAfter(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("Retry-After", out var values))
+        {
+            return null;
+        }
+
+        var candidates = values.ToArray();
+        if (candidates.Length != 1)
+        {
+            return null;
+        }
+        var raw = candidates[0];
+
+        if (int.TryParse(
+                raw,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var seconds)
+            && seconds >= 0)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        if (DateTimeOffset.TryParse(
+                raw,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal,
+                out var retryAt))
+        {
+            var delay = retryAt - DateTimeOffset.UtcNow;
+            return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
+        }
+
+        return null;
     }
 
     private RequestPayload CreatePayload(ChatModelRequest request) =>
@@ -122,14 +323,95 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
                     JsonSerializer.Serialize(call.Arguments, JsonOptions)))).ToArray(),
             message.ToolCallId);
 
+    private static ChatModelException ParseError(
+        JsonElement root,
+        string requestedModel,
+        int httpStatusCode,
+        TimeSpan? retryAfter)
+    {
+        RequireObject(root);
+        if (!root.TryGetProperty("error", out var error)
+            || error.ValueKind != JsonValueKind.Object
+            || !error.TryGetProperty("code", out var codeProperty)
+            || codeProperty.ValueKind != JsonValueKind.Number
+            || !codeProperty.TryGetInt32(out var providerErrorCode))
+        {
+            return Failure(
+                ChatModelFailureCategory.ProtocolError,
+                requestedModel,
+                httpStatusCode);
+        }
+
+        string? limitSource = null;
+        if (error.TryGetProperty("metadata", out var metadata)
+            && metadata.ValueKind != JsonValueKind.Null)
+        {
+            if (metadata.ValueKind != JsonValueKind.Object)
+            {
+                return Failure(
+                    ChatModelFailureCategory.ProtocolError,
+                    requestedModel,
+                    httpStatusCode);
+            }
+
+            if (metadata.TryGetProperty("limit_source", out var limitSourceProperty)
+                && limitSourceProperty.ValueKind != JsonValueKind.Null)
+            {
+                if (limitSourceProperty.ValueKind != JsonValueKind.String)
+                {
+                    return Failure(
+                        ChatModelFailureCategory.ProtocolError,
+                        requestedModel,
+                        httpStatusCode);
+                }
+
+                limitSource = limitSourceProperty.GetString();
+            }
+        }
+
+        var category = Classify(providerErrorCode, limitSource, retryAfter);
+        return Failure(
+            category,
+            requestedModel,
+            httpStatusCode,
+            providerErrorCode,
+            OptionalString(root, "id"),
+            retryAfter,
+            limitSource);
+    }
+
+    private static ChatModelFailureCategory Classify(
+        int code,
+        string? limitSource,
+        TimeSpan? retryAfter) =>
+        code switch
+        {
+            400 or 404 => ChatModelFailureCategory.InvalidRequest,
+            401 => ChatModelFailureCategory.Authentication,
+            402 when string.Equals(
+                         limitSource,
+                         "openrouter_in_flight_budget",
+                         StringComparison.Ordinal)
+                     && retryAfter.HasValue =>
+                ChatModelFailureCategory.TemporaryInFlightBudget,
+            402 => ChatModelFailureCategory.CreditsExhausted,
+            403 => ChatModelFailureCategory.PolicyRejected,
+            408 or 504 => ChatModelFailureCategory.Timeout,
+            429 => ChatModelFailureCategory.RateLimited,
+            500 or 502 or 503 => ChatModelFailureCategory.ProviderUnavailable,
+            _ => ChatModelFailureCategory.UnknownProviderError
+        };
+
     private static ChatModelResponse ParseResponse(
         JsonElement root,
-        ChatModelRequest request)
+        ChatModelRequest request,
+        int httpStatusCode,
+        TimeSpan? retryAfter)
     {
         RequireObject(root);
         if (root.TryGetProperty("error", out _))
         {
-            throw Failure(ChatModelFailureCategory.UnknownProviderError, request.Model, 200);
+            throw ParseError(root, request.Model, httpStatusCode, retryAfter);
         }
 
         if (!root.TryGetProperty("choices", out var choices)
@@ -142,14 +424,24 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
         var choice = choices[0];
         RequireObject(choice);
         var finishReason = OptionalString(choice, "finish_reason");
-        if (finishReason == "length")
+        if (finishReason is "length" or "max_tokens")
         {
             throw new JsonException("Truncated model response.");
         }
 
-        if (finishReason == "content_filter")
+        if (finishReason is "content_filter" or "content_filtered")
         {
-            throw Failure(ChatModelFailureCategory.PolicyRejected, request.Model, 200);
+            throw Failure(
+                ChatModelFailureCategory.PolicyRejected,
+                request.Model,
+                httpStatusCode,
+                retryAfter: retryAfter);
+        }
+
+        if (finishReason is not null
+            && finishReason is not ("stop" or "tool_calls" or "function_call"))
+        {
+            throw new JsonException("Unrecognized completion finish reason.");
         }
 
         if (!choice.TryGetProperty("message", out var message))
@@ -308,13 +600,21 @@ public sealed class OpenRouterChatModelClient : IChatModelClient
     private static ChatModelException Failure(
         ChatModelFailureCategory category,
         string requestedModel,
-        int? status = null) =>
+        int? status = null,
+        int? providerErrorCode = null,
+        string? providerRequestId = null,
+        TimeSpan? retryAfter = null,
+        string? limitSource = null) =>
         new(
             category,
             new ChatModelFailureMetadata(
                 provider: ChatModelProviders.OpenRouter,
                 requestedModel: requestedModel,
-                httpStatusCode: status));
+                httpStatusCode: status,
+                providerErrorCode: providerErrorCode,
+                providerRequestId: providerRequestId,
+                retryAfter: retryAfter,
+                limitSource: limitSource));
 
     private sealed record RequestPayload(
         string Model,

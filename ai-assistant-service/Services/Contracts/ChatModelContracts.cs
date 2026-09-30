@@ -20,7 +20,8 @@ public sealed record ChatModelRequest
         string model,
         IReadOnlyList<ChatModelMessage> messages,
         IReadOnlyList<ChatModelTool>? tools,
-        int maxOutputTokens)
+        int maxOutputTokens,
+        TimeSpan? roundTimeout = null)
     {
         Model = RequireValue(model, nameof(model));
         ArgumentNullException.ThrowIfNull(messages);
@@ -37,15 +38,24 @@ public sealed record ChatModelRequest
                 "The output token limit must be greater than zero.");
         }
 
+        if (roundTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(roundTimeout),
+                "The round timeout must be greater than zero.");
+        }
+
         Messages = Array.AsReadOnly(messages.ToArray());
         Tools = tools is null ? null : Array.AsReadOnly(tools.ToArray());
         MaxOutputTokens = maxOutputTokens;
+        RoundTimeout = roundTimeout;
     }
 
     public string Model { get; }
     public IReadOnlyList<ChatModelMessage> Messages { get; }
     public IReadOnlyList<ChatModelTool>? Tools { get; }
     public int MaxOutputTokens { get; }
+    public TimeSpan? RoundTimeout { get; }
 
     private static string RequireValue(string value, string parameterName)
     {

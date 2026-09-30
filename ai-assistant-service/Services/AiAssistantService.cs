@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ai_assistant_service.Configuration;
 using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Contracts;
@@ -240,19 +241,44 @@ public sealed class AiAssistantService : IAiAssistantService
             category,
             metadata?.HttpStatusCode,
             metadata?.ProviderRequestId);
-        var answer = category switch
+        var answer = string.Equals(
+            profile.Provider,
+            ChatModelProviders.OpenRouter,
+            StringComparison.Ordinal)
+            ? OpenRouterFailureMessage(category)
+            : OllamaFailureMessage(category, metadata?.HttpStatusCode);
+        return new ChatResponse { Answer = answer, Model = profile.Model };
+    }
+
+    private static string OpenRouterFailureMessage(ChatModelFailureCategory category) =>
+        category switch
+        {
+            ChatModelFailureCategory.Timeout
+                or ChatModelFailureCategory.RateLimited
+                or ChatModelFailureCategory.TemporaryInFlightBudget
+                or ChatModelFailureCategory.ProviderUnavailable =>
+                "The AI assistant is temporarily busy. Please try again shortly.",
+            ChatModelFailureCategory.PolicyRejected =>
+                "The AI assistant could not process that request.",
+            ChatModelFailureCategory.ProtocolError =>
+                "The AI assistant returned an invalid response. Please try again.",
+            _ => "The AI assistant is unavailable right now."
+        };
+
+    private static string OllamaFailureMessage(
+        ChatModelFailureCategory category,
+        int? httpStatusCode) =>
+        category switch
         {
             ChatModelFailureCategory.LocalModelUnavailable =>
                 "The AI model is still being set up and isn't available yet. Please try again in a few minutes.",
             ChatModelFailureCategory.Timeout => "The AI model took too long to respond. Please try again.",
-            ChatModelFailureCategory.ProviderUnavailable when metadata?.HttpStatusCode is null =>
+            ChatModelFailureCategory.ProviderUnavailable when httpStatusCode is null =>
                 "I could not reach the AI model right now. Please try again shortly.",
             ChatModelFailureCategory.ProtocolError =>
                 "The AI assistant returned an invalid response. Please try again.",
             _ => "The AI model ran into a problem answering your request. Please try again shortly."
         };
-        return new ChatResponse { Answer = answer, Model = profile.Model };
-    }
 
     /// <summary>
     /// Scans tool-role messages for JSON arrays of task masters and extracts id+name pairs.

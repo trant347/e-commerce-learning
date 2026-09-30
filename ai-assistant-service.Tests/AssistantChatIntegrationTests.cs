@@ -83,6 +83,58 @@ public class AssistantChatIntegrationTests
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task OpenRouterRetryAfterToolRound_DoesNotReexecuteCompletedTool()
+    {
+        using var handler = new OpenRouterRetryHandler();
+        var tool = new SearchTool();
+        using var host = new HostBuilder()
+            .ConfigureAppConfiguration(configuration => configuration
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json")
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AiModels:Tasks:chat:Provider"] = "OpenRouter",
+                    ["AiModels:Tasks:chat:Model"] = "vendor/tool-model",
+                    ["AiModels:Tasks:chat:TimeoutSeconds"] = "10",
+                    ["AiModels:Tasks:chat:RequestTimeoutSeconds"] = "30",
+                    ["AiModels:Tasks:chat:MaxOutputTokens"] = "128",
+                    ["OpenRouter:BaseUrl"] = "https://openrouter.test/api/v1",
+                    ["OpenRouter:ApiKey"] = "test-api-key",
+                    ["OpenRouter:MaxRetries"] = "1"
+                }))
+            .ConfigureServices((context, services) =>
+            {
+                services.AddAiModelRouting(context.Configuration);
+                services.AddHttpClient<OpenRouterChatModelClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => handler);
+                services.AddSingleton<IToolDefinition>(tool);
+                services.AddSingleton<ToolRegistry>();
+                services.AddScoped<IAiAssistantService, AiAssistantService>();
+            })
+            .Build();
+        await host.StartAsync();
+        using var scope = host.Services.CreateScope();
+        var assistant = scope.ServiceProvider.GetRequiredService<IAiAssistantService>();
+
+        var response = await assistant.ChatAsync(
+            new ChatRequest { Message = "Find a landscaper" },
+            new ToolExecutionContext("alice", ["calendar.read"], "integration"),
+            CancellationToken.None);
+
+        Assert.Equal("Found Alice.", response.Answer);
+        Assert.Equal("vendor/tool-model", response.Model);
+        Assert.Equal(1, tool.Calls);
+        Assert.Equal(3, handler.Bodies.Count);
+        Assert.Equal(handler.Bodies[1], handler.Bodies[2]);
+        using var retried = JsonDocument.Parse(handler.Bodies[2]);
+        var messages = retried.RootElement.GetProperty("messages");
+        Assert.Equal(
+            "live-call",
+            messages[messages.GetArrayLength() - 1].GetProperty("tool_call_id").GetString());
+        await host.StopAsync();
+    }
+
     private sealed class ModelHandler(bool inlineCall) : HttpMessageHandler
     {
         public List<string> Bodies { get; } = [];
@@ -101,6 +153,49 @@ public class AssistantChatIntegrationTests
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
             };
         }
+    }
+
+    private sealed class OpenRouterRetryHandler : HttpMessageHandler
+    {
+        public List<string> Bodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (Bodies.Count == 1)
+            {
+                return Reply("""
+                    {"choices":[{"message":{"role":"assistant","tool_calls":[{
+                      "id":"live-call","type":"function","function":{
+                        "name":"search_task_masters",
+                        "arguments":"{\"category\":\"landscaping\"}"
+                      }
+                    }]}}]}
+                    """);
+            }
+
+            if (Bodies.Count == 2)
+            {
+                var unavailable = Reply(
+                    """{"error":{"code":503,"message":"temporarily unavailable"}}""",
+                    HttpStatusCode.ServiceUnavailable);
+                unavailable.Headers.TryAddWithoutValidation("Retry-After", "0");
+                return unavailable;
+            }
+
+            return Reply(
+                """{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Found Alice."}}]}""");
+        }
+
+        private static HttpResponseMessage Reply(
+            string body,
+            HttpStatusCode status = HttpStatusCode.OK) =>
+            new(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
     }
 
     private sealed class SearchTool : IToolDefinition

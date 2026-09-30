@@ -108,6 +108,13 @@ public class ChatModelContractsTests
                 tools: null,
                 maxOutputTokens: 0));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ChatModelRequest(
+                "model",
+                [new ChatModelMessage(ChatModelRoles.User, "hello")],
+                tools: null,
+                maxOutputTokens: 128,
+                roundTimeout: TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             new TaskModelProfile("chat", "Ollama", "qwen3:8b", 60, 30, 1024));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new TaskModelProfile("chat", "Ollama", "qwen3:8b", 60, 300, 0));

@@ -210,6 +210,57 @@ public class AiAssistantServiceTests
         resolver.Verify(r => r.Resolve("chat"), Times.Once);
     }
 
+    [Theory]
+    [InlineData(
+        ChatModelFailureCategory.Timeout,
+        "The AI assistant is temporarily busy. Please try again shortly.")]
+    [InlineData(
+        ChatModelFailureCategory.RateLimited,
+        "The AI assistant is temporarily busy. Please try again shortly.")]
+    [InlineData(
+        ChatModelFailureCategory.ProviderUnavailable,
+        "The AI assistant is temporarily busy. Please try again shortly.")]
+    [InlineData(
+        ChatModelFailureCategory.Authentication,
+        "The AI assistant is unavailable right now.")]
+    [InlineData(
+        ChatModelFailureCategory.CreditsExhausted,
+        "The AI assistant is unavailable right now.")]
+    [InlineData(
+        ChatModelFailureCategory.InvalidRequest,
+        "The AI assistant is unavailable right now.")]
+    [InlineData(
+        ChatModelFailureCategory.PolicyRejected,
+        "The AI assistant could not process that request.")]
+    [InlineData(
+        ChatModelFailureCategory.ProtocolError,
+        "The AI assistant returned an invalid response. Please try again.")]
+    public async Task OpenRouterFailureAfterToolExecution_UsesSafeProviderTextAndClearsMetadata(
+        ChatModelFailureCategory category,
+        string answer)
+    {
+        var tool = new RecordingTool(
+            "search_task_masters",
+            """[{"id":"live","name":"Alice"}]""");
+        var client = new RecordingClient(
+            (round, _) => round == 1
+                ? Task.FromResult(Calls(Call("call", tool.Name)))
+                : throw new ChatModelException(category),
+            provider: ChatModelProviders.OpenRouter);
+        var (service, _) = Service(client, [tool]);
+
+        var response = await service.ChatAsync(
+            new ChatRequest { Message = "search" },
+            Context,
+            CancellationToken.None);
+
+        Assert.Equal(answer, response.Answer);
+        Assert.Equal("configured-model", response.Model);
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
+        Assert.Equal(1, tool.CallCount);
+    }
+
     [Fact]
     public async Task ToolFailure_KeepsResultIdAndLetsModelFinish()
     {
@@ -379,10 +430,11 @@ public class AiAssistantServiceTests
 
     private sealed class RecordingClient(
         Func<int, CancellationToken, Task<ChatModelResponse>> respond,
-        int requestTimeoutSeconds = 300) : ITaskChatModelClient
+        int requestTimeoutSeconds = 300,
+        string provider = ChatModelProviders.Ollama) : ITaskChatModelClient
     {
         public TaskModelProfile Profile { get; } =
-            new("chat", "Ollama", "configured-model", 1, requestTimeoutSeconds, 128);
+            new("chat", provider, "configured-model", 1, requestTimeoutSeconds, 128);
         public List<(IReadOnlyList<ChatModelMessage> Messages, IReadOnlyList<ChatModelTool>? Tools,
             CancellationToken Token)> Requests { get; } = [];
 

@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Specification
 
-> Status: **In progress: tasks 1-7 implemented; OpenRouter errors, retries, telemetry, and deployment pending**
+> Status: **In progress: tasks 1-8 implemented; telemetry and deployment pending**
 >
 > Scope: `ai-assistant-service`, its tests, Docker Compose configuration, and
 > environment documentation.
@@ -424,7 +424,17 @@ privacy-preserving provider routing, `stream: false`, and each profile's model
 and output limit. It preserves native tool-call IDs, serializes arguments as the
 required JSON string, emits matching `tool_call_id` values for results, and maps
 resolved-model/request/usage fields only into diagnostic response metadata.
-Full status/envelope classification and bounded retries remain Task 8.
+Task 8 subsequently completed status/envelope classification and bounded retries.
+
+**Task 8 implementation:** OpenRouter failures now retain only allowlisted
+status, numeric provider code, request ID, retry delay, and in-flight-budget
+metadata. The adapter retries only the current model call and only for the
+specified transient categories, with one configured retry, valid `Retry-After`
+support, bounded jittered fallback, and the original round timeout as the
+non-resetting budget. A 402 requires both the matching limit source and a valid
+header. Caller cancellation escapes HTTP and delay handling, unsafe finish
+reasons fail before tool execution, and OpenRouter user-facing messages are
+selected at the assistant-service boundary without changing Ollama text.
 
 ### Tool-call identity
 
