@@ -25,15 +25,20 @@ public sealed class BookingApiClient : IBookingApiClient
         try
         {
             string path = $"/api/booking/{Uri.EscapeDataString(bookingId)}";
-            _logger.LogInformation("Fetching booking: {Path}", path);
 
             var response = await _httpClient.GetAsync(path, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Unable to fetch booking context from calendar-service");
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                "Unable to fetch booking context from calendar-service, exception type={ExceptionType}",
+                exception.GetType().Name);
             return "Booking data unavailable.";
         }
     }

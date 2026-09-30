@@ -4,6 +4,7 @@ using ai_assistant_service.Contracts;
 using ai_assistant_service.Services;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Tools;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -250,6 +251,20 @@ public class AiAssistantServiceTests
     }
 
     [Fact]
+    public async Task TypedCallerCancellation_EscapesFailureMapping()
+    {
+        var client = new RecordingClient((_, _) =>
+            throw new ChatModelException(ChatModelFailureCategory.CallerCancellation));
+        var (service, _) = Service(client, []);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.ChatAsync(
+                new ChatRequest { Message = "hello" },
+                Context,
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task RequestDeadline_CoversToolExecutionAndDoesNotStartAnotherRound()
     {
         var tool = new RecordingTool("search_task_masters", "", async token =>
@@ -268,10 +283,64 @@ public class AiAssistantServiceTests
         Assert.Empty(response.Mentions);
     }
 
+    [Fact]
+    public async Task InformationAndDebugLogs_ExcludePromptsArgumentsResultsAndCompletions()
+    {
+        var logger = new RecordingLogger<AiAssistantService>();
+        var tool = new RecordingTool(
+            "search_task_masters",
+            """[{"id":"sentinel-result-id","name":"sentinel-result-name"}]""");
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call(
+                "call",
+                tool.Name,
+                """{"sentinel_argument_key":"sentinel-argument-value","minRating":9}"""))
+            : Answer("sentinel-completion")));
+        var (service, _) = Service(client, [tool], logger);
+
+        await service.ChatAsync(new ChatRequest
+        {
+            Message = "sentinel-current-prompt",
+            History = [new() { Role = "user", Content = "sentinel-history-prompt" }]
+        }, Context, CancellationToken.None);
+
+        Assert.DoesNotContain(
+            logger.Entries.Where(entry => entry.Level is LogLevel.Debug or LogLevel.Information),
+            entry => entry.Message.Contains("sentinel", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ToolExceptionDetails_AreNotLogged()
+    {
+        var logger = new RecordingLogger<AiAssistantService>();
+        var tool = new RecordingTool(
+            "search_task_masters",
+            "",
+            _ => throw new InvalidOperationException("sentinel-private-exception"));
+        var client = new RecordingClient((round, _) => Task.FromResult(round == 1
+            ? Calls(Call("call", tool.Name))
+            : Answer("safe answer")));
+        var (service, _) = Service(client, [tool], logger);
+
+        await service.ChatAsync(
+            new ChatRequest { Message = "search" },
+            Context,
+            CancellationToken.None);
+
+        Assert.DoesNotContain(
+            logger.Entries,
+            entry => entry.Message.Contains("sentinel", StringComparison.OrdinalIgnoreCase)
+                || entry.Exception?.ToString().Contains(
+                    "sentinel",
+                    StringComparison.OrdinalIgnoreCase) == true);
+    }
+
     private static readonly ToolExecutionContext Context = new("alice", ["calendar.read"], "correlation-1");
 
     private static (AiAssistantService, Mock<ITaskChatModelResolver>) Service(
-        RecordingClient client, IReadOnlyList<IToolDefinition> tools)
+        RecordingClient client,
+        IReadOnlyList<IToolDefinition> tools,
+        ILogger<AiAssistantService>? logger = null)
     {
         var resolver = new Mock<ITaskChatModelResolver>(MockBehavior.Strict);
         resolver.Setup(r => r.Resolve("chat")).Returns(client);
@@ -294,7 +363,7 @@ public class AiAssistantServiceTests
             }]
         }));
         return (new AiAssistantService(prompt, resolver.Object,
-            new ToolRegistry(tools), NullLogger<AiAssistantService>.Instance), resolver);
+            new ToolRegistry(tools), logger ?? NullLogger<AiAssistantService>.Instance), resolver);
     }
 
     private static ChatModelToolCall Call(string id, string name, string arguments = "{}")
@@ -344,6 +413,25 @@ public class AiAssistantServiceTests
             LastArgs = arguments;
             CallCount++;
             return execute?.Invoke(cancellationToken) ?? Task.FromResult(result);
+        }
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(state, exception), exception));
         }
     }
 }

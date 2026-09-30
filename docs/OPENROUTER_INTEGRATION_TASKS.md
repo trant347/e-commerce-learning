@@ -230,7 +230,7 @@ Paid evaluation and production deployment require separate operator approval.
     The full assistant suite passes 146 tests; the existing NU1902 dependency
     advisory remains unchanged.
 
-- [ ] **6. Complete safe failure handling and remove unsafe existing logs.**
+- [x] **6. Complete safe failure handling and remove unsafe existing logs.**
   Depends on 4-5. Map failures in `AiAssistantService`, outside the tool loop's
   provider-independent logic. Keep the specified Ollama messages and deliberate
   invalid-output/cancellation changes. Handled failures return safe text, the
@@ -241,6 +241,22 @@ Paid evaluation and production deployment require separate operator approval.
   and the assistant's Debug override; redact headers and audit exception logs.
   **Done when:** failure/cancellation tests pass and captured Information/Debug
   logs contain no sentinel keys, prompts, arguments, results, or completions.
+
+  **Implemented 2026-09-29:**
+
+  - `AiAssistantService` keeps provider failure presentation at the service
+    boundary, clears sources and mentions after failures, preserves the existing
+    Ollama messages, and lets both ordinary and typed caller cancellation escape.
+    Failure logs retain only validated task/provider/model and allowlisted status
+    and provider-request metadata.
+  - Removed actor values, dropped-filter names, tool-result payloads, extracted
+    IDs/names, JSON exception text, and exception objects from assistant logs.
+    Tool execution now records only the tool name, exception type, result length,
+    and outcome metadata. The booking tool client no longer logs booking IDs or
+    exception details and now propagates caller cancellation.
+  - Removed the assistant-specific Debug overrides from both appsettings files.
+    Tests run a capturing Debug logger with sentinel prompts, arguments, results,
+    completions, and exception messages to prevent payload regressions.
 
 **Phase gate:** Ollama still completes the existing flows with the new boundary.
 Successful behavior is preserved; intentional error/cancellation changes are

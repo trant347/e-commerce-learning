@@ -49,9 +49,18 @@ public sealed class AiAssistantService : IAiAssistantService
             return FailureResponse(client.Profile, ChatModelFailureCategory.Timeout);
         }
         catch (ChatModelException exception)
+            when (exception.Category == ChatModelFailureCategory.CallerCancellation)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return FailureResponse(client.Profile, exception.Category, exception.Metadata.HttpStatusCode);
+            throw new OperationCanceledException(
+                "The chat model request was canceled.",
+                exception,
+                cancellationToken);
+        }
+        catch (ChatModelException exception)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return FailureResponse(client.Profile, exception.Category, exception.Metadata);
         }
     }
 
@@ -62,8 +71,7 @@ public sealed class AiAssistantService : IAiAssistantService
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
-            "Starting chat request for actor={Actor}, scope count={ScopeCount}, message length={MessageLength}",
-            executionContext.Actor,
+            "Starting chat request with scope count={ScopeCount}, message length={MessageLength}",
             executionContext.AuthorizedScopes.Count,
             request.Message?.Length ?? 0);
 
@@ -151,8 +159,8 @@ public sealed class AiAssistantService : IAiAssistantService
                 if (removedFilters.Count > 0)
                 {
                     _logger.LogInformation(
-                        "Dropped search filters not stated by the user: {Filters}",
-                        string.Join(", ", removedFilters));
+                        "Dropped {FilterCount} search filters not stated by the user",
+                        removedFilters.Count);
                 }
 
                 _logger.LogInformation("Executing tool={ToolName}", toolName);
@@ -172,10 +180,13 @@ public sealed class AiAssistantService : IAiAssistantService
                 {
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception exception)
                 {
                     hadToolExecutionFailure = true;
-                    _logger.LogError(ex, "Tool execution failed for tool={ToolName}", toolName);
+                    _logger.LogError(
+                        "Tool execution failed for tool={ToolName}, exception type={ExceptionType}",
+                        toolName,
+                        exception.GetType().Name);
                     // Return a safe tool payload so the chat can continue without crashing the request.
                     result = "{\"error\":\"tool_unavailable\",\"message\":\"Marketplace tool is temporarily unavailable.\"}";
                 }
@@ -217,17 +228,24 @@ public sealed class AiAssistantService : IAiAssistantService
     }
 
     private ChatResponse FailureResponse(
-        TaskModelProfile profile, ChatModelFailureCategory category, int? httpStatusCode = null)
+        TaskModelProfile profile,
+        ChatModelFailureCategory category,
+        ChatModelFailureMetadata? metadata = null)
     {
         _logger.LogWarning(
-            "Chat failed for task={TaskId}, provider={Provider}, model={Model}, category={Category}, status={Status}",
-            profile.TaskId, profile.Provider, profile.Model, category, httpStatusCode);
+            "Chat failed for task={TaskId}, provider={Provider}, model={Model}, category={Category}, status={Status}, provider request ID={ProviderRequestId}",
+            profile.TaskId,
+            profile.Provider,
+            profile.Model,
+            category,
+            metadata?.HttpStatusCode,
+            metadata?.ProviderRequestId);
         var answer = category switch
         {
             ChatModelFailureCategory.LocalModelUnavailable =>
                 "The AI model is still being set up and isn't available yet. Please try again in a few minutes.",
             ChatModelFailureCategory.Timeout => "The AI model took too long to respond. Please try again.",
-            ChatModelFailureCategory.ProviderUnavailable when httpStatusCode is null =>
+            ChatModelFailureCategory.ProviderUnavailable when metadata?.HttpStatusCode is null =>
                 "I could not reach the AI model right now. Please try again shortly.",
             ChatModelFailureCategory.ProtocolError =>
                 "The AI assistant returned an invalid response. Please try again.",
@@ -251,9 +269,6 @@ public sealed class AiAssistantService : IAiAssistantService
             {
                 var trimmed = msg.Content!.Trim();
 
-                _logger.LogDebug("[ExtractMentions] Tool message content ({Length} chars): {Content}",
-                    trimmed.Length, trimmed.Length > 500 ? trimmed[..500] + "..." : trimmed);
-
                 // Parse into a cloned root so we can safely dispose the document.
                 JsonElement root;
                 using (var doc = JsonDocument.Parse(trimmed))
@@ -269,13 +284,10 @@ public sealed class AiAssistantService : IAiAssistantService
                     var inner = root.GetString();
                     if (!string.IsNullOrWhiteSpace(inner))
                     {
-                        _logger.LogDebug("[ExtractMentions] Unwrapping double-encoded JSON string");
                         using var innerDoc = JsonDocument.Parse(inner);
                         root = innerDoc.RootElement.Clone();
                     }
                 }
-
-                _logger.LogDebug("[ExtractMentions] Parsed JSON, ValueKind={ValueKind}", root.ValueKind);
 
                 IEnumerable<JsonElement> items = root.ValueKind switch
                 {
@@ -297,15 +309,14 @@ public sealed class AiAssistantService : IAiAssistantService
                     {
                         var id   = idEl.GetString()   ?? string.Empty;
                         var name = nameEl.GetString() ?? string.Empty;
-                        _logger.LogDebug("[ExtractMentions] Found candidate: id={Id}, name={Name}", id, name);
                         if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name) && seen.Add(id))
                             mentions.Add(new TaskMasterMention { Id = id, Name = name });
                     }
                 }
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                _logger.LogWarning("[ExtractMentions] Tool content was not valid JSON: {Message}", ex.Message);
+                _logger.LogWarning("Tool result could not be parsed while extracting mentions");
             }
         }
 
