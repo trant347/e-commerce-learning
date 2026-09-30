@@ -16,7 +16,8 @@ The catalog phase introduced the admin-managed, database-backed catalog and
 selection-only forms. It did not change AI prompts, search-tool arguments,
 ranking, category limits, or natural-language resolution. Single-category
 search remains the contract; the previous proposed expansion to up to three
-categories has been superseded.
+categories has been superseded. A new, separately gated design now exists in
+[multi-category search](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md).
 
 ## Finalized data-model contract
 

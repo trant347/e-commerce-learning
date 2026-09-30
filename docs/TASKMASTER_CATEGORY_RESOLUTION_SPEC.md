@@ -11,6 +11,11 @@
 > related-category expansion, and replacing LLM interpretation with a general
 > deterministic resolver. Missing-category proposals remain a separate deferred
 > feature, not a prerequisite for improving AI matching.
+>
+> Amended (proposed): [multi-category search](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md)
+> reintroduces bounded search across at most three categories and 10 total
+> results. Its section 5 overrides this document's single-category,
+> ambiguity, and multiple-service rules; everything else here still applies.
 
 ## 1. Problem and decision
 
@@ -40,8 +45,9 @@ do not replace the catalog, and an enum does not prove semantic correctness.
 - Embeddings, vector databases, fuzzy spelling correction, or a larger model.
 - A general keyword/rules engine, object/action scoring, or related-category
   inference.
-- Searching several categories automatically or dropping a category filter
-  when a search returns no providers.
+- Searching several categories automatically (except the bounded grouped
+  search in the [multi-category spec](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md))
+  or dropping a category filter when a search returns no providers.
 - Category deletion, merging, retirement, or new profile attribute schemas.
 - Implementing missing-category proposals in this rollout.
 - Changing booking, payment, provider ranking, or search-result limits.
@@ -580,10 +586,15 @@ A future proposal design should retain these requirements:
 The previous optional one-to-three-category search and object/skill/related
 category scoring are no longer scheduled requirements. Reintroducing them
 would require a separate design and evidence that the conservative hybrid
-approach is insufficient.
+approach is insufficient. Multi-category search now has that separate design
+in [TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md),
+gated on its own evaluation; object/skill/related-category scoring remains
+superseded.
 
 ## Related documents
 
+- [Multi-category search](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md):
+  proposed bounded grouped search that amends section 5's single-category rule.
 - [Catalog completion record](TASKMASTER_CATEGORY_MANAGEMENT_TASKS.md):
   historical implementation checklist, not a competing future roadmap.
 - [Catalog operations and original reset guide](TASKMASTER_CATEGORY_DATABASE_RESET.md):
