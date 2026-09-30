@@ -184,6 +184,12 @@ public sealed class OllamaChatModelClient : IChatModelClient
                 : null);
     }
 
+    /// <summary>
+    /// Recovers a tool call that Ollama emitted as JSON in the assistant content
+    /// instead of the native <c>tool_calls</c> field. It extracts the JSON object,
+    /// then delegates tool-name, argument, and generated-ID validation to <see cref="ParseCall"/>.
+    /// </summary>
+    /// <returns>The recovered tool call, or <see langword="null"/> when the content is not a tool call.</returns>
     private static ChatModelToolCall? RecoverInlineCall(
         string? content,
         IReadOnlySet<string> allowedNames,
