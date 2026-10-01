@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Specification
 
-> Status: **In progress: tasks 1-11 implemented; operator-approved evaluation pending**
+> Status: **Tasks 1-13 delivered; evaluated chat profile failed release gates; task 14 production opt-in blocked**
 >
 > Scope: `ai-assistant-service`, its tests, Docker Compose configuration, and
 > environment documentation.

@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-11 are complete. Operator-approved evaluation remains pending.**
+Status: **Tasks 1-13 complete. The evaluated chat profile failed release gates; task 14 production opt-in is blocked.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -490,7 +490,7 @@ covered before introducing the external provider.
 
 ## Phase 3: Operator-approved non-production evaluation
 
-- [ ] **12. Prepare a bounded evaluation deployment.**
+- [x] **12. Prepare a bounded evaluation deployment.**
   Depends on 11. Obtain approval before paid calls. Create a dedicated
   credit-limited key, configure alerts, choose a model supporting `tools` and
   `max_tokens`, and review upstream retention/training terms. Define acceptable
@@ -499,7 +499,7 @@ covered before introducing the external provider.
   **Done when:** the chat profile/model and evaluation criteria are documented, deployment
   secrets are configured, and operators have a usable rollback procedure.
 
-  **Preparation recorded 2026-09-30; still pending operator setup:**
+  **Completed 2026-09-30:**
 
   - Operator selected `openai/gpt-4.1-mini`, a USD 2 dedicated-key limit, and
     one local non-production session of at most 30 chat requests or 60 minutes.
@@ -507,15 +507,14 @@ covered before introducing the external provider.
     proposed grounding/tool-selection/latency gates, scope, safe evidence and
     rollback in
     [the deployment evaluation plan](AI_ASSISTANT_DEPLOYMENT.md#task-12-bounded-non-production-chat-evaluation).
-  - **Blockers:** dedicated key and spending alerts are not configured.
-    Operator acceptance of privacy terms and proposed success criteria is
-    still required. No existing `.env` was read or modified; no containers
-    were started and no inference calls were made.
-  - Keep this task unchecked until setup is confirmed. Task 13 still requires
-    separate approval for paid requests; task 14 production approval is not
-    implied.
+  - Operator confirmed the dedicated key and working spending monitor, accepted
+    the privacy terms/criteria and approved bounded task-13 paid calls and
+    non-production restart/rollback. The current-key API independently verified
+    the USD 2 lifetime limit, no reset, non-management status and zero initial
+    usage. Credential values were not printed or committed; `.env` was not edited.
+  - Task 14 production approval is not implied.
 
-- [ ] **13. Run smoke scenarios and rehearse rollback.**
+- [x] **13. Run smoke scenarios and rehearse rollback.**
   Depends on 12. Exercise TaskMaster MCP search, the existing local booking
   tool, final answers from tool results, follow-up history, and safe invalid-key
   handling. Compare representative category prompts with Ollama for correctness,
@@ -529,9 +528,30 @@ covered before introducing the external provider.
   **Done when:** non-sensitive evidence records outcomes against the agreed
   criteria, and failures are resolved or explicitly block rollout.
 
+  **Executed 2026-09-30; rollout explicitly blocked:**
+
+  - Recorded 19 OpenRouter-configured application requests, including warm-ups
+    and invalid-key handling, with reported spend USD 0.016990. Compared ten
+    warm service-search samples per provider on the same fictional fixture.
+  - OpenRouter category/tool selection passed 8/10 versus Ollama 10/10.
+    Both location-only samples incorrectly added a service category and
+    misleadingly reported no matching providers.
+  - Warm p95 was 2.551 s versus Ollama 1.648 s (1.548x); the absolute 60 s
+    gate passed, but the agreed 1.2x relative gate failed.
+  - Grounded search answers, explicit filters, follow-up ranking, unsupported
+    service abstention, honest empty results, read-only booking-tool invocation,
+    invalid-key safety and metadata-only telemetry were exercised. Fresh
+    assistant startup left Ollama stopped; rollback restored a working Ollama
+    chat. Synthetic mixed-profile harness coverage also passed.
+  - See [the recorded evidence and limitations](AI_ASSISTANT_DEPLOYMENT.md#task-13-recorded-evaluation-outcome).
+    Completing the evaluation does not mean its release gates passed.
+
 ## Phase 4: Production opt-in
 
 - [ ] **14. Approve, deploy, and monitor the selected task mapping.**
+  **Blocked:** the evaluated profile failed task-13 selection and latency gates.
+  Resolve or explicitly review these failures and run an approved reevaluation
+  before considering production. Do not silently relax the accepted criteria.
   Depends on 13 and explicit deployment approval. Enable OpenRouter for chat only
   in the intended environment. Monitor failures, latency, tool rounds, tokens, and spend by task,
   and roll back if agreed criteria are breached. Retain the Ollama deployment

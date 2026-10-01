@@ -183,11 +183,10 @@ in Phase 3 of the integration checklist.
 
 ## Task 12: Bounded non-production chat evaluation
 
-**Preparation recorded September 30, 2026; not ready for paid execution.**
-The operator selected the profile and limits below. The dedicated key and
-spending alerts are not configured yet. Task 13 requires their completion,
-acceptance of the proposed criteria and privacy review below, and separate
-approval to make paid requests. Task 14 production approval is separate again.
+**Task 12 completed September 30, 2026 by operator confirmation and key-limit
+verification.** The operator confirmed a working spending monitor, accepted
+the criteria/privacy review and separately approved task 13. Its recorded
+outcome below blocks production; task 14 approval remains separate.
 
 ### Selected profile and limits
 
@@ -220,7 +219,7 @@ parameters, with USD 0.40 per million input tokens and USD 1.60 per million
 output tokens. Prices and eligibility can change; recheck before task 13.
 These rates are not a session-cost guarantee.
 
-### Operator setup checklist (still pending)
+### Operator setup checklist (confirmed for the recorded session; required for reruns)
 
 1. In [OpenRouter key settings](https://openrouter.ai/settings/keys), create a
    dedicated non-management evaluation key with a USD 2 lifetime credit limit
@@ -277,7 +276,7 @@ send. Do not use customer data, private repository content, real booking
 details or secrets. If actual eligible-provider terms cannot be accepted,
 block evaluation rather than silently assuming ZDR or weakening routing.
 
-### Proposed acceptance criteria (approve before task 13)
+### Acceptance criteria (accepted for the recorded session; reapprove changes)
 
 Freeze the catalog, synthetic provider/bookings fixture and labeled scenarios
 before comparing providers. Use the same fixture and user-authored history
@@ -348,3 +347,69 @@ evaluation key after the run if no other approved caller needs it. Do not run
 `down -v`, delete data or edit unrelated task profiles. For any actual mixed
 task map, use the per-task rollback section instead of assuming chat is the
 only caller.
+
+## Task 13: Recorded evaluation outcome
+
+**Evaluation executed; selected profile not approved for production.**
+Session: September 30, 2026, 22:28:19-22:36:48 EDT
+(October 1, 02:28:19-02:36:48 UTC). Source revision before evidence:
+`0386891`. The operator approved paid calls, isolated local restarts/rollback,
+fictional accounts and synthetic data; no production deployment was authorized.
+
+Fixture: 36 catalog IDs and 19 local provider profiles. Eighteen profiles came
+from the repository seed; the operator explicitly attested that all profiles,
+including the additional one, were fictional test data. Seed file SHA-256:
+`4d92a26bff4c94c8725efaa874395e233b669874861a4efe62b2f90f85d18726`.
+Three fresh fictional customer
+accounts were created; credential values and account identifiers are not
+included in evidence. No databases or volumes were reset.
+
+| Measure | Observed result | Gate |
+|---|---|---|
+| Warm search samples | 10 per provider: five scenarios, twice each; warm-ups excluded | Smoke sample floor met |
+| Category/tool selection | OpenRouter 8/10; Ollama 10/10 | **Failed** OpenRouter's 90% target |
+| Explicit location/rate/rating filters | No invented filters in observed calls | Passed |
+| Provider facts/mentions | Reviewed synthetic answers against fixture; returned mention IDs/names matched actual profiles | Passed observed cases |
+| Warm end-to-end p95 | OpenRouter 2.551 s; Ollama 1.648 s; ratio 1.548x | **Failed** 1.2x relative target; passed 60 s absolute target |
+| OpenRouter-configured app requests | 19 total, including two warm-ups and one invalid-key request | Within 30-request limit |
+| Reported key usage | USD 0.016990 after reconciliation, versus USD 2 limit | Within spending limits |
+| Invalid key | Safe unavailable answer, empty sources/mentions, Authentication classification, no tool execution/retry or key-sentinel logging | Passed |
+| Telemetry | Temporary local OTLP collector observed 30 chat spans, 58 model-round spans and token metrics; checked for prompt, credential-sentinel and actor leakage | Passed observed checks |
+| Fresh assistant deployment | Separate temporary Compose project reused existing domain services; OpenRouter search worked while Ollama stayed stopped and merged recipe excluded its services | Passed this startup/topology check |
+| Rollback | Real Ollama chat succeeded; restored `qwen3:8b`, 600/3000 s budgets and `OTEL_SDK_DISABLED=true` | Passed |
+
+Both location-only requests added unrelated service categories instead of
+omitting `category`, then misleadingly reported no matching providers.
+This was a real model-selection failure, not a blank/null transport failure.
+Other scenarios covered repair versus assembly, explicit budget/location,
+cleaning, follow-up ranking, unsupported services and empty-location results.
+The follow-up legitimately re-read provider data without inventing rate filters.
+
+The booking scenario invoked the existing read-only tool and requested a
+booking ID. Its current client cannot list bookings without an ID; this did
+not exercise authenticated retrieval of a calendar record or establish
+end-to-end booking-list support. No real booking records were sent.
+
+Twelve deterministic integration/telemetry tests passed, including synthetic
+mixed-provider/profile isolation. Those checks do not claim live production
+callers for additional tasks. A complete new database-backed stack was not
+created; the fresh-start check covered a new assistant container and the merged
+service graph against the existing fictional domain fixture.
+
+An initial smoke-harness guard mistook empty optional strings for invented
+filters; product logs showed they normalized to absent filters. The guard was
+corrected, that warm-up remained counted, and no application behavior or
+acceptance criteria were changed. Provider usage updates lagged requests;
+the reconciled figure above supersedes the immediate USD 0.0160008 snapshot.
+
+Temporary evaluation containers and the collector were removed. The local
+application remains on Ollama with telemetry disabled; the evaluation key
+remains installed but is not used by that chat profile. The operator may
+disable it if no other approved caller needs it. Raw synthetic review artifacts
+are not committed evidence.
+
+**Release blocker:** do not proceed to task 14 with this profile under the
+accepted criteria. Investigate location-only selection and latency or evaluate
+another explicitly approved chat profile, preserving the same fixture and
+recording any approved criterion changes. Jev and multi-category work remain
+separate and disabled.
