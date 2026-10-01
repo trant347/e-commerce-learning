@@ -131,6 +131,23 @@ public sealed class AuthenticationTests : IClassFixture<AuthenticationTests.AiAs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task Chat_WithBlankMessage_ReturnsBadRequestWithoutCallingAssistant(string message)
+    {
+        _factory.Assistant.Reset();
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", CreateToken("alice", ["ROLE_USER"]));
+
+        var response = await client.PostAsJsonAsync("/api/ai-assistant/chat", new { message });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null(_factory.Assistant.ExecutionContext);
+        Assert.Contains("Message is required.", await response.Content.ReadAsStringAsync());
+    }
+
     private static string CreateToken(
         string? username,
         IReadOnlyCollection<string> roles,

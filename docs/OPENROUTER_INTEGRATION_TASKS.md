@@ -414,7 +414,7 @@ covered before introducing the external provider.
   - A startup test applies each recipe's container environment (including both
     mixed directions with synthetic tasks) and verifies the per-task providers.
 
-- [ ] **11. Close automated integration and regression coverage.**
+- [x] **11. Close automated integration and regression coverage.**
   Depends on 7-10. Exercise task resolution and startup validation, seeded
   message serialization through the real adapters, multi-round tool execution,
   partial-progress failures, requested/resolved model behavior, and preserved
@@ -428,6 +428,51 @@ covered before introducing the external provider.
   Review the checklist against every criterion in spec Section 12.
   **Done when:** the assistant build and test suite pass, all three deployment recipes
   validate, and default CI remains deterministic with no paid OpenRouter calls.
+
+  **Implemented 2026-09-30:**
+
+  - Added real-adapter integration coverage for configured OpenRouter seeds and
+    live tool rounds, matching seeded/live IDs, history ordering, tools/output
+    caps on every round, requested versus resolved models, malicious public
+    routing fields, invalid arguments, authentication failures, and failures
+    after successful tool execution with cleared sources/mentions.
+  - Added simultaneous synthetic callers using both adapters and two OpenRouter
+    models. A rendezvous proves the calls overlap; assertions isolate transcripts,
+    tool schemas, output limits, credentials, responses, and task budgets.
+    A real HTTP-handler timeout on one provider leaves the other task running.
+    Unknown tasks and authentication failures cannot select another profile.
+  - Added configuration/restart coverage proving an existing bound selection
+    remains immutable and replacing chat's provider/model/budgets changes no
+    other profile. Startup tests reject incomplete/invalid unused profiles and
+    missing shared OpenRouter credentials/URL even while chat uses Ollama.
+    Authenticated blank requests retain the controller's existing rejection.
+  - Added `scripts/Test-AiAssistantDeployments.ps1` to the assistant CI job.
+    It renders all-Ollama, OpenRouter-only, and both mixed directions with fake
+    credentials, checks forwarded settings and active dependency/service graphs,
+    and rejects missing OpenRouter-only keys/models. It never starts containers
+    or invokes inference, and restores its environment/removes its temporary file.
+  - Assistant build and all 265 tests pass, including existing category grounding,
+    sources/mentions, tool execution-context authorization, cancellation/deadline,
+    logging, retry, Ollama, and telemetry regressions. All deployment recipes pass.
+    The Section 12 review below distinguishes automated closure from live rollout.
+
+  **Spec Section 12 acceptance review:**
+
+  | Criterion | Evidence/status |
+  |---|---|
+  | Provider-neutral assistant; only chat is a production caller | `AiAssistantService` resolves server-owned `chat` through provider-neutral contracts. |
+  | Configuration/restart selection, coexistence and per-task rollback | `TaskRoutingIntegrationTests` covers concurrent mixed/same-provider calls and isolated restart changes. |
+  | Unknown tasks and invalid profiles fail without defaults | Resolver integration and startup validation tests. |
+  | Multi-round OpenRouter tool IDs and valid initial seeds | `AssistantChatIntegrationTests` and adapter multi-call tests. |
+  | Malformed arguments never execute tools | Real OpenRouter orchestration test plus adapter invalid-output tests. |
+  | Grounding, authorization, sources, mentions and loop limits preserved | Full assistant regression suite, including authentication and reserved execution-metadata tests. |
+  | Any-profile secret validation and safe invalid-key failure | Startup and real-adapter authentication-failure tests; no real keys. |
+  | HTTP 200 errors, conditional 402 retries, budgets and output caps | OpenRouter adapter, resolver, orchestration and integration tests. |
+  | Metadata-only logs and observable server telemetry | Existing logging sentinel and in-process activity/meter tests. |
+  | Three documented recipes and task-specific rollback | Deployment guide and fake-credential Compose checks in default CI. |
+  | Tool-capable live chat model documented | Operator must select and record it in Phase 3; no default hosted slug is shipped. |
+  | Grounded MCP smoke test | Operator-approved Phase 3 remains pending; automated tests intentionally make no paid calls. |
+  | Configuration-only return to Ollama; no Ollama in fresh remote-only deployment | Restart tests, deployment guide and rendered service/dependency graphs. |
 
 ## Phase 3: Operator-approved non-production evaluation
 

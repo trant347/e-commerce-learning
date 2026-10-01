@@ -123,6 +123,11 @@ jobs:
       - name: Run tests
         run: dotnet test --no-restore --nologo --verbosity normal
 
+      - name: Validate AI deployment recipes with fake credentials
+        shell: pwsh
+        working-directory: .
+        run: ./scripts/Test-AiAssistantDeployments.ps1
+
   frontend-tests:
     name: frontend tests
     runs-on: ubuntu-latest

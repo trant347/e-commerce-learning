@@ -135,6 +135,120 @@ public class AssistantChatIntegrationTests
         await host.StopAsync();
     }
 
+    [Theory]
+    [InlineData("success")]
+    [InlineData("authentication")]
+    [InlineData("invalid-arguments")]
+    [InlineData("partial-progress")]
+    public async Task OpenRouterSeedsAndLiveRounds_PreserveIdentityRoutingAndRequestLocalMetadata(string outcome)
+    {
+        using var handler = new OpenRouterConversationHandler(outcome);
+        var tool = new SearchTool();
+        using var host = new HostBuilder()
+            .ConfigureAppConfiguration(configuration => configuration
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json")
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AiModels:Tasks:chat:Provider"] = "OpenRouter",
+                    ["AiModels:Tasks:chat:Model"] = "vendor/requested-model",
+                    ["OpenRouter:BaseUrl"] = "https://openrouter.test/api/v1",
+                    ["OpenRouter:ApiKey"] = "fake-integration-key",
+                    ["OpenRouter:MaxRetries"] = "0"
+                }))
+            .ConfigureServices((context, services) =>
+            {
+                services.AddAiModelRouting(context.Configuration);
+                services.AddHttpClient<OpenRouterChatModelClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => handler);
+                services.AddSingleton<IToolDefinition>(tool);
+                services.AddSingleton<ToolRegistry>();
+                services.AddScoped<IAiAssistantService, AiAssistantService>();
+            })
+            .Build();
+        await host.StartAsync();
+        using var scope = host.Services.CreateScope();
+        var request = JsonSerializer.Deserialize<ChatRequest>("""
+            {"message":"Find a landscaper","taskId":"synthetic","provider":"Ollama",
+             "model":"untrusted","history":[
+               {"role":"user","content":"history-user-sentinel"},
+               {"role":"assistant","content":"history-answer-sentinel"}]}
+            """, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var response = await scope.ServiceProvider.GetRequiredService<IAiAssistantService>()
+            .ChatAsync(request, new ToolExecutionContext("alice", [], "integration"), CancellationToken.None);
+
+        Assert.Equal("vendor/requested-model", response.Model);
+        Assert.Equal(outcome is "authentication" or "invalid-arguments" ? 0 : 1, tool.Calls);
+        Assert.Equal(outcome is "authentication" or "invalid-arguments" ? 1 : 2, handler.Bodies.Count);
+        using var first = JsonDocument.Parse(handler.Bodies[0]);
+        var messages = first.RootElement.GetProperty("messages");
+        Assert.Equal(["system", "user", "assistant", "tool", "assistant", "user", "assistant", "user"],
+            messages.EnumerateArray().Select(message => message.GetProperty("role").GetString()));
+        var seededCall = messages[2].GetProperty("tool_calls")[0];
+        var seedId = seededCall.GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(seedId));
+        Assert.NotEqual("live-search", seedId);
+        Assert.Equal(seedId, messages[3].GetProperty("tool_call_id").GetString());
+        using var seedArguments = JsonDocument.Parse(seededCall.GetProperty("function").GetProperty("arguments").GetString()!);
+        Assert.Equal("landscaping", seedArguments.RootElement.GetProperty("category").GetString());
+        Assert.Equal("history-user-sentinel", messages[5].GetProperty("content").GetString());
+        Assert.Equal("history-answer-sentinel", messages[6].GetProperty("content").GetString());
+        foreach (var body in handler.Bodies)
+        {
+            using var parsed = JsonDocument.Parse(body);
+            Assert.Equal("vendor/requested-model", parsed.RootElement.GetProperty("model").GetString());
+            Assert.Equal(1024, parsed.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.Single(parsed.RootElement.GetProperty("tools").EnumerateArray());
+        }
+        if (handler.Bodies.Count == 2)
+        {
+            using var next = JsonDocument.Parse(handler.Bodies[1]);
+            var followUp = next.RootElement.GetProperty("messages");
+            Assert.Equal("live-search", followUp[8].GetProperty("tool_calls")[0].GetProperty("id").GetString());
+            Assert.Equal("live-search", followUp[9].GetProperty("tool_call_id").GetString());
+            Assert.Contains("tm-live", followUp[9].GetProperty("content").GetString());
+        }
+        if (outcome == "success")
+        {
+            Assert.Equal("Found Alice.", response.Answer);
+            Assert.Equal(["search_task_masters"], response.Sources);
+            Assert.Equal("Alice", Assert.Single(response.Mentions).Name);
+        }
+        else
+        {
+            Assert.Empty(response.Sources);
+            Assert.Empty(response.Mentions);
+            Assert.DoesNotContain("sentinel", response.Answer);
+            Assert.DoesNotContain("fake-integration-key", response.Answer);
+            Assert.DoesNotContain("Found Alice.", response.Answer);
+        }
+        await host.StopAsync();
+    }
+
+    private sealed class OpenRouterConversationHandler(string outcome) : HttpMessageHandler
+    {
+        public List<string> Bodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("https://openrouter.test/api/v1/chat/completions", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("fake-integration-key", request.Headers.Authorization?.Parameter);
+            Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            var body = outcome == "authentication" || (outcome == "partial-progress" && Bodies.Count == 2)
+                ? """{"error":{"code":401,"message":"private-provider-sentinel"}}"""
+                : Bodies.Count == 2
+                    ? """{"model":"vendor/resolved-model","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Found Alice."}}]}"""
+                    : outcome == "invalid-arguments"
+                        ? """{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"live-search","type":"function","function":{"name":"search_task_masters","arguments":"[]"}}]}}]}"""
+                        : """{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"live-search","type":"function","function":{"name":"search_task_masters","arguments":"{\"category\":\"landscaping\"}"}}]}}]}""";
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
     private sealed class ModelHandler(bool inlineCall) : HttpMessageHandler
     {
         public List<string> Bodies { get; } = [];

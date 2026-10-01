@@ -153,6 +153,19 @@ docker compose exec ollama ollama pull <model-tag>
 
 ## Verifying a deployment
 
+Run the same deterministic recipe check used by CI from the repository root:
+
+```powershell
+.\scripts\Test-AiAssistantDeployments.ps1
+```
+
+It renders all-Ollama, OpenRouter-only, and both mixed directions using only
+fake credentials, checks forwarded profiles and active service/dependency graphs,
+and verifies that OpenRouter-only requires a key and model. It does not start
+containers, download models, or call OpenRouter. On Linux CI, run it with `pwsh`.
+This configuration check does not replace the operator-approved live smoke test
+in Phase 3 of the integration checklist.
+
 - `/health` only checks configuration and never calls a model.
 - An invalid or revoked key is only detected on the first real chat request. Users
   get a safe "unavailable" answer, and the logs show the `Authentication` failure category.

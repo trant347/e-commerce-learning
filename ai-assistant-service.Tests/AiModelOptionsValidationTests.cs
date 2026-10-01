@@ -10,6 +10,46 @@ namespace ai_assistant_service.Tests;
 
 public class AiModelOptionsValidationTests
 {
+    [Theory]
+    [InlineData("Model", "", "AiModels:Tasks:synthetic:Model")]
+    [InlineData("Provider", "Unknown", "AiModels:Tasks:synthetic:Provider")]
+    [InlineData("MaxOutputTokens", "0", "AiModels:Tasks:synthetic:MaxOutputTokens")]
+    [InlineData("RequestTimeoutSeconds", "", "AiModels:Tasks:synthetic:RequestTimeoutSeconds")]
+    [InlineData("key", "", "OpenRouter:ApiKey")]
+    [InlineData("url", "invalid", "OpenRouter:BaseUrl")]
+    public async Task HostStartup_ValidatesUnusedOpenRouterProfileAndSharedSettings(
+        string setting, string value, string expectedError)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["AiModels:Tasks:synthetic:Provider"] = "OpenRouter",
+            ["AiModels:Tasks:synthetic:Model"] = "vendor/synthetic",
+            ["AiModels:Tasks:synthetic:TimeoutSeconds"] = "10",
+            ["AiModels:Tasks:synthetic:RequestTimeoutSeconds"] = "30",
+            ["AiModels:Tasks:synthetic:MaxOutputTokens"] = "128",
+            ["OpenRouter:ApiKey"] = "fake-key",
+            ["OpenRouter:BaseUrl"] = "https://openrouter.test/api/v1"
+        };
+        values[setting switch
+        {
+            "key" => "OpenRouter:ApiKey",
+            "url" => "OpenRouter:BaseUrl",
+            _ => $"AiModels:Tasks:synthetic:{setting}"
+        }] = value;
+        using var host = new HostBuilder()
+            .ConfigureAppConfiguration(configuration => configuration
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json")
+                .AddInMemoryCollection(values))
+            .ConfigureServices((context, services) => services.AddAiModelRouting(context.Configuration))
+            .Build();
+
+        var exception = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+
+        Assert.Contains(expectedError, exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("fake-key", exception.Message);
+    }
+
     [Fact]
     public async Task HostStartup_FailsWhenChatProfileIsMissing()
     {
