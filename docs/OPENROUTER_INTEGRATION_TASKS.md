@@ -514,6 +514,30 @@ covered before introducing the external provider.
     usage. Credential values were not printed or committed; `.env` was not edited.
   - Task 14 production approval is not implied.
 
+  **Evaluation learning and follow-up plan (2026-09-30):**
+
+  - Task 13 found Ollama better on this smoke fixture: selection 10/10 versus
+    GPT-4.1-mini 8/10, and warm p95 1.648 s versus 2.551 s. This is not evidence
+    that Ollama is generally the better model.
+  - Both GPT failures were location-only searches: it added landscaping or
+    gardening instead of omitting category. Repeated failure on one scenario
+    suggests a prompt/instruction-fit issue worth investigating; randomness
+    remains possible, and causation has not been established.
+  - **Hypotheses, not verified causes:** local inference avoids external network
+    and upstream scheduling overhead across model rounds; the prompt/schema
+    were developed around Ollama, and the lone landscaping few-shot example
+    could bias category choice.
+  - The comparison used five scenarios repeated twice. With ten samples,
+    nearest-rank p95 is the slowest measured request; do not generalize quality
+    or latency from this small run.
+  - **Pending follow-up:** repeat location-only requests with varied wording,
+    then test a contrasting location-only example while holding the model,
+    fixture, budgets and other settings fixed. Measure per-round latency and
+    output length to distinguish routing overhead from generation variability.
+    Record changes/results separately; retain the current baseline and release
+    gates. This investigation has not run and needs a newly approved paid-call
+    budget/window. Do not add Jev or silently relax criteria to hide failures.
+
 - [x] **13. Run smoke scenarios and rehearse rollback.**
   Depends on 12. Exercise TaskMaster MCP search, the existing local booking
   tool, final answers from tool results, follow-up history, and safe invalid-key
