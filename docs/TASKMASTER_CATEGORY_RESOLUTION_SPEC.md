@@ -824,8 +824,9 @@ superseded.
   implemented conversational-model foundation; Jev is not a chat-model slug.
 - [Multi-category search](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md):
   proposed bounded grouped search that amends section 5's single-category rule.
-- [Catalog completion record](TASKMASTER_CATEGORY_MANAGEMENT_TASKS.md):
-  historical implementation checklist, not a competing future roadmap.
+- [Category management and Jev tasks](TASKMASTER_CATEGORY_MANAGEMENT_TASKS.md):
+  resumable implementation checklist and original catalog completion record;
+  the source specifications remain authoritative.
 - [Catalog operations and original reset guide](TASKMASTER_CATEGORY_DATABASE_RESET.md):
   administration and explicitly destructive legacy-bootstrap procedures.
   Do not run the reset for this hybrid rollout.

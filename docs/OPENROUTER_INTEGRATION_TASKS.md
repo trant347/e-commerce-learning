@@ -27,6 +27,13 @@ Do not configure `typesafe/jev-1.13` as `OPENROUTER_CHAT_MODEL`. Task 12 below
 prepares chat evaluation, not Jev category implementation; no paid calls are
 authorized by a documentation or code change.
 
+The resumable Jev/category-first checklist, completed product prerequisites,
+remaining assistant work and separately gated up-to-three-category extension
+are tracked in
+[TaskMaster Category Management and Jev Tasks](TASKMASTER_CATEGORY_MANAGEMENT_TASKS.md#active-plan-jev-category-first-integration).
+Use that checklist for Jev implementation; do not renumber or mark the
+remaining chat evaluation/deployment tasks complete on its behalf.
+
 Each task includes its own tests and completion criteria. Implement, test, verify,
 and commit small working increments rather than postponing tests until the end.
 Tasks in Phase 1 may share an increment where needed to keep the service buildable.

@@ -1,16 +1,18 @@
-# TaskMaster Category Management Completion Record
+# TaskMaster Category Management and Jev Tasks
 
-Status: **Historical record. Original catalog phase (tasks 1-11) complete.**
+Status: **Original catalog phase complete. Jev prerequisites JEV-01 and JEV-02 complete; remaining category-first and multi-category tasks pending.**
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
+Multi-category extension: [TaskMaster Multi-Category Search Specification](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md).
 
-The source specification is authoritative for current contracts and the new
-hybrid AI rollout. The phase numbers below refer to the original catalog
-project, not the new hybrid implementation phases. The historical requirement
+The specifications are authoritative; the active checklist below organizes
+the remaining work. The original phase numbers later in this file refer to
+the completed catalog project, not the new hybrid implementation phases.
+The historical requirement
 to implement missing-category proposals before AI improvements is withdrawn.
 No database reset is required for the hybrid rollout.
 
-## Completed scope
+## Completed original catalog scope
 
 The catalog phase introduced the admin-managed, database-backed catalog and
 selection-only forms. It did not change AI prompts, search-tool arguments,
@@ -45,6 +47,177 @@ interpretation remain unimplemented; see the source specification.
 Object terms, related-category scoring, merging,
 retirement, and required profile attributes remain outside the current rollout.
 Removing referenced categories requires an explicit reassignment policy.
+
+## Active plan: Jev category-first integration
+
+### Resume here
+
+As of September 30, 2026, **JEV-03 is the next implementation task**.
+Jev is not wired into the assistant, and multi-category search is not enabled.
+The intended flow is user request -> category decision against product-owned
+metadata -> validated MCP search -> grounded answer from a separate chat model.
+The first gated release retains one category; the MC tasks below add the
+planned maximum of one primary plus two alternatives.
+
+OpenRouter chat tasks 1-11 are complete; their evaluation tasks are separate.
+Do not set `OPENROUTER_CHAT_MODEL` to `typesafe/jev-1.13`. No task in this
+checklist authorizes paid inference or enabling the feature. Use fake HTTP
+handlers/model responses in default tests. Do not log or commit credentials;
+deployment examples and automated checks use fake secrets.
+
+Each implementation task includes focused tests in the same increment.
+Update its checkbox and completion note with the commit and any remaining
+blocker before stopping. Leave unfinished tasks unchecked; do not mark a
+feature complete merely because its configuration or specification exists.
+
+### Product prerequisites (complete)
+
+- [x] **JEV-01. Persist aliases and support admin editing.**
+  Product-owned normalized aliases, strict API validation, omitted-field
+  preservation, explicit clearing, public metadata and admin UI editing.
+  **Completed:** `9900479`.
+
+- [x] **JEV-02. Expose the rich catalog and validate search categories.**
+  Depends on JEV-01. Add `get_category_catalog`, immutable metadata snapshots
+  and deterministic versions through `CategoryCatalogService`. Validate
+  canonical categories before provider-cache reads; distinguish invalid,
+  unknown and unavailable-catalog failures. Preserve legacy discovery and
+  location-only searches.
+  **Completed:** `4d8e94c`.
+
+### Assistant integration (pending)
+
+- [ ] **JEV-03. Implement rich-catalog snapshot lifecycle.**
+  Depends on JEV-02. In new modes, refresh `get_category_catalog` and atomically
+  publish immutable IDs, metadata, version and last-successful-refresh time.
+  Build schema and decision context from the same request-captured snapshot.
+  Preserve legacy refresh behavior and adapt tool ownership/reconnect handling.
+  Validate schema, unique IDs, field limits, JSON-string wrapping, the
+  100-category ceiling and the default 12,000-character context limit.
+  **Done when:** tests cover metadata-only changes, malformed/empty responses,
+  last-good retention, five-minute expiry, refresh interval validation,
+  degraded readiness, cancellation and replacement tools. Unusable snapshots
+  block category searches, not unrelated tools.
+
+- [ ] **JEV-04. Add the separate Jev decision client and opt-in settings.**
+  Depends on JEV-02. Implement typed Decisions request/response contracts and
+  an HTTP adapter, separate from chat clients. Use server-owned intent/category
+  questions, live catalog criteria and explicit abstention options. Add
+  validated semantic-provider/model/endpoint/deadline/policy settings; require
+  the shared key when Jev is enabled even if chat uses Ollama. Keep legacy as
+  the default, with no startup inference and no automatic HTTP retries.
+  **Done when:** capturing-handler tests prove the Decisions endpoint/auth and
+  wire shape, strict option/distribution validation and numeric boundaries,
+  safe HTTP/error-envelope handling, cancellation and bounded deadlines.
+  Missing enabled settings fail startup safely; the chat profile is unchanged.
+
+- [ ] **JEV-05. Wire category-first orchestration and locked search arguments.**
+  Depends on JEV-03 and JEV-04. Implement the typed resolution outcomes and
+  semantic-provider selection behind `CategoryResolution:Mode`. Apply the
+  category gate to native and inline-recovered search calls, including searches
+  requested later in an initially non-search conversation. Lock accepted IDs;
+  the chat model extracts only explicit filters and produces grounded prose.
+  Preserve clarification history and user filters across replies.
+  **Done when:** uncertain intent, clarification, no-match and invalid
+  decisions search nothing; accepted decisions use only the captured catalog.
+  Empty provider results do not broaden categories. Public response/auth
+  contracts and unrelated booking flows remain unchanged.
+
+- [ ] **JEV-06. Add cross-boundary failure and response-integrity coverage.**
+  Depends on JEV-05. Share the request-wide deadline and existing repair/round
+  budget; allow at most one eligible malformed-decision repair, never auth,
+  credit or infrastructure repair. Surface safe unavailability without silent
+  provider/model fallback. Add metadata-only, bounded telemetry using existing
+  facilities, not new exporters.
+  **Done when:** deterministic integration tests cover failures, catalog
+  updates/outages, restarts/reconnect, clarification and malicious metadata.
+  Sources and mentions come only from tools executed for the current request,
+  never decisions, refreshes or few-shot results. Logs contain no decision
+  state, criteria, probability maps or raw provider bodies.
+
+- [ ] **JEV-07. Wire deployment variables and document rollback.**
+  Depends on JEV-04 and JEV-05. Forward explicit Jev settings through Compose,
+  document `.env.example` and deployment recipes, and keep the Decisions model
+  separate from `OPENROUTER_CHAT_MODEL`. Support Jev with Ollama chat and with
+  OpenRouter chat; account for both workloads sharing the server-side key.
+  **Done when:** fake-secret deployment checks cover both topologies and
+  disabled/misconfigured modes without containers making inference calls.
+  Rollback restores legacy/provider settings without resetting data or
+  removing credentials/infrastructure still needed by another caller.
+
+### Evaluation and release (pending; operator gates)
+
+- [ ] **JEV-08. Review metadata, prepare evaluation and freeze acceptance policy.**
+  Fixture/metadata preparation depends on JEV-02; live evaluation depends on
+  JEV-06 and JEV-07 plus explicit operator approval and a spend cap.
+  Review descriptions/aliases and version at least 120 labeled prompts across
+  the six specification groups, with separate tuning and held-out data.
+  Pin model/catalog/policy and evaluate single-category Jev against the
+  applicable legacy/catalog-grounded baselines; report accuracy, abstention,
+  confusion pairs, latency and cost using the specification's release gates.
+  **Done when:** reviewed thresholds and numeric tolerance are frozen and
+  held-out results are recorded. Do not guess production confidence thresholds.
+  If approval or a gate is missing, record the blocker and keep Jev disabled.
+
+- [ ] **JEV-09. Verify and release the single-category end-to-end flow.**
+  Depends on JEV-06, JEV-07 and JEV-08. Add deterministic end-to-end coverage
+  for metadata edits affecting new decisions, ambiguity searching nothing,
+  preserved filters and grounded provider responses. Stub model network calls.
+  Deploy product capabilities first; enable the assistant only with separate
+  operator approval after the gates pass.
+  **Done when:** the approved flow and rollback are verified and documented.
+  Multi-category support stays disabled until the separate MC gates pass.
+
+## Planned extension: up to three categories
+
+These tasks are separate from the first single-category Jev release. The
+current Jev contract selects one category; probabilities and clarification
+candidates are not automatic permission to search three categories.
+
+- [ ] **MC-01. Align the Jev decision specification with bounded alternatives.**
+  Depends on JEV-02; finalize before implementing alternative selection.
+  Reconcile the Jev single-choice contract with the multi-category amendment:
+  one primary, at most two distinct alternatives, explicit abstention and an
+  evaluated acceptance policy. Define how Jev responses authorize alternatives
+  without blindly taking the top three probabilities or conflating independent
+  questions. Preserve the default single-category behavior.
+  **Done when:** the source specifications agree on decision shape, selection
+  policy, search authorization, bounds and evaluation labels.
+
+- [ ] **MC-02. Implement grouped multi-category MCP search in product-service.**
+  Depends on JEV-02 and MC-01. Extend the existing search tool with validated
+  alternatives, authoritative checks for every ID, fair allocation,
+  cross-group deduplication and at most 10 providers combined. Preserve the
+  byte-compatible single-category success shape.
+  **Done when:** focused tests cover every validation error, empty/uneven
+  groups, 4/3/3 allocation, deduplication and grouped response metadata.
+
+- [ ] **MC-03. Wire bounded assistant alternatives, schemas and mentions.**
+  Depends on JEV-05, MC-01 and MC-02. Add
+  `CategorySearch:MaxCategories` (1-3, default 1), atomic primary/items enums,
+  validated Jev alternatives, native/inline search gates and grouped mentions.
+  Never silently truncate or allow the chat model to replace locked choices.
+  **Done when:** tests cover modes 1 and 3, array-valued primary rejection,
+  duplicate/excess alternatives, grounded filters, grouped results and
+  request-local sources/mentions. Mode 1 retains its existing behavior.
+
+- [ ] **MC-04. Evaluate, verify end-to-end and gate multi-category enablement.**
+  Depends on JEV-09 and MC-03. Update examples, add a deterministic grouped
+  Playwright scenario with stubbed AI calls, and apply the multi-category
+  specification's quality/latency gates. Paid evaluation and enabling require
+  explicit operator approval, independently of the single-category release.
+  **Done when:** recorded results meet the gates and rollback to
+  `CategorySearch:MaxCategories=1` is verified. No data reset is required.
+
+## Later optional hybrid fast path
+
+- [ ] **EXACT-01. Add product-owned exact resolution and the assistant branch.**
+  Depends on JEV-03 and JEV-05; not a prerequisite for the first Jev release.
+  Explicitly register `resolve_category_exact`, reuse `CategoryCatalogService`
+  for versions, and implement entire-input matching, collision clarification,
+  version reconciliation and bounded semantic fallback behind `hybrid`.
+  **Done when:** deterministic correctness/performance tests and separate
+  three-mode evaluation satisfy the source specification before enablement.
 
 ## Implementation before original Phase 1
 
@@ -146,13 +319,13 @@ enforced by the backend. Existing profiles and pending applications have an
 explicit reset outcome. REST, MCP category discovery, and forms share one source
 of truth. AI selection and search behavior remain unchanged.
 
-## Future work: consolidated in the source specification
+## Superseded original future work
 
 The original Phase 2/3 checklists are superseded, not completed. See the source
 specification for the proposed hybrid phases, acceptance criteria, and the
 separate deferred missing-category proposal requirements.
 
-The current direction retains single-category search, adds rich catalog
-metadata and clarification first, then introduces conservative exact matching
-with LLM interpretation for other requests. There is no requirement to build
-multi-category search, object/action scoring, or a broad rules engine.
+The active JEV checklist replaces those old checklists. Multi-category search
+is tracked separately above, not silently enabled by Jev integration.
+Missing-category proposals, object/action scoring and a broad rules engine
+remain outside this plan.
