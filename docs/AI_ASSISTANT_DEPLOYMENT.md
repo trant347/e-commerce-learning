@@ -180,3 +180,171 @@ in Phase 3 of the integration checklist.
 - Telemetry (source/meter `TaskMaster.AiAssistant`) is exported only when
   `OTEL_SDK_DISABLED=false` and a reachable OTLP collector is configured. Compose
   disables it by default.
+
+## Task 12: Bounded non-production chat evaluation
+
+**Preparation recorded September 30, 2026; not ready for paid execution.**
+The operator selected the profile and limits below. The dedicated key and
+spending alerts are not configured yet. Task 13 requires their completion,
+acceptance of the proposed criteria and privacy review below, and separate
+approval to make paid requests. Task 14 production approval is separate again.
+
+### Selected profile and limits
+
+| Item | Evaluation setting |
+|---|---|
+| Task/provider/model | `chat` / `OpenRouter` / `openai/gpt-4.1-mini` |
+| Deployment | Local non-production stack, Recipe 2; no public test endpoint |
+| Round/request/output budgets | 60 s / 300 s / 1024 tokens, as in the existing override |
+| Retry/routing policy | Existing maximum one eligible retry; `require_parameters=true`, `data_collection=deny` |
+| Dedicated key | Evaluation-only key, USD 2 lifetime limit, no scheduled reset |
+| Observation window | One session, at most 30 application chat requests or 60 minutes, whichever comes first |
+| Baseline | Base Compose Ollama `chat`, `qwen3:8b`, unchanged 600/3000 s budgets |
+| Scope | Existing MCP tools, local read-only `get_bookings`, history and grounded answers |
+
+All application requests count toward 30, including follow-ups, warm-ups,
+failures and reruns. One chat request can make multiple billable model rounds
+and retries; 30 requests is not a limit of 30 upstream calls. Do not run requests
+concurrently or share the evaluation key with other applications/tasks.
+The 60-minute window starts with the first paid request. Stop at any limit,
+any safety failure or the spending stop threshold below. Do not enable Jev,
+multi-category search or another production task caller for this evaluation.
+Do not start a request unless the remaining session time covers its full
+300-second request budget; finish or cancel in-flight work within the window.
+
+The [model documentation](https://openrouter.ai/openai/gpt-4.1-mini) advertises
+`tools` and `max_tokens`. The public
+[endpoint metadata](https://openrouter.ai/api/v1/models/openai/gpt-4.1-mini/endpoints)
+was checked on September 30, 2026: the OpenAI endpoint advertises both required
+parameters, with USD 0.40 per million input tokens and USD 1.60 per million
+output tokens. Prices and eligibility can change; recheck before task 13.
+These rates are not a session-cost guarantee.
+
+### Operator setup checklist (still pending)
+
+1. In [OpenRouter key settings](https://openrouter.ai/settings/keys), create a
+   dedicated non-management evaluation key with a USD 2 lifetime credit limit
+   and no reset schedule. Do not reuse an unrestricted key. Disable Auto Top-Up
+   for the evaluation account; do not change a shared account's billing without
+   its owner's approval. Do not raise the limit if the evaluation exhausts it.
+2. Configure a local/operator-controlled spending alert using the
+   [current-key endpoint](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key)
+   (`GET https://openrouter.ai/api/v1/key`) or an existing trusted monitoring
+   facility. Poll every 30 seconds while the session is active, alert
+   at USD 1 usage and stop issuing new requests at USD 1.50. Monitor failure or
+   missing/invalid usage data also stops the session. Display only numeric usage,
+   configured limit and remaining allowance; never headers, key labels or raw
+   responses. Verify alert delivery before paid evaluation.
+3. Treat [Activity](https://openrouter.ai/activity) and key usage as the spend
+   source of truth, not token estimates. The official
+   [spending guidance](https://openrouter.zendesk.com/hc/en-us/articles/51690568268059-How-do-I-cap-my-spending-and-stop-runaway-usage-from-coding-agents)
+   warns that in-flight calls can overshoot a key limit. Serial execution, a
+   USD 1.50 stop threshold and disabled Auto Top-Up provide headroom; a USD 2
+   key limit alone is not an exact total-billing guarantee. The reviewed
+   documentation does not establish a built-in configurable threshold alert:
+   do not mark alerts configured merely because a key limit exists. Manual
+   dashboard checks are supplemental, not proof of automatic alert delivery.
+4. Install the key locally as `OPENROUTER_API_KEY` and set
+   `OPENROUTER_CHAT_MODEL=openai/gpt-4.1-mini` in the untracked `.env`.
+   Do not paste the key into chat, commands, screenshots or committed files.
+   This preparation did not read or modify the existing `.env`.
+5. Confirm the upstream privacy review below and accept/finalize the proposed
+   success criteria. Record only configuration/readiness attestations, not
+   credentials or account identifiers. Obtain explicit task-13 paid-call
+   approval after these prerequisites are satisfied.
+
+### Upstream privacy review
+
+Reviewed September 30, 2026:
+
+- [OpenRouter provider policies](https://openrouter.ai/docs/guides/privacy/provider-logging)
+  distinguish training restrictions from retention. `data_collection=deny`
+  does not promise zero retention. The model slug is not an upstream-provider
+  pin; permitted same-model endpoints can vary.
+- [OpenAI API data controls](https://developers.openai.com/api/docs/guides/your-data)
+  state that API data is not used for training by default, but abuse-monitoring
+  logs can retain content for up to 30 days, with stated exceptions. Approved
+  zero-data-retention controls are not assumed for this key.
+- The public OpenRouter provider-policy metadata currently lists OpenAI and
+  Azure as not training on prompts, but with different retention flags.
+  Metadata is not a substitute for applicable provider terms; recheck every
+  eligible provider and account privacy settings before execution.
+
+Use only fictional evaluation accounts, synthetic bookings/provider records
+and synthetic requests. Existing tools send returned records to the chat
+model: synthetic user prompts alone do not make real tool results safe to
+send. Do not use customer data, private repository content, real booking
+details or secrets. If actual eligible-provider terms cannot be accepted,
+block evaluation rather than silently assuming ZDR or weakening routing.
+
+### Proposed acceptance criteria (approve before task 13)
+
+Freeze the catalog, synthetic provider/bookings fixture and labeled scenarios
+before comparing providers. Use the same fixture and user-authored history
+for OpenRouter and Ollama. Run labeled scenarios twice where the 30-request
+cap permits; count every turn separately and reserve room for failure checks.
+Use at least 10 completed service-search samples for latency reporting.
+
+| Measure | Proposed pass gate |
+|---|---|
+| Tool/category selection | At least 90% of labeled applicable decisions are correct; report search, booking and unsupported cases separately |
+| Explicit filter grounding | 100% retain supplied filters and invent no location, budget or rating |
+| Answer grounding | Zero invented provider/booking facts; zero sources/mentions from unexecuted tools or seeded examples |
+| Empty results/history | Honest empty results; follow-up ranking uses verified data without invented filters or category broadening |
+| Authentication/failure safety | Invalid key yields safe unavailability with no tool execution or sensitive logs; do not retry auth failures |
+| Warm end-to-end latency | p95 at most 60 s and at most 1.2 times the paired Ollama baseline; report sample count and variability |
+| Spend/window | No new calls at USD 1.50 usage; total observed usage at most USD 2, 30 requests and 60 minutes |
+| Operations | Required topology, restart, telemetry and rollback checks from task 13 pass |
+
+Small samples are smoke evidence, not proof of general category accuracy.
+Record baseline failures honestly; do not relax criteria or change model,
+fixtures or prompts mid-run without stopping and approving a revised plan.
+
+Task-13 scenarios must include wooden-cupboard repair (`carpentry`), flat-pack
+assembly (`furniture-assembly`), an explicit budget/location search, a
+location-only search, a cheapest-provider follow-up, read-only booking lookup,
+a known category with no matching providers, an unsupported service and safe
+invalid-key handling. Distinguish first-run/restart timing from warm timing.
+Infrastructure-only and synthetic mixed-profile checks must not add paid
+domain callers. Follow the existing task-13 telemetry prerequisites.
+
+Commit only scenario IDs, expected/observed pass flags, requested model,
+aggregate latency/cost/usage and sanitized failure categories. Never commit
+raw requests, histories, tool results, completions, credentials, booking IDs
+or account identifiers. Include the observation start/end and fixture revision.
+
+### Preparation checks and rollback
+
+The existing fake-secret check is safe to run now:
+
+```powershell
+.\scripts\Test-AiAssistantDeployments.ps1
+```
+
+After the operator installs the dedicated key, validate the real recipe
+without printing resolved credentials:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.openrouter.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.openrouter.yml config --services
+```
+
+These checks do not validate the key against OpenRouter or prove runtime
+startup/tool behavior. Do not start the evaluation stack or submit chat
+requests until task 13 is explicitly approved.
+
+For the chat-only evaluation, stop submitting requests and restore Ollama
+using Recipe 1 (base file only):
+
+```powershell
+docker compose config --quiet
+docker compose up -d --build
+```
+
+The base file restores Ollama infrastructure and chat's provider/model/budgets.
+Wait for initialization and verify `/health`, then rehearse a synthetic Ollama
+chat in task 13; `/health` alone does not prove model readiness. Disable the
+evaluation key after the run if no other approved caller needs it. Do not run
+`down -v`, delete data or edit unrelated task profiles. For any actual mixed
+task map, use the per-task rollback section instead of assuming chat is the
+only caller.

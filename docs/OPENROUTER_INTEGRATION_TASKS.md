@@ -499,6 +499,22 @@ covered before introducing the external provider.
   **Done when:** the chat profile/model and evaluation criteria are documented, deployment
   secrets are configured, and operators have a usable rollback procedure.
 
+  **Preparation recorded 2026-09-30; still pending operator setup:**
+
+  - Operator selected `openai/gpt-4.1-mini`, a USD 2 dedicated-key limit, and
+    one local non-production session of at most 30 chat requests or 60 minutes.
+  - Documented capability/pricing and upstream-policy review, key/alert setup,
+    proposed grounding/tool-selection/latency gates, scope, safe evidence and
+    rollback in
+    [the deployment evaluation plan](AI_ASSISTANT_DEPLOYMENT.md#task-12-bounded-non-production-chat-evaluation).
+  - **Blockers:** dedicated key and spending alerts are not configured.
+    Operator acceptance of privacy terms and proposed success criteria is
+    still required. No existing `.env` was read or modified; no containers
+    were started and no inference calls were made.
+  - Keep this task unchecked until setup is confirmed. Task 13 still requires
+    separate approval for paid requests; task 14 production approval is not
+    implied.
+
 - [ ] **13. Run smoke scenarios and rehearse rollback.**
   Depends on 12. Exercise TaskMaster MCP search, the existing local booking
   tool, final answers from tool results, follow-up history, and safe invalid-key
