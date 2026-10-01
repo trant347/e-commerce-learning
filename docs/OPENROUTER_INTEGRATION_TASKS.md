@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Tasks
 
-Status: **In progress; tasks 1-10 are complete. Integration coverage and evaluation remain pending.**
+Status: **In progress; tasks 1-11 are complete. Operator-approved evaluation remains pending.**
 
 Source: [OpenRouter Integration Specification](OPENROUTER_INTEGRATION_SPEC.md).
 The specification is authoritative; this checklist organizes its implementation.
@@ -19,6 +19,13 @@ here. Category resolution and hiring remain separate features; do not add their
 workflows, prompts, output schemas, or endpoints. Jev/Gemma are not hard-coded or
 assumed-compatible dependencies. Mixed Ollama/OpenRouter task maps are supported;
 synthetic internal callers demonstrate the foundation without adding features.
+
+Jev's verified Decisions API and category-first implementation sequence are now
+specified separately in
+[TaskMaster category resolution](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md#jev-category-first-integration-proposed).
+Do not configure `typesafe/jev-1.13` as `OPENROUTER_CHAT_MODEL`. Task 12 below
+prepares chat evaluation, not Jev category implementation; no paid calls are
+authorized by a documentation or code change.
 
 Each task includes its own tests and completion criteria. Implement, test, verify,
 and commit small working increments rather than postponing tests until the end.

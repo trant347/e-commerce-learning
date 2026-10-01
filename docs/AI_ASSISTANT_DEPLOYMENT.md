@@ -27,6 +27,14 @@ the OpenRouter key is required only if **any** task uses OpenRouter.
 Changes take effect after a restart. Nothing is live-reloaded, and a failing
 task never falls back to another task, model, or provider.
 
+**Jev is not a chat model.** Do not set
+`OPENROUTER_CHAT_MODEL=typesafe/jev-1.13`: this variable feeds the existing
+Chat Completions adapter, while Jev uses the separate Decisions API.
+[Jev category-first integration](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md#jev-category-first-integration-proposed)
+is specified but not implemented. Adding a category model variable to `.env`
+does not activate it. Keep the existing chat model and future category decision
+model separate; sharing an OpenRouter key does not make their APIs compatible.
+
 Compose does not forward host environment variables automatically. Every task
 setting must appear in the service's `environment` in a Compose file.
 

@@ -1,6 +1,6 @@
 # OpenRouter Integration and Task-Specific Model Specification
 
-> Status: **In progress: tasks 1-10 implemented; integration coverage and evaluation pending**
+> Status: **In progress: tasks 1-11 implemented; operator-approved evaluation pending**
 >
 > Scope: `ai-assistant-service`, its tests, Docker Compose configuration, and
 > environment documentation.
@@ -32,6 +32,38 @@ tool/function calling. Model slugs remain configuration, not application code.
 This phase implements the routing foundation and migrates existing chat only.
 Category resolution and hiring are separate features, not new workflows here.
 
+### Jev is a separate decision API, not a chat model
+
+Reviewed against the official Jev documentation on **September 30, 2026**:
+`typesafe/jev-1.13` is a TypeSafe decision model accessed through OpenRouter,
+not an OpenAI conversational model. It returns typed decisions and probabilities
+instead of generated text or assistant tool calls.
+
+The category-first design belongs in
+[TaskMaster category resolution](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md#jev-category-first-integration-proposed).
+It requires a separate Decisions API client:
+
+```text
+POST https://openrouter.ai/api/alpha/decisions
+```
+
+Do not assign Jev to `AiModels:Tasks:chat:Model` or `OPENROUTER_CHAT_MODEL`.
+Those settings select the model used by the existing Chat Completions adapter
+for every chat/tool round. Changing the slug does not change the API endpoint,
+request shape, parser, or workflow. Likewise, adding a `category_resolution`
+chat profile does not create a Decisions API caller.
+
+The intended separate feature is: user request -> Jev category decision ->
+application validation against the product-owned catalog -> marketplace search
+-> grounded response from the configured chat model. Jev never executes tools
+or supplies provider results. The same server-side OpenRouter key may be reused;
+credential reuse does not imply protocol compatibility.
+
+Only the chat foundation is implemented. Jev configuration, Decisions API
+translation, category gating and confidence evaluation remain proposed in the
+category spec. OpenRouter tasks 12-14 evaluate and deploy the existing chat
+foundation; they do not implicitly implement Jev.
+
 ### Goals
 
 - Allow `ai-assistant-service` to use an OpenRouter-hosted conversational model.
@@ -57,7 +89,9 @@ Category resolution and hiring are separate features, not new workflows here.
   cross-model/provider failover, or hot-reloading mappings during a request.
 - Implementing category-resolution or hiring workflows, their prompts, output
   schemas, endpoints, or tool permissions. A mapping alone creates no feature.
-- Committing to Jev, Gemma, or other unverified model slugs/capabilities.
+- Implementing Jev's Decisions API in the Chat Completions adapter or choosing
+  an operator's hosted chat model. Jev's verified decision capabilities belong
+  to the separate category-resolution feature.
 - Adding OpenRouter server tools, web search, plugins, or hosted MCP.
 - Changing the public `ChatRequest` or `ChatResponse` schema, except that
   `ChatResponse.Model` will contain the model configured for `chat`, including
