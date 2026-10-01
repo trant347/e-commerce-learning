@@ -4,6 +4,9 @@ import com.bookstore.productsevice.model.Category;
 import com.bookstore.productsevice.repository.CategoryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataAccessException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -23,6 +26,7 @@ import java.util.stream.Collectors;
 @Service
 public class CategoryService {
 
+    private static final Logger log = LoggerFactory.getLogger(CategoryService.class);
     static final int MAX_ID_LENGTH = 64;
     static final int MAX_DISPLAY_NAME_LENGTH = 80;
     static final int MAX_DESCRIPTION_LENGTH = 500;
@@ -47,13 +51,34 @@ public class CategoryService {
     }
 
     public List<Category> getCategories() {
-        return categoryRepository.findAllByOrderByDisplayNameAsc();
+        return readCatalog(categoryRepository::findAllByOrderByDisplayNameAsc);
     }
 
     public Category getCategory(String id) {
         String normalizedId = normalizeId(id);
-        return categoryRepository.findById(normalizedId)
+        return readCatalog(() -> categoryRepository.findById(normalizedId))
                 .orElseThrow(() -> new CategoryNotFoundException(normalizedId));
+    }
+
+    public String normalizeAndValidateSearchCategory(String category) {
+        String normalizedId;
+        try {
+            normalizedId = normalizeId(category);
+        } catch (CategoryValidationException exception) {
+            throw validationError(
+                    "invalid_category",
+                    exception.getMessage(),
+                    "category",
+                    "must be a valid canonical category ID");
+        }
+        if (!readCatalog(() -> categoryRepository.existsById(normalizedId))) {
+            throw validationError(
+                    "unknown_category",
+                    "Unknown category: '" + normalizedId + "'.",
+                    "category",
+                    "must identify an existing category");
+        }
+        return normalizedId;
     }
 
     public Category createCategory(String id,
@@ -150,7 +175,7 @@ public class CategoryService {
             }
         }
 
-        Set<String> existingIds = categoryRepository.findAllById(normalizedIds).stream()
+        Set<String> existingIds = readCatalog(() -> categoryRepository.findAllById(normalizedIds)).stream()
                 .map(Category::getId)
                 .collect(Collectors.toSet());
         List<String> unknownIds = normalizedIds.stream()
@@ -281,13 +306,13 @@ public class CategoryService {
     }
 
     private void ensureUniqueId(String id) {
-        if (categoryRepository.existsById(id)) {
+        if (readCatalog(() -> categoryRepository.existsById(id))) {
             throw duplicateId(id);
         }
     }
 
     private void ensureUniqueDisplayName(String normalizedDisplayName, String displayName) {
-        if (categoryRepository.existsByNormalizedDisplayName(normalizedDisplayName)) {
+        if (readCatalog(() -> categoryRepository.existsByNormalizedDisplayName(normalizedDisplayName))) {
             throw duplicateDisplayName(normalizeWhitespace(displayName));
         }
     }
@@ -324,5 +349,15 @@ public class CategoryService {
         Map<String, String> fieldErrors = new LinkedHashMap<>();
         fieldErrors.put(field, fieldMessage);
         return new CategoryValidationException(errorCode, message, fieldErrors);
+    }
+
+    private <T> T readCatalog(Supplier<T> query) {
+        try {
+            return query.get();
+        } catch (DataAccessException exception) {
+            log.error("Category catalog storage unavailable, exception type={}",
+                    exception.getClass().getSimpleName());
+            throw new CategoryCatalogUnavailableException(exception);
+        }
     }
 }

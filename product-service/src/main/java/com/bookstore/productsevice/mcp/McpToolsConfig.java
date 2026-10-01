@@ -1,6 +1,7 @@
 package com.bookstore.productsevice.mcp;
 
 import com.bookstore.productsevice.services.ProductCacheService;
+import com.bookstore.productsevice.category.CategoryCatalogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -22,7 +23,13 @@ public class McpToolsConfig {
     }
 
     @Bean
-    public ToolCallbackProvider taskMasterToolCallbackProvider(TaskMasterMcpTools tools) {
-        return ToolCallbackProvider.from(ToolCallbacks.from(tools));
+    public CategoryCatalogMcpTools categoryCatalogMcpTools(CategoryCatalogService catalogService) {
+        return new CategoryCatalogMcpTools(catalogService);
+    }
+
+    @Bean
+    public ToolCallbackProvider taskMasterToolCallbackProvider(
+            TaskMasterMcpTools tools, CategoryCatalogMcpTools catalogTools) {
+        return ToolCallbackProvider.from(ToolCallbacks.from(tools, catalogTools));
     }
 }

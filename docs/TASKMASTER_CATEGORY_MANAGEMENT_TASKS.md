@@ -38,8 +38,10 @@ specification.
 Aliases were excluded from the original completed phase. The first hybrid
 prerequisite added them on September 30, 2026: normalized product-owned arrays,
 strict admin API validation, omission-preserving updates and alias editing in
-the admin UI. Existing documents need no reset. Rich MCP catalog exposure and
-Jev interpretation remain unimplemented; see the source specification.
+the admin UI. The next prerequisite added versioned rich MCP catalog exposure
+and authoritative search-category validation, also on September 30, 2026.
+Existing documents need no reset. Assistant rich snapshots and Jev
+interpretation remain unimplemented; see the source specification.
 Object terms, related-category scoring, merging,
 retirement, and required profile attributes remain outside the current rollout.
 Removing referenced categories requires an explicit reassignment policy.

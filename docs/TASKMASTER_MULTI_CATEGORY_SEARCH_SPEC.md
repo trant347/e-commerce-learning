@@ -58,7 +58,8 @@ searching.
   optional `location`, `minRate`, `maxRate`, and `minRating`, and returns a
   JSON array of at most 10 TaskMasters (`TaskMasterMcpTools.MAX_RESULTS`).
 - `ProductCacheService.searchWithFilters` caches per
-  `category + location + filters + limit`;
+  `canonical category + location + filters + limit` after validating supplied
+  category IDs against the product-owned catalog, even on cache hits;
   `TaskMasterSearchRepositoryImpl.searchWithFilters` matches `jobCategories`
   exactly and applies `limit` with no explicit sort. Result order is therefore
   the repository's natural order, and this spec does not change it.
@@ -67,9 +68,11 @@ searching.
   `McpRemoteTool.NormalizeSchema` preserves only `type`, `description`, and
   `enum` for each property.
 - `ToolRegistry.FlattenToString` flattens every argument to a string. A
-  multi-element array is joined with commas. **Existing gap:** if the model
-  sends `"category": ["a", "b"]`, product-service receives `"a,b"`, which
-  matches no category and silently returns `[]`.
+  multi-element array is joined with commas. If the model sends
+  `"category": ["a", "b"]`, product-service receives `"a,b"` and now rejects it
+  with `invalid_category`; it no longer silently returns `[]`. The proposed
+  assistant gate below still needs to reject this shape before MCP execution
+  and explain the separate primary/alternative arguments.
 - `AiAssistantService.ExtractMentions` reads a top-level array, an object's
   `taskMasters` array, or a single object with `id`, but not grouped results.
 - The system prompt (`PromptOptions.SystemPrompt`) instructs the model to
@@ -99,7 +102,7 @@ fit, and never used to pad the search.
 
 ### 3.2 Validation
 
-Validate before any cache lookup or repository query. Reuse the shared
+Validate before any provider-cache lookup or provider repository query. Reuse the shared
 `CategoryService` validation defined in section 6 of the resolution
 specification; do not add a second validator.
 
@@ -119,7 +122,8 @@ specification; do not add a second validator.
    to repair the call.
 4. Reject a `category` value that contains a comma with `invalid_category`
    and a message telling the caller to use `alternativeCategories`. This
-   closes the silent `"a,b"` gap described in section 2.
+   preserves the current comma rejection and adds actionable guidance for the
+   new alternative-category argument.
 
 Errors use the existing MCP `{error, message}` envelope and are tool payloads,
 not transport statuses. Catalog storage failures return

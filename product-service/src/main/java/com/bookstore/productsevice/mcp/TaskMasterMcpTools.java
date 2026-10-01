@@ -1,6 +1,9 @@
 package com.bookstore.productsevice.mcp;
 
 import com.bookstore.productsevice.location.LocationValidationException;
+import com.bookstore.productsevice.category.CategoryCatalogUnavailableException;
+import com.bookstore.productsevice.category.CategoryValidationException;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.services.ProductCacheService;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -11,6 +14,7 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * MCP tool definitions for the TaskMaster domain.
@@ -73,14 +77,22 @@ public class TaskMasterMcpTools {
         log.info("[MCP] search_task_masters called: category='{}', location='{}', minRate='{}', maxRate='{}', minRating='{}'",
                 category, location, minRate, maxRate, minRating);
 
-        String sanitizedCategory = sanitizeString(category);
+        String sanitizedCategory = category == null ? null : category.trim();
         String sanitizedLocation = sanitizeString(location);
         Double minRateVal = parseDoubleOrNull(minRate);
         Double maxRateVal = parseDoubleOrNull(maxRate);
         Double minRatingVal = parseDoubleOrNull(minRating);
 
+        if (sanitizedCategory != null && sanitizedCategory.isEmpty()) {
+            return toJson(new ToolValidationError(
+                    "invalid_category",
+                    "Category must be a valid canonical category ID when supplied.",
+                    Map.of("category", "must not be empty")));
+        }
         if (sanitizedCategory == null && sanitizedLocation == null) {
-            return "{\"error\": \"Please specify the type of service or a location so I can help you find the right task master.\"}";
+            return toJson(new ToolValidationError(
+                    "invalid_category",
+                    "Please specify the type of service or a location so I can help you find the right task master."));
         }
 
         List<TaskMaster> results;
@@ -89,6 +101,10 @@ public class TaskMasterMcpTools {
                     sanitizedCategory, sanitizedLocation, minRateVal, maxRateVal, minRatingVal, MAX_RESULTS);
         } catch (LocationValidationException ex) {
             return toJson(new ToolValidationError("invalid_location", ex.getMessage()));
+        } catch (CategoryValidationException ex) {
+            return toJson(new ToolValidationError(ex.getErrorCode(), ex.getMessage(), ex.getFieldErrors()));
+        } catch (CategoryCatalogUnavailableException ex) {
+            return toJson(new ToolValidationError("category_catalog_unavailable", ex.getMessage()));
         }
 
         log.info("[MCP] search_task_masters returning {} results", results.size());
@@ -118,10 +134,13 @@ public class TaskMasterMcpTools {
     public String getCategories() {
         log.info("[MCP] get_categories called");
 
-        List<String> categories = productCacheService.getCategories();
-
-        log.info("[MCP] get_categories returning {} categories", categories.size());
-        return toJson(categories);
+        try {
+            List<String> categories = productCacheService.getCategories();
+            log.info("[MCP] get_categories returning {} categories", categories.size());
+            return toJson(categories);
+        } catch (CategoryCatalogUnavailableException ex) {
+            return toJson(new ToolValidationError("category_catalog_unavailable", ex.getMessage()));
+        }
     }
 
     private static String sanitizeString(String value) {
@@ -153,6 +172,10 @@ public class TaskMasterMcpTools {
         }
     }
 
-    private record ToolValidationError(String error, String message) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record ToolValidationError(String error, String message, Map<String, String> fieldErrors) {
+        private ToolValidationError(String error, String message) {
+            this(error, message, null);
+        }
     }
 }

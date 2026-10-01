@@ -131,8 +131,10 @@ public class ProductCacheService {
     }
 
     public List<TaskMaster> getByCategory(String category) {
-        String listKey = FILTER_PREFIX + "category:" + category;
-        return getViaFragmentCache(listKey, filterHits, filterMisses, () -> repository.findAllByJobCategoriesContaining(category));
+        String canonicalCategory = categoryService.normalizeAndValidateSearchCategory(category);
+        String listKey = FILTER_PREFIX + "category:" + canonicalCategory;
+        return getViaFragmentCache(listKey, filterHits, filterMisses,
+                () -> repository.findAllByJobCategoriesContaining(canonicalCategory));
     }
 
     public List<TaskMaster> getByMinRating(double minRating) {
@@ -155,9 +157,10 @@ public class ProductCacheService {
     }
 
     public List<TaskMaster> getByCategoryLimited(String category, int limit) {
-        String listKey = FILTER_PREFIX + "category:" + category + ":limit:" + limit;
+        String canonicalCategory = categoryService.normalizeAndValidateSearchCategory(category);
+        String listKey = FILTER_PREFIX + "category:" + canonicalCategory + ":limit:" + limit;
         return getViaFragmentCache(listKey, filterHits, filterMisses,
-                () -> repository.findAllByJobCategoriesContaining(category, PageRequest.of(0, limit)));
+                () -> repository.findAllByJobCategoriesContaining(canonicalCategory, PageRequest.of(0, limit)));
     }
 
     public List<TaskMaster> getByRateRangeLimited(double minRate, double maxRate, int limit) {
@@ -175,15 +178,18 @@ public class ProductCacheService {
     public List<TaskMaster> searchWithFilters(String category, String location,
                                                Double minRate, Double maxRate,
                                                Double minRating, int limit) {
+        String canonicalCategory = category == null
+                ? null
+                : categoryService.normalizeAndValidateSearchCategory(category);
         LocationSearchCriteria locationCriteria = location == null
                 ? null
                 : locationNormalizer.normalizeForSearch(location);
         String locationKey = locationCriteria == null ? "none" : locationCriteria.cacheKey();
-        String listKey = FILTER_PREFIX + "search:" + category + ":" + locationKey
+        String listKey = FILTER_PREFIX + "search:" + canonicalCategory + ":" + locationKey
                 + ":" + minRate + ":" + maxRate + ":" + minRating + ":limit:" + limit;
         return getViaFragmentCache(listKey, filterHits, filterMisses,
                 () -> repository.searchWithFilters(
-                        category,
+                        canonicalCategory,
                         locationCriteria,
                         minRate,
                         maxRate,

@@ -4,6 +4,7 @@ package com.bookstore.productsevice.errorhandler.advice;
 import com.bookstore.productsevice.category.CategoryConflictException;
 import com.bookstore.productsevice.category.CategoryNotFoundException;
 import com.bookstore.productsevice.category.CategoryValidationException;
+import com.bookstore.productsevice.category.CategoryCatalogUnavailableException;
 import com.bookstore.productsevice.errorhandler.ErrorDetail;
 import com.bookstore.productsevice.errorhandler.ErrorStatus;
 import com.bookstore.productsevice.errorhandler.Error;
@@ -110,6 +111,16 @@ public class ErrorAdvice {
                 "message", ex.getMessage(),
                 "fieldErrors", Map.of(ex.getField(), "must be unique"));
         return new ResponseEntity<>(body, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(CategoryCatalogUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleCategoryCatalogUnavailable(
+            CategoryCatalogUnavailableException ex) {
+        return new ResponseEntity<>(
+                Map.of(
+                        "error", "category_catalog_unavailable",
+                        "message", ex.getMessage()),
+                HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     @ExceptionHandler(CategoryNotFoundException.class)

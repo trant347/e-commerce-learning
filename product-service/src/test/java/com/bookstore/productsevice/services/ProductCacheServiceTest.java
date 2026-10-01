@@ -48,6 +48,7 @@ public class ProductCacheServiceTest {
         valueOps = mock(ValueOperations.class);
         repository = mock(TaskMasterRepository.class);
         categoryService = mock(CategoryService.class);
+        when(categoryService.normalizeAndValidateSearchCategory("Plumbing")).thenReturn("plumbing");
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
         cacheService = new ProductCacheService(
@@ -200,14 +201,14 @@ public class ProductCacheServiceTest {
 
     @Test
     public void getByCategory_cacheMiss_queriesDbAndCaches() {
-        when(valueOps.get("products:filter:category:Plumbing")).thenReturn(null);
-        when(repository.findAllByJobCategoriesContaining("Plumbing")).thenReturn(List.of(sampleTm1));
+        when(valueOps.get("products:filter:category:plumbing")).thenReturn(null);
+        when(repository.findAllByJobCategoriesContaining("plumbing")).thenReturn(List.of(sampleTm1));
 
         List<TaskMaster> result = cacheService.getByCategory("Plumbing");
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getName()).isEqualTo("Alice");
-        verify(valueOps).set(eq("products:filter:category:Plumbing"), eq(List.of("tm-1")), anyLong(), any());
+        verify(valueOps).set(eq("products:filter:category:plumbing"), eq(List.of("tm-1")), anyLong(), any());
     }
 
     @Test
@@ -363,22 +364,22 @@ public class ProductCacheServiceTest {
 
     @Test
     public void searchWithFilters_cacheMiss_passesLimitToRepository() {
-        String key = "products:filter:search:Plumbing:none:null:25.0:null:limit:10";
+        String key = "products:filter:search:plumbing:none:null:25.0:null:limit:10";
         when(valueOps.get(key)).thenReturn(null);
-        when(repository.searchWithFilters("Plumbing", null, null, 25.0, null, 10))
+        when(repository.searchWithFilters("plumbing", null, null, 25.0, null, 10))
                 .thenReturn(List.of(sampleTm1));
 
         List<TaskMaster> result = cacheService.searchWithFilters(
                 "Plumbing", null, null, 25.0, null, 10);
 
         assertThat(result).hasSize(1);
-        verify(repository).searchWithFilters("Plumbing", null, null, 25.0, null, 10);
+        verify(repository).searchWithFilters("plumbing", null, null, 25.0, null, 10);
         verify(valueOps).set(eq(key), eq(List.of("tm-1")), anyLong(), any());
     }
 
     @Test
     public void searchWithFilters_cacheHit_skipsDb() {
-        String key = "products:filter:search:Plumbing:city-or-state:new york:NY:null:null:null:limit:10";
+        String key = "products:filter:search:plumbing:city-or-state:new york:NY:null:null:null:limit:10";
         when(valueOps.get(key)).thenReturn(List.of("tm-1"));
         when(valueOps.multiGet(List.of("products:item:tm-1")))
                 .thenReturn(List.of(sampleTm1));
@@ -388,6 +389,7 @@ public class ProductCacheServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getName()).isEqualTo("Alice");
+        verify(categoryService).normalizeAndValidateSearchCategory("Plumbing");
         verify(repository, never()).searchWithFilters(
                 anyString(),
                 any(LocationSearchCriteria.class),
@@ -399,14 +401,14 @@ public class ProductCacheServiceTest {
 
     @Test
     public void searchWithFilters_differentLimits_useDifferentCacheKeys() {
-        String key5  = "products:filter:search:Plumbing:none:null:null:null:limit:5";
-        String key10 = "products:filter:search:Plumbing:none:null:null:null:limit:10";
+        String key5  = "products:filter:search:plumbing:none:null:null:null:limit:5";
+        String key10 = "products:filter:search:plumbing:none:null:null:null:limit:10";
 
         when(valueOps.get(key5)).thenReturn(null);
         when(valueOps.get(key10)).thenReturn(null);
-        when(repository.searchWithFilters("Plumbing", null, null, null, null, 5))
+        when(repository.searchWithFilters("plumbing", null, null, null, null, 5))
                 .thenReturn(List.of(sampleTm1));
-        when(repository.searchWithFilters("Plumbing", null, null, null, null, 10))
+        when(repository.searchWithFilters("plumbing", null, null, null, null, 10))
                 .thenReturn(List.of(sampleTm1, sampleTm2));
 
         List<TaskMaster> r5 = cacheService.searchWithFilters("Plumbing", null, null, null, null, 5);
@@ -427,16 +429,16 @@ public class ProductCacheServiceTest {
         // surfaces exactly what it returns and never exceeds the cap.
         List<TaskMaster> capped = generateTaskMasters(limit);
 
-        String key = "products:filter:search:Plumbing:none:null:null:null:limit:" + limit;
+        String key = "products:filter:search:plumbing:none:null:null:null:limit:" + limit;
         when(valueOps.get(key)).thenReturn(null);
-        when(repository.searchWithFilters("Plumbing", null, null, null, null, limit))
+        when(repository.searchWithFilters("plumbing", null, null, null, null, limit))
                 .thenReturn(capped);
 
         List<TaskMaster> result = cacheService.searchWithFilters(
                 "Plumbing", null, null, null, null, limit);
 
         assertThat(result).hasSize(limit);
-        verify(repository).searchWithFilters("Plumbing", null, null, null, null, limit);
+        verify(repository).searchWithFilters("plumbing", null, null, null, null, limit);
         // The cached id list should also contain at most `limit` ids
         List<String> expectedIds = capped.stream().map(TaskMaster::getId).collect(Collectors.toList());
         verify(valueOps).set(eq(key), eq(expectedIds), anyLong(), any());
@@ -445,16 +447,16 @@ public class ProductCacheServiceTest {
     @Test
     public void getByCategoryLimited_passesLimitAsPageable() {
         int limit = 10;
-        when(valueOps.get("products:filter:category:Plumbing:limit:" + limit)).thenReturn(null);
-        when(repository.findAllByJobCategoriesContaining(eq("Plumbing"), eq(PageRequest.of(0, limit))))
+        when(valueOps.get("products:filter:category:plumbing:limit:" + limit)).thenReturn(null);
+        when(repository.findAllByJobCategoriesContaining(eq("plumbing"), eq(PageRequest.of(0, limit))))
                 .thenReturn(generateTaskMasters(limit));
 
         List<TaskMaster> result = cacheService.getByCategoryLimited("Plumbing", limit);
 
         assertThat(result).hasSize(limit);
-        verify(repository).findAllByJobCategoriesContaining("Plumbing", PageRequest.of(0, limit));
+        verify(repository).findAllByJobCategoriesContaining("plumbing", PageRequest.of(0, limit));
         // Unlimited overload must not be invoked when the limited variant is requested
-        verify(repository, never()).findAllByJobCategoriesContaining("Plumbing");
+        verify(repository, never()).findAllByJobCategoriesContaining("plumbing");
     }
 
     @Test
@@ -505,9 +507,9 @@ public class ProductCacheServiceTest {
         int limit = 10;
         List<TaskMaster> few = generateTaskMasters(3);
 
-        String key = "products:filter:search:Plumbing:none:null:null:null:limit:" + limit;
+        String key = "products:filter:search:plumbing:none:null:null:null:limit:" + limit;
         when(valueOps.get(key)).thenReturn(null);
-        when(repository.searchWithFilters("Plumbing", null, null, null, null, limit))
+        when(repository.searchWithFilters("plumbing", null, null, null, null, limit))
                 .thenReturn(few);
 
         List<TaskMaster> result = cacheService.searchWithFilters(

@@ -1,6 +1,6 @@
 # TaskMaster Category Catalog and Hybrid Resolution Specification
 
-> Status: **Catalog and admin-managed aliases implemented; rich catalog, hybrid resolution and Jev integration proposed, not implemented**
+> Status: **Product catalog, aliases, rich MCP catalog and search-category validation implemented; assistant snapshots, hybrid resolution and Jev integration proposed, not implemented**
 >
 > This is the authoritative category design specification. It consolidates the
 > implemented catalog contract and the proposed hybrid AI matching design.
@@ -94,6 +94,7 @@ and server-managed creation/update timestamps and actors.
 | `POST /products/admin/categories` | Create with `id`, `displayName`, `description`, optional `aliases`; return `201` |
 | `PUT /products/admin/categories/{id}` | Update display name, description and optional `aliases`; omission preserves aliases, `[]` clears; return `200` |
 | MCP `get_categories` | Canonical ID array, unchanged for compatibility |
+| MCP `get_category_catalog` | Versioned rich catalog with IDs, names, descriptions and aliases; no arguments |
 | MCP `search_task_masters` | Optional `category` (omit for location-only searches); optional location/rate/rating filters; requires a category or location; at most 10 providers |
 
 Admin APIs require a valid JWT with `ROLE_ADMIN`; UI visibility is not
@@ -112,7 +113,9 @@ and the error envelope:
 
 `fieldErrors` is optional. Existing category errors include `invalid_category`,
 `unknown_category`, `duplicate_category_id`, and
-`duplicate_category_display_name`.
+`duplicate_category_display_name`. Catalog storage failures return
+`503 category_catalog_unavailable` on HTTP and an `{error, message}` tool
+payload on MCP; they are not successful empty catalogs or provider results.
 
 ### Current AI behavior and gaps
 
@@ -124,17 +127,20 @@ and the error envelope:
   response alone does not trigger reconnect.
 - `McpRemoteTool` supplies the enum to Ollama. Neither a schema enum nor the
   registry's scalar normalization is authoritative category validation.
-- `TaskMasterMcpTools` rejects a search with neither category nor location, but
-  passes supplied categories to `ProductCacheService.searchWithFilters` without
-  an authoritative existence check.
+- `TaskMasterMcpTools` rejects a search with neither category nor location.
+  Supplied categories are normalized and checked against the live catalog by
+  `CategoryService` before provider caches or repository searches. Explicitly
+  empty/malformed values are errors even if a location is supplied; omission
+  still permits the existing location-only search.
 - The assistant drops rate/rating filters whose value does not appear in the
   user's recent messages (`SearchFilterGrounding`). Location is not checked,
   because models legitimately rewrite it (for example `SF` to `San Francisco`).
 - The assistant's system prompt forces a best category/search, while the
   product tool description permits clarification. These instructions conflict.
-- Descriptions and admin-managed aliases exist in the catalog and REST metadata,
-  but MCP `get_categories` still supplies only IDs. The rich MCP catalog and
-  semantic decision clients are not implemented.
+- Descriptions and admin-managed aliases are exposed through
+  `get_category_catalog`; `get_categories` still supplies only IDs for legacy
+  clients. The assistant still refreshes the legacy ID list, not rich snapshots.
+  Semantic decision clients are not implemented.
 - Chat requests carry user/assistant history; the assistant currently uses
   only the last two history messages. There is no durable category-resolution
   conversation state.
@@ -203,9 +209,9 @@ continue preserving administrator-edited records. Populate useful aliases and
 refine existing descriptions through reviewed admin updates or an explicit,
 idempotent migration, not by overwriting metadata at every startup.
 
-## 4. Rich MCP catalog and snapshot lifecycle
+## 4. Rich MCP catalog (implemented) and assistant snapshots (proposed)
 
-Add product-owned MCP `get_category_catalog` with no model arguments:
+Product-owned MCP `get_category_catalog` accepts no model arguments:
 
 ```json
 {
@@ -229,14 +235,27 @@ consistent escaping. Use the same product-owned serialization helper for all
 version producers. Any ID, name, description, or alias change changes the
 version; timestamps and database iteration order do not.
 
+`CategoryCatalogService` is the shared snapshot and serialization helper.
+It reads the category collection once, copies public metadata into an immutable
+snapshot, sorts IDs and stored normalized aliases, and hashes the compact UTF-8
+category array using a dedicated Jackson mapper. Application-wide pretty
+printing/property-order settings cannot alter the digest. The MCP adapter
+serializes that same captured snapshot; it does not re-read the catalog to
+produce the payload. Future exact-resolution version producers must reuse
+this helper, not create a second digest implementation.
+
 Build this small catalog from `CategoryService` initially rather than adding a
 second Redis metadata cache. Derive the digest and payload from the same
 materialized list. If caching is later introduced, it must reuse catalog-write
 invalidation and prevent stale fills; that optimization is not required here.
 Keep existing ID-list cache invalidation after admin mutations.
 
-Register the new tool explicitly through `McpToolsConfig`; discovery remains
-generic. Preserve `get_categories` and its array shape for older clients.
+`CategoryCatalogMcpTools` is registered explicitly through `McpToolsConfig`
+alongside the existing TaskMaster tools, not through component discovery.
+Discovery remains generic. `get_categories` and its array shape are preserved
+for older clients. Empty catalog reads remain valid empty catalog snapshots;
+storage failures return `category_catalog_unavailable` rather than an empty
+snapshot. The proposed assistant rejects an empty snapshot for new decisions.
 
 In the new assistant mode, evolve the existing refresh mechanism to obtain
 rich metadata and publish one immutable snapshot containing IDs, metadata,
@@ -496,9 +515,10 @@ is not supported. OpenRouter integration task 12 prepares evaluation of the
 existing chat foundation, not implementation of these category prerequisites.
 
 Implementation progress (September 30, 2026): alias persistence, strict API
-validation, legacy omission versus clearing, public metadata arrays and admin
-editing are implemented. The rich MCP catalog and authoritative search
-validation remain the next prerequisites; the Jev client is not yet wired.
+validation, legacy omission versus clearing, public metadata arrays, admin
+editing, deterministic rich MCP catalog snapshots and authoritative
+search-category validation are implemented. Assistant rich-snapshot handling
+and the Jev decision client/search gate remain unimplemented.
 
 ### Hybrid phase 1: catalog-grounded semantic interpretation
 
@@ -602,7 +622,7 @@ alias map belongs in ai-assistant-service.
   mentions derive only from tools actually executed for this request; a
   clarification must not include provider mentions from examples or history.
 
-## 6. Authoritative product validation
+## 6. Authoritative product validation (implemented)
 
 Validate category syntax and existence through shared `CategoryService` logic
 before cache lookup or repository search, including MCP and explicit REST
@@ -613,6 +633,14 @@ meaning. Do not make unfiltered browsing require a category.
 Search accepts canonical IDs, not display names or aliases. Normalize IDs
 under the existing rules; aliases must first resolve to an ID. Unknown IDs
 must fail even if an old cache entry exists.
+
+`CategoryService.normalizeAndValidateSearchCategory` is the shared validation
+boundary. `ProductCacheService.getByCategory`, `getByCategoryLimited` and
+`searchWithFilters` call it before provider Redis reads or provider queries.
+The validation itself reads the authoritative category repository, including
+on a provider-cache hit. Canonical IDs are used in both cache keys and queries.
+The REST category-filter endpoint and MCP search both reach this boundary;
+the MCP adapter translates domain failures into tool error envelopes.
 
 | Condition | REST category search | MCP search payload |
 |---|---|---|
@@ -626,7 +654,8 @@ array or a provider-shaped object. They are tool payloads, not claims about MCP
 transport HTTP statuses. Translate expected domain exceptions explicitly and
 log infrastructure failures through existing service mechanisms.
 
-The assistant may refresh and repair an unknown-category decision once; this
+The following assistant repair behavior remains proposed: the assistant may
+refresh and repair an unknown-category decision once; this
 shares the repair budget in section 5, rather than adding another loop.
 Cancellation propagates, and the existing round limit remains an upper bound.
 Do not expose raw tool errors or internal names in the user-facing answer.
@@ -706,8 +735,8 @@ not a separate taxonomy configuration system.
 ### Hybrid phase 1: metadata, ambiguity, and validation
 
 1. **Implemented:** alias persistence/DTO validation and backward-compatible admin editing.
-2. Add the rich catalog MCP tool and authoritative search validation. Preserve
-   existing discovery and search success shapes.
+2. **Implemented:** rich catalog MCP tool and authoritative search validation.
+   Existing discovery and search success shapes are preserved.
 3. Review descriptions and aliases for overlapping services.
 4. Add assistant snapshot handling, typed decisions, clarification behavior,
    and prompt/tool alignment behind `catalog-llm`.

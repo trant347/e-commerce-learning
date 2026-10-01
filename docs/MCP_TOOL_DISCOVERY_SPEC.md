@@ -108,10 +108,22 @@ spring.ai.mcp.server:
 | `search_task_masters` | Search marketplace by category/location | `category?`, `location?` |
 | `get_task_master_by_id` | Get a specific profile | `id` |
 | `get_categories` | List all job categories | _(none)_ |
+| `get_category_catalog` | Versioned rich category metadata for category decisions | _(none)_ |
+
+`get_categories` preserves its legacy ID-array response. The rich catalog
+returns `schemaVersion`, a deterministic `catalogVersion`, and categories
+with `id`, `displayName`, `description`, and `aliases`. The current assistant
+still refreshes search enums from `get_categories`; rich-snapshot lifecycle
+and Jev decisions remain proposed in `TASKMASTER_CATEGORY_RESOLUTION_SPEC.md`.
+Supplied search categories are validated against the live product catalog
+before provider-cache reads. Invalid/unknown categories and catalog-read
+failures produce typed tool error payloads, not successful empty results.
 
 ### Key Files
 - `mcp/TaskMasterMcpTools.java` — Tool methods annotated with `@Tool` / `@ToolParam`
 - `mcp/McpToolsConfig.java` — Registers tools as `ToolCallbackProvider` bean
+- `mcp/CategoryCatalogMcpTools.java` — Rich catalog tool, explicitly registered
+- `category/CategoryCatalogService.java` — Shared immutable snapshot and canonical version producer
 
 ## AI Assistant Service — MCP Client
 
