@@ -20,7 +20,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -76,6 +75,7 @@ public class CategoryAdminControllerTest {
                 "carpentry",
                 "Carpentry",
                 "Wood construction and repair.",
+                null,
                 "catalog-admin"))
                 .thenReturn(category(
                         "carpentry",
@@ -93,6 +93,7 @@ public class CategoryAdminControllerTest {
                 "carpentry",
                 "Carpentry",
                 "Wood construction and repair.",
+                null,
                 "catalog-admin");
         verify(productCacheService).evictCategoryCatalog();
     }
@@ -107,6 +108,7 @@ public class CategoryAdminControllerTest {
                 "carpentry",
                 "Fine Carpentry",
                 "Custom wood construction.",
+                null,
                 "catalog-admin"))
                 .thenReturn(category(
                         "carpentry",
@@ -133,12 +135,7 @@ public class CategoryAdminControllerTest {
                 request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        verify(categoryService, never())
-                .createCategory(
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(categoryService);
         verifyNoInteractions(productCacheService);
     }
 
@@ -152,12 +149,7 @@ public class CategoryAdminControllerTest {
                 request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        verify(categoryService, never())
-                .createCategory(
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(categoryService);
         verifyNoInteractions(productCacheService);
     }
 

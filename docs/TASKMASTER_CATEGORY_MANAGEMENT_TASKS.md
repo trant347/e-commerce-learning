@@ -35,8 +35,12 @@ ASCII slugs; both IDs and normalized display names are unique. The complete
 normalization, validation, API, and error contract is recorded in the source
 specification.
 
-Aliases were excluded from this completed phase and are now proposed in the
-hybrid specification. Object terms, related-category scoring, merging,
+Aliases were excluded from the original completed phase. The first hybrid
+prerequisite added them on September 30, 2026: normalized product-owned arrays,
+strict admin API validation, omission-preserving updates and alias editing in
+the admin UI. Existing documents need no reset. Rich MCP catalog exposure and
+Jev interpretation remain unimplemented; see the source specification.
+Object terms, related-category scoring, merging,
 retirement, and required profile attributes remain outside the current rollout.
 Removing referenced categories requires an explicit reassignment policy.
 

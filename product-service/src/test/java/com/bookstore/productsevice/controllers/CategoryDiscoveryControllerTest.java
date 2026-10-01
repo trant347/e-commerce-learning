@@ -50,6 +50,7 @@ public class CategoryDiscoveryControllerTest {
                         .setId("carpentry")
                         .setDisplayName("Carpentry")
                         .setDescription("Wood construction and repair.")
+                        .setAliases(List.of("woodworking"))
                         .setNormalizedDisplayName("carpentry")
                         .setCreatedBy("system-seed")));
 
@@ -59,6 +60,7 @@ public class CategoryDiscoveryControllerTest {
         assertThat(response.getBody()).containsExactly(new CategoryResponse(
                 "carpentry",
                 "Carpentry",
-                "Wood construction and repair."));
+                "Wood construction and repair.",
+                List.of("woodworking")));
     }
 }

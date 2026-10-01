@@ -61,6 +61,7 @@ public class CategoryAdminController {
                 body.id(),
                 body.displayName(),
                 body.description(),
+                body.aliases(),
                 getUsername(request)));
         productCacheService.evictCategoryCatalog();
         return ResponseEntity.status(HttpStatus.CREATED).body(category);
@@ -82,6 +83,7 @@ public class CategoryAdminController {
                 id,
                 body.displayName(),
                 body.description(),
+                body.aliases(),
                 getUsername(request)));
         productCacheService.evictCategoryCatalog();
         return ResponseEntity.ok(category);

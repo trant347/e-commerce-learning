@@ -26,6 +26,8 @@ public class CategoryService {
     static final int MAX_ID_LENGTH = 64;
     static final int MAX_DISPLAY_NAME_LENGTH = 80;
     static final int MAX_DESCRIPTION_LENGTH = 500;
+    static final int MAX_ALIASES = 20;
+    static final int MAX_ALIAS_LENGTH = 80;
 
     private static final Pattern CATEGORY_ID_PATTERN =
             Pattern.compile("^[a-z0-9]+(?:-[a-z0-9]+)*$");
@@ -58,10 +60,19 @@ public class CategoryService {
                                    String displayName,
                                    String description,
                                    String actor) {
+        return createCategory(id, displayName, description, null, actor);
+    }
+
+    public Category createCategory(String id,
+                                   String displayName,
+                                   String description,
+                                   List<String> aliases,
+                                   String actor) {
         String normalizedId = normalizeId(id);
         String normalizedDisplayName = normalizeDisplayName(displayName);
         String validatedDescription = normalizeDescription(description);
         String validatedActor = normalizeActor(actor);
+        List<String> normalizedAliases = normalizeAliases(aliases, normalizedId, normalizedDisplayName);
 
         ensureUniqueId(normalizedId);
         ensureUniqueDisplayName(normalizedDisplayName, displayName);
@@ -72,6 +83,7 @@ public class CategoryService {
                 .setDisplayName(normalizeWhitespace(displayName))
                 .setNormalizedDisplayName(normalizedDisplayName)
                 .setDescription(validatedDescription)
+                .setAliases(normalizedAliases)
                 .setCreatedAt(timestamp)
                 .setCreatedBy(validatedActor)
                 .setUpdatedAt(timestamp)
@@ -84,10 +96,22 @@ public class CategoryService {
                                    String displayName,
                                    String description,
                                    String actor) {
+        return updateCategory(id, displayName, description, null, actor);
+    }
+
+    public Category updateCategory(String id,
+                                   String displayName,
+                                   String description,
+                                   List<String> aliases,
+                                   String actor) {
         Category category = getCategory(id);
         String normalizedDisplayName = normalizeDisplayName(displayName);
         String validatedDescription = normalizeDescription(description);
         String validatedActor = normalizeActor(actor);
+        List<String> normalizedAliases = normalizeAliases(
+                aliases == null ? category.getAliases() : aliases,
+                category.getId(),
+                normalizedDisplayName);
 
         if (!normalizedDisplayName.equals(category.getNormalizedDisplayName())) {
             ensureUniqueDisplayName(normalizedDisplayName, displayName);
@@ -96,6 +120,7 @@ public class CategoryService {
         category.setDisplayName(normalizeWhitespace(displayName))
                 .setNormalizedDisplayName(normalizedDisplayName)
                 .setDescription(validatedDescription)
+                .setAliases(normalizedAliases)
                 .setUpdatedAt(now.get())
                 .setUpdatedBy(validatedActor);
 
@@ -215,6 +240,37 @@ public class CategoryService {
                     "is required");
         }
         return actor.trim();
+    }
+
+    private List<String> normalizeAliases(List<String> aliases, String id, String displayName) {
+        if (aliases == null) {
+            return List.of();
+        }
+        if (aliases.size() > MAX_ALIASES) {
+            throw invalidAliases("must contain at most 20 aliases");
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String alias : aliases) {
+            String value = normalizeWhitespace(alias).toLowerCase(Locale.ROOT);
+            if (value.length() < 2 || value.length() > MAX_ALIAS_LENGTH) {
+                throw invalidAliases("each alias must be 2-80 characters");
+            }
+            if (value.equals(id) || value.equals(displayName)) {
+                throw invalidAliases("must not repeat this category's ID or display name");
+            }
+            if (!normalized.add(value)) {
+                throw invalidAliases("must not contain duplicate normalized aliases");
+            }
+        }
+        return List.copyOf(normalized);
+    }
+
+    private CategoryValidationException invalidAliases(String detail) {
+        return validationError(
+                "invalid_category",
+                "Invalid category aliases: " + detail + ".",
+                "aliases",
+                detail);
     }
 
     private String normalizeWhitespace(String value) {

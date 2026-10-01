@@ -1,6 +1,6 @@
 # TaskMaster Category Catalog and Hybrid Resolution Specification
 
-> Status: **Catalog implemented; hybrid resolution proposed, not implemented**
+> Status: **Catalog and admin-managed aliases implemented; rich catalog, hybrid resolution and Jev integration proposed, not implemented**
 >
 > This is the authoritative category design specification. It consolidates the
 > implemented catalog contract and the proposed hybrid AI matching design.
@@ -70,7 +70,7 @@ proposal.
 providers. `TaskMaster.jobCategories` and application `jobCategories` remain
 arrays of canonical IDs; aliases are never stored as profile category values.
 
-`Category` contains `id`, `displayName`, `normalizedDisplayName`, `description`,
+`Category` contains `id`, `displayName`, `normalizedDisplayName`, `description`, `aliases`,
 and server-managed creation/update timestamps and actors.
 
 - IDs are immutable after creation. Input is trimmed and lowercased, must be
@@ -89,10 +89,10 @@ and server-managed creation/update timestamps and actors.
 | Interface | Current contract |
 |---|---|
 | `GET /products/categories` | Sorted canonical ID array |
-| `GET /products/categories/metadata` | Public array of `{id, displayName, description}` |
+| `GET /products/categories/metadata` | Public array of `{id, displayName, description, aliases}` |
 | `GET /products/admin/categories` | Administrator catalog listing |
-| `POST /products/admin/categories` | Create with `id`, `displayName`, `description`; return `201` |
-| `PUT /products/admin/categories/{id}` | Update display name and description; return `200` |
+| `POST /products/admin/categories` | Create with `id`, `displayName`, `description`, optional `aliases`; return `201` |
+| `PUT /products/admin/categories/{id}` | Update display name, description and optional `aliases`; omission preserves aliases, `[]` clears; return `200` |
 | MCP `get_categories` | Canonical ID array, unchanged for compatibility |
 | MCP `search_task_masters` | Optional `category` (omit for location-only searches); optional location/rate/rating filters; requires a category or location; at most 10 providers |
 
@@ -132,8 +132,9 @@ and the error envelope:
   because models legitimately rewrite it (for example `SF` to `San Francisco`).
 - The assistant's system prompt forces a best category/search, while the
   product tool description permits clarification. These instructions conflict.
-- Descriptions already exist in the catalog and REST metadata, but MCP
-  `get_categories` supplies only IDs. Aliases are not implemented.
+- Descriptions and admin-managed aliases exist in the catalog and REST metadata,
+  but MCP `get_categories` still supplies only IDs. The rich MCP catalog and
+  semantic decision clients are not implemented.
 - Chat requests carry user/assistant history; the assistant currently uses
   only the last two history messages. There is no durable category-resolution
   conversation state.
@@ -143,10 +144,10 @@ Implementation anchors: `CategoryService.java`, `TaskMasterMcpTools.java`,
 `McpToolDiscoveryService.cs`, `McpRemoteTool.cs`, `AiAssistantService.cs`, and
 `ai-assistant-service\appsettings.json`.
 
-## 3. Category metadata extension
+## 3. Category metadata extension (implemented)
 
 Reuse existing names and descriptions; do not create a second taxonomy.
-Add administrator-managed `aliases` to `Category` and metadata DTOs:
+Administrator-managed `aliases` are persisted in `Category` and metadata DTOs:
 
 ```json
 {
@@ -494,6 +495,11 @@ Until these steps are implemented and their gates pass, Jev end-to-end testing
 is not supported. OpenRouter integration task 12 prepares evaluation of the
 existing chat foundation, not implementation of these category prerequisites.
 
+Implementation progress (September 30, 2026): alias persistence, strict API
+validation, legacy omission versus clearing, public metadata arrays and admin
+editing are implemented. The rich MCP catalog and authoritative search
+validation remain the next prerequisites; the Jev client is not yet wired.
+
 ### Hybrid phase 1: catalog-grounded semantic interpretation
 
 1. Capture a usable catalog snapshot and relevant conversation context.
@@ -699,7 +705,7 @@ not a separate taxonomy configuration system.
 
 ### Hybrid phase 1: metadata, ambiguity, and validation
 
-1. Add alias persistence/DTO validation and backward-compatible admin editing.
+1. **Implemented:** alias persistence/DTO validation and backward-compatible admin editing.
 2. Add the rich catalog MCP tool and authoritative search validation. Preserve
    existing discovery and search success shapes.
 3. Review descriptions and aliases for overlapping services.

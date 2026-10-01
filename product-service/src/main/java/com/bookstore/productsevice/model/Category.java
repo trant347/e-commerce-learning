@@ -8,6 +8,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.io.Serializable;
 import java.time.Instant;
+import java.util.List;
 
 @Document(collection = "categories")
 @Data
@@ -26,6 +27,8 @@ public class Category implements Serializable {
 
     private String description;
 
+    private List<String> aliases = List.of();
+
     @JsonIgnore
     private Instant createdAt;
 
@@ -37,4 +40,8 @@ public class Category implements Serializable {
 
     @JsonIgnore
     private String updatedBy;
+
+    public List<String> getAliases() {
+        return aliases == null ? List.of() : aliases;
+    }
 }

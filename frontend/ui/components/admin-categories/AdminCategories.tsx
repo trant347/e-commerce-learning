@@ -13,13 +13,19 @@ interface CategoryForm {
     id: string;
     displayName: string;
     description: string;
+    aliases: string;
 }
 
 const EMPTY_FORM: CategoryForm = {
     id: '',
     displayName: '',
     description: '',
+    aliases: '',
 };
+
+function parseAliases(value: string): string[] {
+    return value.split(/\r?\n/).map(alias => alias.trim()).filter(alias => alias.length > 0);
+}
 
 function getCategoryErrorMessage(error: unknown, fallback: string): string {
     if (axios.isAxiosError<{ message?: string }>(error)) {
@@ -41,6 +47,7 @@ export default function AdminCategories() {
     const [editForm, setEditForm] = useState<Omit<CategoryForm, 'id'>>({
         displayName: '',
         description: '',
+        aliases: '',
     });
 
     const loadCategories = async () => {
@@ -82,7 +89,10 @@ export default function AdminCategories() {
         setError(null);
         setSuccess(null);
         try {
-            await TaskMasterServices.createCategory(createForm);
+            await TaskMasterServices.createCategory({
+                ...createForm,
+                aliases: parseAliases(createForm.aliases),
+            });
             setCreateForm(EMPTY_FORM);
             setSuccess('Category created.');
             await loadCategories();
@@ -98,6 +108,7 @@ export default function AdminCategories() {
         setEditForm({
             displayName: category.displayName,
             description: category.description,
+            aliases: (category.aliases ?? []).join('\n'),
         });
         setError(null);
         setSuccess(null);
@@ -111,7 +122,10 @@ export default function AdminCategories() {
         setError(null);
         setSuccess(null);
         try {
-            await TaskMasterServices.updateCategory(editingId, editForm);
+            await TaskMasterServices.updateCategory(editingId, {
+                ...editForm,
+                aliases: parseAliases(editForm.aliases),
+            });
             setEditingId(null);
             setSuccess('Category updated.');
             await loadCategories();
@@ -174,6 +188,19 @@ export default function AdminCategories() {
                             placeholder="Describe the work included in this category."
                         />
                     </div>
+                    <div className="user-input-row">
+                        <label htmlFor="category-aliases">Aliases</label>
+                        <textarea
+                            id="category-aliases"
+                            value={createForm.aliases}
+                            onChange={event => setCreateForm({
+                                ...createForm,
+                                aliases: event.target.value,
+                            })}
+                            placeholder="e.g. wooden cupboard repair"
+                        />
+                        <small>One phrase per line. Up to 20 aliases, each 2-80 characters.</small>
+                    </div>
                     <button className="submit-btn" type="submit" disabled={submitting}>
                         {submitting ? 'Saving...' : 'Create Category'}
                     </button>
@@ -202,6 +229,7 @@ export default function AdminCategories() {
                                     <th>ID</th>
                                     <th>Display Name</th>
                                     <th>Description</th>
+                                    <th>Aliases</th>
                                     <th></th>
                                 </tr>
                             </thead>
@@ -211,7 +239,7 @@ export default function AdminCategories() {
                                         <td><code>{category.id}</code></td>
                                         {editingId === category.id ? (
                                             <>
-                                                <td colSpan={2}>
+                                                <td colSpan={3}>
                                                     <form
                                                         id={`edit-category-${category.id}`}
                                                         className="category-edit-form"
@@ -242,6 +270,21 @@ export default function AdminCategories() {
                                                             required
                                                             maxLength={500}
                                                         />
+                                                        <label htmlFor={`edit-aliases-${category.id}`}>
+                                                            Aliases
+                                                        </label>
+                                                        <textarea
+                                                            id={`edit-aliases-${category.id}`}
+                                                            value={editForm.aliases}
+                                                            onChange={event => setEditForm({
+                                                                ...editForm,
+                                                                aliases: event.target.value,
+                                                            })}
+                                                        />
+                                                        <small>
+                                                            One phrase per line, up to 20. Each must be 2-80 characters.
+                                                            Leave empty to remove all aliases.
+                                                        </small>
                                                     </form>
                                                 </td>
                                                 <td className="category-actions">
@@ -267,6 +310,7 @@ export default function AdminCategories() {
                                             <>
                                                 <td>{category.displayName}</td>
                                                 <td>{category.description}</td>
+                                                <td>{(category.aliases ?? []).join(', ') || 'None'}</td>
                                                 <td className="category-actions">
                                                     <button
                                                         className="review-btn"

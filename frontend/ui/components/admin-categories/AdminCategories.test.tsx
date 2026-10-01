@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
@@ -53,13 +53,14 @@ describe('AdminCategories', () => {
     });
 
     test('loads and displays the canonical category catalog', async () => {
-        listCategoriesMock.mockResolvedValue([carpentry]);
+        listCategoriesMock.mockResolvedValue([{ ...carpentry, aliases: ['woodworking', 'cabinet repair'] }]);
 
         renderPage();
 
         expect(await screen.findByText('carpentry')).toBeInTheDocument();
         expect(screen.getByText('Carpentry')).toBeInTheDocument();
         expect(screen.getByText('Wood construction and repair.')).toBeInTheDocument();
+        expect(screen.getByText('woodworking, cabinet repair')).toBeInTheDocument();
     });
 
     test('shows an explicit empty state', async () => {
@@ -91,6 +92,7 @@ describe('AdminCategories', () => {
             id: 'appliance-repair',
             displayName: 'Appliance Repair',
             description: 'Household appliance diagnosis and repair.',
+            aliases: [],
         });
 
         renderPage();
@@ -112,6 +114,7 @@ describe('AdminCategories', () => {
                 id: 'appliance-repair',
                 displayName: 'Appliance Repair',
                 description: 'Household appliance diagnosis and repair.',
+                aliases: [],
             });
         });
         expect(await screen.findByText('Category created.')).toBeInTheDocument();
@@ -179,6 +182,7 @@ describe('AdminCategories', () => {
             expect(updateCategoryMock).toHaveBeenCalledWith('carpentry', {
                 displayName: 'Fine Carpentry',
                 description: 'Wood construction and repair.',
+                aliases: [],
             });
         });
         expect(await screen.findByText('Category updated.')).toBeInTheDocument();
@@ -211,5 +215,64 @@ describe('AdminCategories', () => {
 
         expect(await screen.findByText("Category 'carpentry' already exists."))
             .toBeInTheDocument();
+    });
+
+    test('creates aliases from separate lines without discarding punctuation or negation', async () => {
+        listCategoriesMock.mockResolvedValue([]);
+        createCategoryMock.mockResolvedValue(carpentry);
+        renderPage();
+        await screen.findByText(/no categories have been created/i);
+        fireEvent.change(screen.getByLabelText(/canonical id/i), { target: { value: 'carpentry' } });
+        fireEvent.change(screen.getByLabelText(/^display name/i), { target: { value: 'Carpentry' } });
+        fireEvent.change(screen.getByLabelText(/^description/i), { target: { value: carpentry.description } });
+        fireEvent.change(screen.getByLabelText('Aliases'), {
+            target: { value: ' wooden cupboard repair \n\nnot assembly!\n' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: /create category/i }));
+
+        await waitFor(() => expect(createCategoryMock).toHaveBeenCalledWith({
+            ...carpentry,
+            aliases: ['wooden cupboard repair', 'not assembly!'],
+        }));
+        expect(screen.getByLabelText('Aliases')).toHaveValue('');
+    });
+
+    test.each([
+        { name: 'replaces', value: ' cabinet repair \nwood construction', expected: ['cabinet repair', 'wood construction'] },
+        { name: 'clears', value: '', expected: [] },
+    ])('$name aliases on save', async ({ value, expected }) => {
+        listCategoriesMock.mockResolvedValue([{ ...carpentry, aliases: ['woodworking'] }]);
+        updateCategoryMock.mockResolvedValue(carpentry);
+        renderPage();
+        await screen.findByText('carpentry');
+        fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+        const aliases = within(screen.getByRole('row', { name: /carpentry/i })).getByLabelText('Aliases');
+        expect(aliases).toHaveValue('woodworking');
+        fireEvent.change(aliases, { target: { value } });
+        fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+        await waitFor(() => expect(updateCategoryMock).toHaveBeenCalledWith('carpentry', {
+            displayName: carpentry.displayName,
+            description: carpentry.description,
+            aliases: expected,
+        }));
+    });
+
+    test('preserves alias edits after a validation failure', async () => {
+        listCategoriesMock.mockResolvedValue([{ ...carpentry, aliases: ['woodworking'] }]);
+        updateCategoryMock.mockRejectedValue({
+            isAxiosError: true,
+            response: { data: { message: 'Invalid category aliases: must not contain duplicate normalized aliases.' } },
+        });
+        renderPage();
+        await screen.findByText('carpentry');
+        fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+        const aliases = within(screen.getByRole('row', { name: /carpentry/i })).getByLabelText('Aliases');
+        fireEvent.change(aliases, { target: { value: 'woodworking\nWOODWORKING' } });
+        fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+        expect(await screen.findByText(/must not contain duplicate normalized aliases/i)).toBeInTheDocument();
+        expect(aliases).toHaveValue('woodworking\nWOODWORKING');
+        expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled();
     });
 });

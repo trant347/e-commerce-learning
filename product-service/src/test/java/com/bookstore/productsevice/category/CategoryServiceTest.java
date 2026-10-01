@@ -10,9 +10,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Collections;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -245,6 +248,110 @@ public class CategoryServiceTest {
         assertThatThrownBy(() -> service.getCategory("carpentry"))
                 .isInstanceOf(CategoryNotFoundException.class)
                 .hasMessage("Category 'carpentry' was not found.");
+    }
+
+    @Test
+    public void createCategory_normalizesAliasesWithoutInferringOrRemovingWords() {
+        Category result = service.createCategory(
+                "carpentry", "Carpentry", "Woodwork",
+                List.of("  Wooden \t Cupboard\n REPAIR ", "Not Assembly!", "ISTANBUL woodwork"),
+                "admin");
+
+        assertThat(result.getAliases()).containsExactly(
+                "wooden cupboard repair", "not assembly!", "istanbul woodwork");
+    }
+
+    @Test
+    public void createCategory_defaultsOmittedAliasesToEmpty() {
+        Category result = service.createCategory("carpentry", "Carpentry", "Woodwork", "admin");
+
+        assertThat(result.getAliases()).isEmpty();
+    }
+
+    @Test
+    public void createCategory_rejectsInvalidAliasesBeforeSaving() {
+        List<List<String>> invalid = List.of(
+                List.of(" "),
+                List.of("x"),
+                List.of("x".repeat(81)),
+                List.of(" Woodworking ", "WOODWORKING"),
+                List.of(" CARPENTRY "),
+                List.of("Furniture-Assembly"),
+                Collections.singletonList(null),
+                IntStream.range(0, 21).mapToObj(index -> "alias " + index).toList());
+
+        for (List<String> aliases : invalid) {
+            CategoryValidationException exception = assertThrows(CategoryValidationException.class,
+                    () -> service.createCategory(
+                            "furniture-assembly", "Carpentry", "Woodwork", aliases, "admin"));
+            assertThat(exception.getErrorCode()).isEqualTo("invalid_category");
+            assertThat(exception.getFieldErrors()).containsKey("aliases");
+        }
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    public void createCategory_acceptsAliasCountAndLengthBoundaries() {
+        List<String> aliases = IntStream.range(0, 20).mapToObj(index ->
+                index == 0 ? "ab" : index == 1 ? "x".repeat(80) : "alias " + index).toList();
+
+        Category result = service.createCategory("carpentry", "Carpentry", "Woodwork", aliases, "admin");
+
+        assertThat(result.getAliases()).hasSize(20);
+        assertThat(result.getAliases().get(0)).hasSize(2);
+        assertThat(result.getAliases().get(1)).hasSize(80);
+    }
+
+    @Test
+    public void createCategory_allowsAliasesCollidingWithOtherCategories() {
+        service.createCategory("carpentry", "Carpentry", "Woodwork", List.of("woodworking", "plumbing"), "admin");
+        Category second = service.createCategory(
+                "joinery", "Joinery", "Woodwork", List.of("woodworking", "carpentry"), "admin");
+
+        assertThat(second.getAliases()).containsExactly("woodworking", "carpentry");
+    }
+
+    @Test
+    public void updateCategory_omissionPreservesAliasesAndEmptyArrayClearsThem() {
+        Category existing = category("carpentry", "Carpentry", "carpentry", "Woodwork")
+                .setAliases(List.of("woodworking"));
+        when(repository.findById("carpentry")).thenReturn(Optional.of(existing));
+
+        assertThat(service.updateCategory("carpentry", "Carpentry", "New woodwork", "editor").getAliases())
+                .containsExactly("woodworking");
+        assertThat(service.updateCategory(
+                "carpentry", "Carpentry", "New woodwork", List.of(), "editor").getAliases()).isEmpty();
+    }
+
+    @Test
+    public void updateCategory_replacesAliasesAndPreservesCreationAudit() {
+        Category existing = category("carpentry", "Carpentry", "carpentry", "Woodwork")
+                .setAliases(List.of("woodworking"))
+                .setCreatedAt(NOW.minusSeconds(60))
+                .setCreatedBy("creator");
+        when(repository.findById("carpentry")).thenReturn(Optional.of(existing));
+
+        Category result = service.updateCategory(
+                "carpentry", "Carpentry", "Woodwork", List.of(" Cabinet   Repair "), "editor");
+
+        assertThat(result.getAliases()).containsExactly("cabinet repair");
+        assertThat(result.getCreatedAt()).isEqualTo(NOW.minusSeconds(60));
+        assertThat(result.getCreatedBy()).isEqualTo("creator");
+        assertThat(result.getUpdatedBy()).isEqualTo("editor");
+    }
+
+    @Test
+    public void updateCategory_rejectsNewNameCollidingWithPreservedAliasWithoutMutatingRecord() {
+        Category existing = category("carpentry", "Carpentry", "carpentry", "Woodwork")
+                .setAliases(List.of("woodworking"));
+        when(repository.findById("carpentry")).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.updateCategory("carpentry", "Woodworking", "Woodwork", "editor"))
+                .isInstanceOf(CategoryValidationException.class);
+
+        assertThat(existing.getDisplayName()).isEqualTo("Carpentry");
+        assertThat(existing.getAliases()).containsExactly("woodworking");
+        verify(repository, never()).save(any());
     }
 
     private Category category(String id,

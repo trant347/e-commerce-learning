@@ -41,15 +41,18 @@ export interface CategoryMetadata {
     id: string;
     displayName: string;
     description: string;
+    aliases?: string[];
 }
 
 export interface CreateCategoryRequest {
     id: string;
     displayName: string;
     description: string;
+    aliases?: string[];
 }
 
 export interface UpdateCategoryRequest {
     displayName: string;
     description: string;
+    aliases?: string[];
 }

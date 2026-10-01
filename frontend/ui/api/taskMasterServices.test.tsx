@@ -48,6 +48,7 @@ describe('TaskMasterServices category administration', () => {
             id: 'appliance-repair',
             displayName: 'Appliance Repair',
             description: 'Household appliance diagnosis and repair.',
+            aliases: ['washing machine repair'],
         };
         postMock.mockResolvedValue({ data: request });
 
@@ -85,5 +86,26 @@ describe('TaskMasterServices category administration', () => {
             }
         );
         expect(request).not.toHaveProperty('id');
+        expect(request).not.toHaveProperty('aliases');
+    });
+
+    test.each([
+        { aliases: ['woodworking'] },
+        { aliases: [] },
+    ])('forwards explicit aliases without changing update semantics: $aliases', async ({ aliases }) => {
+        const request: UpdateCategoryRequest = {
+            displayName: 'Carpentry',
+            description: 'Wood construction and repair.',
+            aliases,
+        };
+        putMock.mockResolvedValue({ data: { id: 'carpentry', ...request } });
+
+        await TaskMasterServices.updateCategory('carpentry', request);
+
+        expect(putMock).toHaveBeenCalledWith(
+            '/products/admin/categories/carpentry',
+            request,
+            expect.objectContaining({ headers: expect.any(Object) })
+        );
     });
 });
