@@ -444,9 +444,43 @@ required tool, so it is not a valid latency improvement. It also remains
 limit. OpenRouter reported USD 0.0262896 total key usage after the run, an
 increase of USD 0.0092996 and within the approved cap.
 
-The follow-up implements a deterministic application-boundary correction:
-before `search_task_masters` executes, an invented category is removed when
-the arguments contain a location but current/recent user messages name no
-service. Explicit service wording and service context from recent history keep
-the model-selected category. This correction requires a separately approved
-live reevaluation against the unchanged gates before Task 14 can deploy.
+The subsequent application-boundary location-only word-list guard was
+reverted: it could misclassify new wording or service names and had not been
+live-evaluated against the release gates. Existing numeric filter grounding
+remains. A passing, separately approved live reevaluation against the
+unchanged gates is still required before Task 14 can deploy.
+
+### Qwen3 8B hosted comparison (incomplete)
+
+On October 1, 2026, the operator separately approved up to 11 hosted
+application requests, USD 0.25 additional usage and a 45-minute window,
+with the same fictional fixture and acceptance gates. This compared local
+Ollama `qwen3:8b` with the closest hosted model,
+[`qwen/qwen3-8b`](https://openrouter.ai/qwen/qwen3-8b), **not** the
+distinct Qwen3.8 model family. The public Alibaba endpoint advertised
+`tools` and `max_tokens`. The chat prompt and numeric-only grounding stayed
+unchanged; the reverted word-list guard was absent. Each provider used its
+existing documented round/request budgets (Ollama 600/3000 seconds,
+OpenRouter 60/300 seconds), with the same 1024-token cap.
+
+The local run completed one warm-up and ten measured requests: five labeled
+searches repeated twice (location-only Chicago and Austin, cupboard repair,
+flat-pack assembly and a budgeted plumber search). All ten called
+`search_task_masters` with the expected category or omitted category, and
+returned the expected synthetic provider. Its observed end-to-end p95 was
+2.003 seconds; the warm-up was excluded.
+
+The hosted model completed one warm-up search. On two Chicago location-only
+attempts, the product tool received `location=Chicago` and no category,
+but the following hosted model round returned HTTP 429 after the adapter's
+eligible retry. The second attempt followed a 75-second pause; the repeated
+rate limit stopped the run. The handled failures returned no grounded answer.
+These two first-round tool choices are encouraging but cannot establish model
+quality, latency parity or release readiness. No hosted p95 is reported.
+
+The run used three hosted application requests total. Observed key usage
+increased from USD 0.035290 to USD 0.036187819 (USD 0.000897819 additional),
+within the approved cap; usage reporting may reconcile later. The base
+Ollama `chat` profile was restored and a local Chicago search returned the
+synthetic provider. Diagnose the repeated endpoint rate limit before any
+further paid evaluation. No production opt-in was made.

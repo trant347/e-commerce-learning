@@ -601,11 +601,26 @@ covered before introducing the external provider.
     Ollama baseline and still misses the 1.2x gate.
   - Reported key usage increased by USD 0.0092996 to USD 0.0262896 total,
     within the approved limits.
-  - Added an application-boundary guard that drops an invented category when a
-    search includes a location but the current/recent user messages name no
-    service. Service-specific searches and category context from recent history
-    remain unchanged. This deterministic correction still requires a newly
-    approved paid reevaluation; it does not authorize production deployment.
+  - The application-boundary location-only word-list guard was later reverted:
+    its heuristic could misclassify new wording or service names, and it was
+    never live-evaluated against the release gates. Numeric filter grounding
+    remains in place. This follow-up does not authorize production deployment.
+
+  **Qwen3 8B comparison attempted 2026-10-01; still blocked:**
+
+  - Under a new approval (at most 11 paid application requests, USD 0.25
+    additional spend and 45 minutes), local `qwen3:8b` passed all ten planned
+    synthetic search cases: expected tool, category and fixture provider,
+    with observed p95 2.003 s (excluding one warm-up).
+  - Hosted `qwen/qwen3-8b` completed one warm-up. In two Chicago location-only
+    attempts, the search tool received the correct location and no category,
+    but the following model round returned HTTP 429 despite the configured
+    retry and a 75-second pause between attempts. No grounded final answer
+    resulted. The run stopped after three paid application requests; no
+    hosted p95 or task-14 quality pass is established. Observed additional
+    key usage was USD 0.000897819 (provider usage can reconcile later).
+  - The stack was restored to Ollama. Diagnose the hosted endpoint's repeated
+    rate limiting before another paid run; keep the original release gates.
 
 ## Validation commands
 
