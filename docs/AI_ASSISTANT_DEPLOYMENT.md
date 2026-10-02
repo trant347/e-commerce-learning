@@ -496,3 +496,27 @@ later. The 20-requests/minute OpenRouter limit documented for free models does
 not by itself explain the paid endpoint's 429. Without response-header or
 provider-side evidence, do not attribute it to a specific limit. The stack
 was restored to Ollama, and a local Chicago search succeeded.
+
+### Gemma 4 31B free endpoint (incomplete)
+
+On October 1, 2026, the operator approved up to 11 synthetic application
+requests within 45 minutes for `google/gemma-4-31b-it:free`, including the
+Google AI Studio route's published 55-day prompt retention. The public
+catalog advertised `tools` and `max_tokens`; OpenRouter's public endpoint
+listing contained Google AI Studio alone. No paid model or production
+rollout was authorized.
+
+The first fictional search warm-up failed on its first model round: HTTP 429
+was returned on both the initial attempt and its configured retry, before
+any marketplace tool ran. The evaluation stopped without issuing measured
+search requests. After a pause, one minimal fictional direct API request
+with the same free model and provider-selection policy also returned 429.
+Its error had no provider code or `X-RateLimit-*`/`Retry-After` headers, so
+the rejecting layer cannot be established. The key endpoint reported 0 free
+daily requests used out of 1000 and no additional spending after these
+failures; these readings do not prove which limit applied. No Gemma
+correctness or latency comparison is possible from this attempt.
+
+The local stack was restored to Ollama; a synthetic Chicago tool-backed
+search succeeded. Do not change provider privacy/routing requirements,
+switch to a paid Gemma variant, or deploy OpenRouter based on these failures.

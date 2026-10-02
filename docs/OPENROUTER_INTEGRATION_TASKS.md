@@ -627,6 +627,13 @@ covered before introducing the external provider.
     is still unknown; this did not establish a 20-requests/minute violation.
     Observed key usage remained USD 0.036524441 after the retry. Ollama was
     restored and a local Chicago search succeeded.
+  - An approved synthetic test of `google/gemma-4-31b-it:free` also stopped
+    after its first application warm-up: the first model round and its retry
+    returned HTTP 429 without executing a tool. One minimal fictional direct
+    request returned 429 without rate-limit headers or provider error code.
+    The key's free daily counter remained 0/1000 and its reported usage did
+    not increase. The rejecting layer is unconfirmed; no Gemma quality or
+    latency comparison is established. Ollama was restored.
 
 ## Validation commands
 
