@@ -57,6 +57,57 @@ public class SearchFilterGroundingTests
         Assert.True(result.ContainsKey("maxRate"));
     }
 
+    [Theory]
+    [InlineData("Are there any TaskMasters in Chicago?", "Chicago")]
+    [InlineData("Show me any provider located in Phoenix, AZ.", "Phoenix, AZ")]
+    [InlineData("Who is available around Seattle, WA?", "Seattle")]
+    [InlineData("Can I find a TaskMaster in Chicago without a specific service?", "Chicago")]
+    [InlineData("Who is the highest rated provider in Chicago?", "Chicago")]
+    [InlineData("Find any provider in Chicago under $50 an hour", "Chicago")]
+    public void RemovesCategoryFromLocationOnlySearch(string userMessage, string location)
+    {
+        var result = SearchFilterGrounding.RemoveUngroundedFilters(
+            "search_task_masters",
+            Args($"{{\"category\":\"landscaping\",\"location\":\"{location}\"}}"),
+            new[] { userMessage },
+            out var removed);
+
+        Assert.Equal(new[] { "category" }, removed);
+        Assert.False(result.ContainsKey("category"));
+        Assert.Equal(location, result["location"].GetString());
+    }
+
+    [Theory]
+    [InlineData("Find a plumber in Chicago", "Chicago")]
+    [InlineData("I need help with English in Chicago", "Chicago")]
+    [InlineData("Repair my wooden cupboard near Chicago", "Chicago")]
+    [InlineData("Find an IT provider in Chicago", "Chicago")]
+    public void KeepsCategoryWhenUserNamesAService(string userMessage, string location)
+    {
+        var args = Args($"{{\"category\":\"plumbing\",\"location\":\"{location}\"}}");
+
+        var result = SearchFilterGrounding.RemoveUngroundedFilters(
+            "search_task_masters", args, new[] { userMessage }, out var removed);
+
+        Assert.Empty(removed);
+        Assert.Same(args, result);
+    }
+
+    [Fact]
+    public void KeepsCategoryGroundedByRecentHistory()
+    {
+        var args = Args("{\"category\":\"plumbing\",\"location\":\"Chicago\"}");
+
+        var result = SearchFilterGrounding.RemoveUngroundedFilters(
+            "search_task_masters",
+            args,
+            new[] { "what about Chicago?", "I need a plumber" },
+            out var removed);
+
+        Assert.Empty(removed);
+        Assert.Same(args, result);
+    }
+
     [Fact]
     public void LeavesBlankFiltersAndOtherToolsUntouched()
     {

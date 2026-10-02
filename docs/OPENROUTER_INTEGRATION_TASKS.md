@@ -583,6 +583,30 @@ covered before introducing the external provider.
   **Done when:** operators accept the rollout against the evaluation criteria.
   Update the spec/task status to reflect actual completion, not just code merge.
 
+  **Follow-up executed 2026-10-01; production remains blocked:**
+
+  - The operator approved at most 20 application requests, USD 0.50 additional
+    spend and 45 minutes. The unchanged GPT-4.1-mini profile received ten
+    varied location-only requests across fixture cities that each have a seeded
+    provider. It continued adding landscaping or otherwise returned empty
+    results; the location-only selection blocker reproduced consistently.
+  - A prompt-only experiment added a stronger precedence rule and a contrasting
+    location-only seeded conversation. In the next ten requests, two answers
+    copied the seeded empty-result conclusion without executing a tool, one
+    still explicitly narrowed to landscaping, and the batch did not establish
+    a passing location-only mapping. The experiment was reverted.
+  - Unchanged-profile p95 was 2.618 s. The experimental batch p95 was 2.070 s,
+    but it is not a valid latency improvement because two requests skipped the
+    required tool; even the observed 2.070 s is 1.256x the retained 1.648 s
+    Ollama baseline and still misses the 1.2x gate.
+  - Reported key usage increased by USD 0.0092996 to USD 0.0262896 total,
+    within the approved limits.
+  - Added an application-boundary guard that drops an invented category when a
+    search includes a location but the current/recent user messages name no
+    service. Service-specific searches and category context from recent history
+    remain unchanged. This deterministic correction still requires a newly
+    approved paid reevaluation; it does not authorize production deployment.
+
 ## Validation commands
 
 Run from the repository root. Use focused test filters during each increment;

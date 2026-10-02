@@ -413,3 +413,40 @@ accepted criteria. Investigate location-only selection and latency or evaluate
 another explicitly approved chat profile, preserving the same fixture and
 recording any approved criterion changes. Jev and multi-category work remain
 separate and disabled.
+
+## Task 14: Location-only follow-up
+
+**Investigation executed; production remains blocked.**
+Session: October 1, 2026, 22:10:14-22:12:31 EDT
+(October 2, 02:10:14-02:12:31 UTC). The operator approved at most 20
+application requests, USD 0.50 additional usage and 45 minutes. The task-13
+fixture, `openai/gpt-4.1-mini`, 60/300-second budgets, 1024-token cap and
+release gates were retained. No production deployment was authorized.
+
+The first ten requests varied location-only wording across Chicago, Austin,
+Phoenix, Seattle, New York and Denver. Every city has a provider in the
+repository fixture. The unchanged profile continued anchoring on landscaping
+or otherwise returned an empty result, reproducing the selection blocker.
+Observed p95 for this bounded diagnostic batch was 2.618 seconds; no separate
+warm-up requests were added because the approved 20-request cap was reserved
+for the unchanged and experimental comparisons.
+
+A prompt-only experiment strengthened the location-only instruction and added
+a contrasting seeded tool conversation. In the second ten requests, two
+answers repeated the seeded empty-result conclusion without executing any
+tool, one answer still explicitly narrowed the request to landscaping, and the
+remaining observations did not establish a passing location-only mapping. The
+experiment was reverted rather than shipping a grounding regression.
+
+The experimental batch p95 was 2.070 seconds, but two requests omitted the
+required tool, so it is not a valid latency improvement. It also remains
+1.256x the retained 1.648-second Ollama baseline, above the accepted 1.2x
+limit. OpenRouter reported USD 0.0262896 total key usage after the run, an
+increase of USD 0.0092996 and within the approved cap.
+
+The follow-up implements a deterministic application-boundary correction:
+before `search_task_masters` executes, an invented category is removed when
+the arguments contain a location but current/recent user messages name no
+service. Explicit service wording and service context from recent history keep
+the model-selected category. This correction requires a separately approved
+live reevaluation against the unchanged gates before Task 14 can deploy.
