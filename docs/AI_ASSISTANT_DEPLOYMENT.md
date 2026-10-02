@@ -484,3 +484,15 @@ within the approved cap; usage reporting may reconcile later. The base
 Ollama `chat` profile was restored and a local Chicago search returned the
 synthetic provider. Diagnose the repeated endpoint rate limit before any
 further paid evaluation. No production opt-in was made.
+
+On October 1, 2026, around 22:45 EDT, the operator requested one additional
+retry of the same paid `qwen/qwen3-8b` model within the approved window. More
+than ten minutes after the previous attempt, that fourth application request
+received HTTP 429 on its first model round and on the configured retry, before
+any tool executed. The assistant returned the safe busy message with empty
+sources and mentions. Observed key usage remained USD 0.036524441 after the
+attempt (USD 0.001234441 above the pre-comparison reading); usage may reconcile
+later. The 20-requests/minute OpenRouter limit documented for free models does
+not by itself explain the paid endpoint's 429. Without response-header or
+provider-side evidence, do not attribute it to a specific limit. The stack
+was restored to Ollama, and a local Chicago search succeeded.

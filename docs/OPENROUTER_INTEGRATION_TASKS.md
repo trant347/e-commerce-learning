@@ -621,6 +621,12 @@ covered before introducing the external provider.
     key usage was USD 0.000897819 (provider usage can reconcile later).
   - The stack was restored to Ollama. Diagnose the hosted endpoint's repeated
     rate limiting before another paid run; keep the original release gates.
+  - A separately requested fourth hosted application attempt more than ten
+    minutes later returned HTTP 429 on the first model round, including the
+    configured retry, before any tool ran. The paid model's upstream constraint
+    is still unknown; this did not establish a 20-requests/minute violation.
+    Observed key usage remained USD 0.036524441 after the retry. Ollama was
+    restored and a local Chicago search succeeded.
 
 ## Validation commands
 
