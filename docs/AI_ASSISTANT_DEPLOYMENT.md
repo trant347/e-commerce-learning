@@ -105,6 +105,33 @@ provider, model, Ollama URL, 600/3000 s budgets, and Ollama services together:
 docker compose up -d --build
 ```
 
+**Try a different OpenRouter chat model later.** Choose its exact OpenRouter
+model ID (including `:free` if applicable) from the model page. Verify that it
+supports Chat Completions with both `tools` and `max_tokens`, review the
+eligible providers' retention/training policies, and set a bounded key and
+usage alerts before any live test. Put the ID in `OPENROUTER_CHAT_MODEL` in
+the untracked `.env` alongside `OPENROUTER_API_KEY`; never commit the key.
+Changing the model variable in `.env` alone does **not** switch the base
+Ollama deployment. For an existing OpenRouter-only stack, render the merged
+configuration without exposing credentials, then recreate only the assistant:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.openrouter.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.openrouter.yml up -d --no-deps --force-recreate ai-assistant-service
+```
+
+If starting from the default Ollama stack instead, use the **switching an
+existing all-Ollama stack** commands above so the old Ollama containers stop.
+The OpenRouter override sets `chat`'s provider, model and 60/300-second
+budgets together; do not put an Ollama tag or a Decisions-only model (such as
+Jev) into `OPENROUTER_CHAT_MODEL`. The model is selected on restart, not
+live-reloaded, and failures never fall back to Ollama automatically. Test with
+synthetic data first, verify tool calls, grounded answers, latency, rate
+limits and spend against the unchanged acceptance criteria below, and get
+separate approval before any production opt-in. To return to Ollama, use the
+base-file rollback command above. A new model slug alone does not complete
+task 14.
+
 ## Recipe 3: Mixed providers
 
 Use this when some tasks use Ollama and others use OpenRouter. Start from the

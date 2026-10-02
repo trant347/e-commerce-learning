@@ -583,6 +583,14 @@ covered before introducing the external provider.
   **Done when:** operators accept the rollout against the evaluation criteria.
   Update the spec/task status to reflect actual completion, not just code merge.
 
+  **For a future model candidate:** follow
+  [Recipe 2](AI_ASSISTANT_DEPLOYMENT.md#recipe-2-openrouter-only) to select an
+  exact tool-capable chat model, update the untracked `.env`, render the merged
+  configuration safely, restart the assistant with the override, and roll back
+  to base Ollama if the approved gates fail. A different slug requires its own
+  provider/privacy and bounded evaluation review; it is not an automatic
+  approval to deploy or a fallback from the failed candidates below.
+
   **Follow-up executed 2026-10-01; production remains blocked:**
 
   - The operator approved at most 20 application requests, USD 0.50 additional

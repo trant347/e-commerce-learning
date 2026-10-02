@@ -747,6 +747,20 @@ For the default chat-only deployment, rollback uses the base file again, restori
 the `chat` provider, model, URL, budgets, and services together, not merely its
 provider name.
 
+To replace an OpenRouter chat model without code changes, select a Chat
+Completions model supporting `tools` and `max_tokens`, review the current
+eligible providers' data policies and cost/limits, update only the untracked
+`OPENROUTER_CHAT_MODEL` setting, and recreate the assistant using the
+OpenRouter-only override. Changing `.env` alone does not enable OpenRouter in
+the default Ollama topology; the override maps the variable to the chat
+profile. Switching an existing Ollama stack also requires stopping its
+Ollama containers as described above. See
+[the deployment guide](AI_ASSISTANT_DEPLOYMENT.md#recipe-2-openrouter-only)
+for the exact safe-render, enable, model-replacement and rollback commands.
+Evaluate a newly selected model on synthetic data against the existing
+release gates and obtain separate deployment approval; do not treat a model
+swap as completion of Phase 4.
+
 Document a third, mixed-provider deployment recipe using the base file (which
 retains Ollama), plus explicit deployment environment mappings for every task.
 Do not use the OpenRouter-only override for this recipe. Container environment
