@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ai_assistant_service.Services.Mcp;
 
+/// <summary>Strictly validates and materializes product-service rich catalog responses.</summary>
 internal static partial class CategoryCatalogParser
 {
     internal const int SupportedSchemaVersion = 1;

@@ -3,6 +3,9 @@ using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services.Mcp;
 
+/// <summary>
+/// Atomically publishes the last validated rich catalog and evaluates its readiness.
+/// </summary>
 public sealed class CategoryCatalogSnapshotStore
 {
     public static readonly TimeSpan MaximumSnapshotAge = TimeSpan.FromMinutes(5);

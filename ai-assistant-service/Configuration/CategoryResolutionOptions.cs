@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Configuration;
 
+/// <summary>Configures category-resolution rollout mode and rich-catalog limits.</summary>
 public sealed class CategoryResolutionOptions
 {
     public const string SectionName = "CategoryResolution";
@@ -11,6 +12,7 @@ public sealed class CategoryResolutionOptions
     public int MaxCatalogContextChars { get; set; } = DefaultMaxCatalogContextChars;
 }
 
+/// <summary>Supported category-resolution rollout mode names.</summary>
 public static class CategoryResolutionModes
 {
     public const string Legacy = "legacy";
@@ -22,6 +24,7 @@ public static class CategoryResolutionModes
         || string.Equals(mode, Hybrid, StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>Configures periodic MCP category refresh behavior.</summary>
 public sealed class McpDiscoveryOptions
 {
     public const string SectionName = "McpDiscovery";
@@ -31,6 +34,7 @@ public sealed class McpDiscoveryOptions
         DefaultCategoryRefreshIntervalSeconds;
 }
 
+/// <summary>Validates category-resolution settings and mode-specific refresh requirements.</summary>
 public sealed class CategoryResolutionOptionsValidator
     : IValidateOptions<CategoryResolutionOptions>
 {
