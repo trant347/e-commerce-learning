@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ai_assistant_service.Configuration;
 using ai_assistant_service.Contracts;
@@ -5,6 +6,8 @@ using ai_assistant_service.Services.ChatModels;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Telemetry;
 using ai_assistant_service.Services.Tools;
+using ai_assistant_service.Services.Mcp;
+using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services;
 
@@ -14,23 +17,42 @@ public sealed class AiAssistantService : IAiAssistantService
     private readonly ToolRegistry _toolRegistry;
     private readonly ILogger<AiAssistantService> _logger;
     private readonly AssistantPrompt _prompt;
+    private readonly CategoryResolutionOptions _categoryOptions;
+    private readonly CategoryCatalogSnapshotStore? _snapshots;
+    private readonly CategoryDecisionService? _categoryDecisions;
+    private readonly SearchFilterExtractionService? _filterExtraction;
 
     // To keep prompts concise, only include the last 2 messages from history (if any) as context for the model.
     private const int MaxChatMemorySize = 2;
 
     // Guard against infinite tool-call loops
     private const int MaxToolRounds = 5;
+    private const string CategoryFirstSystemPrompt =
+        "You are a TaskMaster marketplace assistant. Use only live tool results from this request for provider or booking claims. " +
+        "Never invent provider names, rates, ratings, locations, availability or booking details. " +
+        "The application decides and locks marketplace category searches; do not select, replace or broaden a category, " +
+        "and do not present preferences as verified constraints. Present providers in the returned order without reranking or omitting them. " +
+        "If a tool returns no results, say so honestly. " +
+        "Use independent tools for booking questions; never claim a provider or booking was verified without its tool result.";
 
     public AiAssistantService(
         AssistantPrompt prompt,
         ITaskChatModelResolver modelResolver,
         ToolRegistry toolRegistry,
-        ILogger<AiAssistantService> logger)
+        ILogger<AiAssistantService> logger,
+        IOptions<CategoryResolutionOptions>? categoryOptions = null,
+        CategoryCatalogSnapshotStore? snapshots = null,
+        CategoryDecisionService? categoryDecisions = null,
+        SearchFilterExtractionService? filterExtraction = null)
     {
         _prompt = prompt;
         _modelResolver = modelResolver;
         _toolRegistry = toolRegistry;
         _logger = logger;
+        _categoryOptions = categoryOptions?.Value ?? new CategoryResolutionOptions();
+        _snapshots = snapshots;
+        _categoryDecisions = categoryDecisions;
+        _filterExtraction = filterExtraction;
     }
 
     public async Task<ChatResponse> ChatAsync(
@@ -42,10 +64,11 @@ public sealed class AiAssistantService : IAiAssistantService
         var client = _modelResolver.Resolve("chat");
         using var telemetry = AiAssistantTelemetry.StartChat(client.Profile, cancellationToken);
         using var deadline = TaskModelRequestDeadline.Create(client.Profile, cancellationToken);
+        var elapsed = Stopwatch.StartNew();
         try
         {
             return await RunConversationAsync(
-                request, executionContext, client, telemetry, deadline.Token);
+                request, executionContext, client, telemetry, elapsed, deadline.Token);
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
@@ -66,6 +89,17 @@ public sealed class AiAssistantService : IAiAssistantService
             cancellationToken.ThrowIfCancellationRequested();
             return FailureResponse(client.Profile, telemetry, exception.Category, exception.Metadata);
         }
+        catch (JevDecisionException exception)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            telemetry.Failed(ChatModelFailureCategory.ProviderUnavailable, exception.HttpStatusCode);
+            _logger.LogWarning(
+                "Category decision failed: {Category}, status={Status}",
+                exception.Category, exception.HttpStatusCode);
+            return SafeAnswer(
+                client.Profile.Model,
+                "Category matching is temporarily unavailable. Please try again shortly.");
+        }
     }
 
     private async Task<ChatResponse> RunConversationAsync(
@@ -73,6 +107,7 @@ public sealed class AiAssistantService : IAiAssistantService
         ToolExecutionContext executionContext,
         ITaskChatModelClient client,
         AiAssistantTelemetry.ChatTelemetry telemetry,
+        Stopwatch elapsed,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -90,13 +125,19 @@ public sealed class AiAssistantService : IAiAssistantService
             toolDefinitions.Count, 
             string.Join(", ", _toolRegistry.All.Select(t => t.Name)));
 
-        var messages = new List<ChatModelMessage>(_prompt.Messages);
+        var richMode = CategoryResolutionModes.IsRichCatalogMode(_categoryOptions.Mode);
+        var messages = richMode
+            ? new List<ChatModelMessage> { new(ChatModelRoles.System, CategoryFirstSystemPrompt) }
+            : new List<ChatModelMessage>(_prompt.Messages);
         var usedCallIds = messages.SelectMany(message => message.ToolCalls ?? [])
             .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
 
-        // User-authored text the model saw in this request. Search filters must come from here,
-        // never from seeded few-shot examples.
+        // Only user-authored messages are decision/filter context; never seeded examples or tool results.
+        var userHistory = request.History?
+            .Where(h => h.Role == ChatModelRoles.User && !string.IsNullOrWhiteSpace(h.Content))
+            .Select(h => h.Content).ToArray() ?? [];
         var userMessages = new List<string?> { request.Message };
+        userMessages.AddRange(userHistory);
 
         // Include only the last exchange (up to 2 messages) for multi-turn context
         if (request.History is { Count: > 0 })
@@ -111,10 +152,6 @@ public sealed class AiAssistantService : IAiAssistantService
                     && (h.Role == "user" || h.Role == "assistant"))
                 {
                     messages.Add(new ChatModelMessage(h.Role, h.Content));
-                    if (h.Role == "user")
-                    {
-                        userMessages.Add(h.Content);
-                    }
                 }
             }
         }
@@ -124,6 +161,78 @@ public sealed class AiAssistantService : IAiAssistantService
         var executedToolNames = new List<string>();
         var executedToolMessages = new List<ChatModelMessage>();
         string? finalContent = null;
+        CategoryCatalogSnapshot? capturedCatalog = null;
+        CategoryDecision? categoryDecision = null;
+        if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) == true)
+        {
+            if (_categoryDecisions is null || _filterExtraction is null)
+                throw new ChatModelException(ChatModelFailureCategory.InvalidConfiguration);
+
+            categoryDecision = await _categoryDecisions.ResolveAsync(
+                request, userHistory, capturedCatalog!, client,
+                TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                cancellationToken);
+            switch (categoryDecision.Status)
+            {
+                case CategoryDecisionStatus.NeedsClarification:
+                    telemetry.Succeeded(false);
+                    return SafeAnswer(model, categoryDecision.Clarification!);
+                case CategoryDecisionStatus.NoMatch:
+                    telemetry.Succeeded(false);
+                    return SafeAnswer(model, "I couldn't match that request to an offered service. Could you describe the service you need?");
+                case CategoryDecisionStatus.Resolved:
+                {
+                    var filters = await _filterExtraction.ExtractAsync(
+                        request.Message ?? string.Empty, userHistory, client, cancellationToken);
+                    if (filters.NeedsClarification)
+                    {
+                        telemetry.Succeeded(false);
+                        return SafeAnswer(model, "Could you clarify the required location, hourly USD rate, rating, or other requirement before I search?");
+                    }
+                    if (_toolRegistry.Get(SearchFilterGrounding.SearchToolName) is null)
+                        return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
+
+                    var searchArgs = LockedSearchArguments(categoryDecision.CategoryId!, filters);
+                    var result = await ExecuteLockedSearchAsync(
+                        executionContext, searchArgs, cancellationToken);
+                    if (SearchFailed(result))
+                    {
+                        _logger.LogWarning("Locked category search returned an unusable result");
+                        return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
+                    }
+
+                    var prefetchCall = new ChatModelToolCall(
+                        $"catalog-search-{Guid.NewGuid():N}",
+                        SearchFilterGrounding.SearchToolName, searchArgs);
+                    messages.Add(new ChatModelMessage(ChatModelRoles.Assistant, null, [prefetchCall]));
+                    var prefetchResult = new ChatModelMessage(ChatModelRoles.Tool, result, toolCallId: prefetchCall.Id);
+                    messages.Add(prefetchResult);
+                    executedToolMessages.Add(prefetchResult);
+                    executedToolNames.Add(SearchFilterGrounding.SearchToolName);
+                    telemetry.ToolCallCompleted(SearchFilterGrounding.SearchToolName, succeeded: true);
+                    usedCallIds.Add(prefetchCall.Id);
+                    messages.Add(new ChatModelMessage(ChatModelRoles.System,
+                        "The preceding live search used the validated category and explicit hard filters. " +
+                        "Use only these current results for provider claims. Do not present soft preferences as verified constraints " +
+                        "or claim availability. Do not call search_task_masters again for this request."));
+                    if (filters.SoftPreferences.Count > 0)
+                        messages.Add(new ChatModelMessage(ChatModelRoles.User,
+                            JsonSerializer.Serialize(new
+                            {
+                                contextFromEarlierUserMessages = "These are preferences, not verified provider constraints.",
+                                softPreferences = filters.SoftPreferences.Select(item => new
+                                {
+                                    item.Field, item.Value, item.Unit, item.Evidence
+                                })
+                            })));
+                    break;
+                }
+            }
+        }
+        else
+        {
+            capturedCatalog = null;
+        }
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)
@@ -159,6 +268,55 @@ public sealed class AiAssistantService : IAiAssistantService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var toolName = toolCall.Name;
+                if (richMode && string.Equals(
+                        toolName, SearchFilterGrounding.SearchToolName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    if (categoryDecision?.Status != CategoryDecisionStatus.Resolved)
+                    {
+                        if (capturedCatalog is null
+                            || _categoryDecisions is null || _filterExtraction is null)
+                            return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
+                        categoryDecision = await _categoryDecisions.ResolveAsync(
+                            request, userHistory, capturedCatalog, client,
+                            TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                            cancellationToken);
+                        if (categoryDecision.Status != CategoryDecisionStatus.Resolved)
+                        {
+                            telemetry.Succeeded(false);
+                            return SafeAnswer(model, "Which single marketplace service would you like to find?");
+                        }
+                        var filters = await _filterExtraction.ExtractAsync(
+                            request.Message ?? string.Empty, userHistory, client, cancellationToken);
+                        if (filters.NeedsClarification)
+                        {
+                            telemetry.Succeeded(false);
+                            return SafeAnswer(model, "Could you clarify the required search filters before I search?");
+                        }
+                        var lockedArgs = LockedSearchArguments(categoryDecision.CategoryId!, filters);
+                        var lockedResult = await ExecuteLockedSearchAsync(
+                            executionContext, lockedArgs, cancellationToken);
+                        if (SearchFailed(lockedResult))
+                        {
+                            _logger.LogWarning("Locked category search returned an unusable result");
+                            return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
+                        }
+                        var liveToolMessage = new ChatModelMessage(
+                            ChatModelRoles.Tool, lockedResult, toolCallId: toolCall.Id);
+                        messages.Add(liveToolMessage);
+                        executedToolMessages.Add(liveToolMessage);
+                        executedToolNames.Add(SearchFilterGrounding.SearchToolName);
+                        telemetry.ToolCallCompleted(SearchFilterGrounding.SearchToolName, succeeded: true);
+                        continue;
+                    }
+
+                    var lockedMessage = new ChatModelMessage(
+                        ChatModelRoles.Tool,
+                        "{\"error\":\"category_search_already_executed\",\"message\":\"Use the live search results already returned for this request.\"}",
+                        toolCallId: toolCall.Id);
+                    messages.Add(lockedMessage);
+                    continue;
+                }
                 var args = SearchFilterGrounding.RemoveUngroundedFilters(
                     toolName, toolCall.Arguments, userMessages, out var removedFilters);
 
@@ -216,6 +374,8 @@ public sealed class AiAssistantService : IAiAssistantService
 
         var roundLimitReached = finalContent is null;
         finalContent ??= defaultFallback;
+        if (richMode && capturedCatalog is null && executedToolNames.Count == 0)
+            return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
 
         if (hadToolExecutionFailure && string.Equals(finalContent, defaultFallback, StringComparison.Ordinal))
         {
@@ -237,6 +397,59 @@ public sealed class AiAssistantService : IAiAssistantService
             Sources  = executedToolNames,
             Mentions = mentions
         };
+    }
+
+    private static ChatResponse SafeAnswer(string model, string answer) =>
+        new() { Answer = answer, Model = model };
+
+    private static IReadOnlyDictionary<string, JsonElement> LockedSearchArguments(
+        string categoryId, SearchFilterEnvelope filters)
+    {
+        var arguments = new Dictionary<string, JsonElement>(filters.HardArguments, StringComparer.Ordinal)
+        {
+            ["category"] = JsonSerializer.SerializeToElement(categoryId)
+        };
+        return arguments;
+    }
+
+    private async Task<string> ExecuteLockedSearchAsync(
+        ToolExecutionContext executionContext,
+        IReadOnlyDictionary<string, JsonElement> arguments,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _toolRegistry.ExecuteAsync(
+                executionContext, SearchFilterGrounding.SearchToolName, arguments, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError(
+                "Locked category search failed: exception type={ExceptionType}",
+                exception.GetType().Name);
+            return "{\"error\":\"tool_unavailable\"}";
+        }
+    }
+
+    private static bool SearchFailed(string result)
+    {
+        if (string.IsNullOrWhiteSpace(result)) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(result);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                using var inner = JsonDocument.Parse(root.GetString() ?? string.Empty);
+                root = inner.RootElement;
+                return root.ValueKind != JsonValueKind.Array;
+            }
+            return root.ValueKind != JsonValueKind.Array;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
     }
 
     private ChatResponse FailureResponse(

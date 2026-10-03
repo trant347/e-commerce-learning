@@ -109,6 +109,8 @@ builder.Services.AddHttpClient<IBookingApiClient, BookingApiClient>((sp, client)
 builder.Services.AddSingleton<IToolDefinition, GetBookingsTool>();
 builder.Services.AddSingleton<ToolRegistry>();
 builder.Services.AddSingleton<McpCategoryEnumRefresher>();
+builder.Services.AddSingleton<CategoryDecisionService>();
+builder.Services.AddSingleton<SearchFilterExtractionService>();
 
 // MCP tool discovery — connects to remote MCP servers and registers their tools dynamically.
 builder.Services.AddHostedService<McpToolDiscoveryService>();
