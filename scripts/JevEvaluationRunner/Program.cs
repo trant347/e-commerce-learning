@@ -229,7 +229,8 @@ sealed class CategoryEntryComparer : IEqualityComparer<CategoryEntry>
         && left.Id == right.Id
         && left.DisplayName == right.DisplayName
         && left.Description == right.Description
-        && left.Aliases.SequenceEqual(right.Aliases, StringComparer.Ordinal);
+        && left.Aliases.Order(StringComparer.Ordinal)
+            .SequenceEqual(right.Aliases.Order(StringComparer.Ordinal), StringComparer.Ordinal);
     public int GetHashCode(CategoryEntry category) =>
         StringComparer.Ordinal.GetHashCode(category.Id);
 }

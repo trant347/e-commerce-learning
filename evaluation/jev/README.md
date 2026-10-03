@@ -74,8 +74,28 @@ includes language teaching, as the seed always did; no case labels language
 teaching, so labels are unaffected.
 
 **Operator re-review of the v2 snapshot is required** before any inference
-against it. Then rerun tuning only (Jev and/or local Ollama) with
-`catalog.v2.json`; held-out evaluation remains gated on a tuning pass.
+against it. The operator reviewed and approved catalog v2 for evaluation on
+October 3, 2026.
+
+### v2 tuning results (October 3, 2026, tuning split only)
+
+Same 60 tuning cases, three repeats each (180 runs per model), catalog v2.
+Jev reported cost **$0.050513**; one key-usage check hit HTTP 429 and the
+runner resumed without repeating completed runs. Raw results remain private.
+
+| Tuning-only measure | Jev v1 | Jev v2 | Ollama v1 | Ollama v2 |
+|---|---:|---:|---:|---:|
+| Correct automatic selections (gate at least 90%) | 88/108 | **102/108 (94.4%)** | 108/108 | 108/108 |
+| Correct safe abstentions (gate at least 95%) | 63/66 | **63/66 (95.5%)** | 9/66 | 17/66 |
+| Incorrect forced selections (gate at most 5%) | 3/66 | **3/66 (4.5%)** | 48/66 | 49/66 |
+
+Best v2 Jev grid candidate: confidence **0.0**, probability **0.0**, margin
+**0.1** (tolerance 0.001); no wrong-category selections. This is the first
+candidate to meet all three tuning gates, but the thresholds were selected on
+these same tuning runs and abstention sits at the gate boundary. It is **not a
+frozen policy or release result**: freezing a policy and a held-out run with
+`catalog.v2.json` require separate operator approval. Ollama still forces a
+category on most requests that need abstention.
 
 The offline validator checks that case IDs refer to this snapshot and that
 the canonical digest matches both the frozen snapshot and reported digest;
