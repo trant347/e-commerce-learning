@@ -124,6 +124,43 @@ outcomes, these held-out cases are now **consumed**: any intent-question or
 policy change must be measured on new, independently written held-out cases,
 not by rescoring this set. JEV-08 remains blocked and Jev stays disabled.
 
+### v3: clarified intent question and fresh held-out cases (October 3, 2026): PASS
+
+Commit `077cac0` rewrote the intent question:
+
+- it reads the clarification history and current request as one conversation;
+- booking or hiring a provider, and requests for services the marketplace may
+  not offer, count as `service_search`;
+- questions about an existing booking, payment or account, how-it-works
+  questions and general chat count as `not_applicable`.
+
+`cases.v2.jsonl` keeps the 60 v1 tuning cases and adds 60 fresh held-out
+cases (`H11`-`H20`), written without access to the intent wording or v1
+held-out prompts and reviewed by the operator. Validate it with
+`python evaluation\jev\validate.py --catalog v2 --cases v2`.
+
+The tuning rerun (180 runs, $0.050580) selected margin 0.65, the lowest value
+on a 0.65-0.80 plateau, with 108/108 automatic, 65/66 abstention and 0/66
+forced. Margins of 0.50 or lower fail the abstention gate. `policy.v3.json`
+(`jev-policy-v3-20261003`) was committed in `1b512d3` before held-out
+inference. Held-out (180 runs, $0.051165), scored only with that policy:
+
+| Held-out measure | Result | Gate |
+|---|---:|---|
+| Correct automatic selections | 111/111 (100%) | PASS (at least 90%) |
+| Correct safe abstentions | 60/60 (100%) | PASS (at least 95%) |
+| Incorrect forced selections | 0/60 (0%) | PASS (at most 5%) |
+| NotApplicable correct | 9/9 | not gated |
+
+There were no wrong-category pairs, unavailable results or malformed held-out
+decisions; one held-out run needed one repair. Two tuning runs were
+`MalformedDecision` and are included in the tuning figures. Jev call latency
+in the runner was p50 179 ms, p95 242 ms, max 351 ms.
+
+Limitations: these are category-stage gates only. End-to-end latency and the
+legacy-baseline comparison are not measured. With 60 held-out cases, a perfect
+score still allows a true error rate of a few percent.
+
 The offline validator checks that case IDs refer to this snapshot and that
 the canonical digest matches both the frozen snapshot and reported digest;
 it does not contact product-service or MCP.
