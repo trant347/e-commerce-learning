@@ -36,6 +36,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
     parser.add_argument("--fixture", type=Path, default=Path("evaluation/jev/cases.v1.jsonl"))
+    parser.add_argument("--ollama-results", type=Path, help="Optional same-fixture Ollama comparison")
     args = parser.parse_args()
     cases = {
         item["id"]: item
@@ -102,6 +103,42 @@ def main():
         and decision(row, *thresholds)[1] != cases[row["id"]]["expected"]["categoryId"]
     )
     print(f"Wrong-category confusion pairs: {confusion.most_common(10)}")
+    if args.ollama_results is not None:
+        ollama = [
+            json.loads(line)
+            for line in args.ollama_results.read_text(encoding="utf-8").splitlines()
+        ]
+        ollama_keys = [(row["id"], row["repeat"]) for row in ollama]
+        if (len(ollama) != 180
+            or set(ollama_keys) != set(keys)
+            or {row["catalogVersion"] for row in ollama} != versions
+            or {row["model"] for row in ollama} != {"qwen3:8b"}):
+            parser.error("Ollama comparison must use the same 180 tuning runs, catalog and model.")
+        ollama_automatic = sum(
+            row["outcome"] == "Resolved"
+            and row["categoryId"] == cases[row["id"]]["expected"]["categoryId"]
+            for row in ollama
+            if cases[row["id"]]["expected"]["outcome"] == "Resolved"
+        )
+        ollama_abstention = sum(
+            row["outcome"] in ("NeedsClarification", "NoMatch")
+            for row in ollama
+            if cases[row["id"]]["expected"]["outcome"] in ("NeedsClarification", "NoMatch")
+        )
+        ollama_forced = sum(
+            row["outcome"] == "Resolved"
+            for row in ollama
+            if cases[row["id"]]["expected"]["outcome"] in ("NeedsClarification", "NoMatch")
+        )
+        print(
+            f"Ollama qwen3:8b: automatic {ollama_automatic}/{len(unambiguous)}; "
+            f"correct abstention {ollama_abstention}/{len(abstention)}; "
+            f"incorrect forced {ollama_forced}/{len(abstention)}"
+        )
+        print(
+            "Tuning only: Ollama has no confidence gate here; a correct category "
+            "on answerable requests does not excuse forced selections."
+        )
     print("Tuning only: this is NOT a frozen production policy or held-out release result.")
     return 0
 

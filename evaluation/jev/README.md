@@ -82,6 +82,35 @@ follow-up misses in particular. Do not run held-out evaluation or claim release
 from these tuning figures. If the catalog digest changes, re-freeze and
 re-review before any further inference.
 
+## Local Ollama comparison (October 3, 2026)
+
+The same 60 approved tuning cases were run three times each (180 runs) with
+the frozen catalog digest above. The local `qwen3:8b` comparison used the
+existing `CategoryDecisionService`/`OllamaChatModelClient` path, with **no
+API key or paid calls**. Compared with Jev's best safe tuning grid:
+
+| Tuning-only measure | Jev | Local Ollama `qwen3:8b` |
+|---|---:|---:|
+| Correct automatic selections | 88/108 | 108/108 |
+| Correct safe abstentions | 63/66 | 9/66 |
+| Incorrect forced selections | 3/66 | 48/66 |
+
+For the remaining nine cases requiring abstention, Ollama predicted
+`NotApplicable`, which was not a correct abstention. Measured **category-stage** p50/p95
+durations were approximately **165/235 ms** for Jev versus **383/2183 ms**
+for Ollama. These are neither end-to-end latencies nor a controlled latency
+study. Ollama classified answerable requests better in this tuning comparison
+but was dramatically less safe on ambiguous or unsupported requests; **neither
+approach meets both release gates**. No held-out evaluation or policy freeze
+follows from these tuning-only results.
+
+To recompute the local comparison from **private, uncommitted** result files
+(offline analysis, no inference), run from the repository root:
+
+```text
+python scripts\analyze_jev_tuning.py C:\private\jev-tuning.jsonl --fixture evaluation\jev\cases.v1.jsonl --ollama-results C:\private\ollama-tuning.jsonl
+```
+
 ## Paid runner (future approved tuning only)
 
 `scripts\JevEvaluationRunner\JevEvaluationRunner.csproj` accepts six
