@@ -13,6 +13,7 @@ public enum ChatModelFailureCategory
     RateLimited,
     ProviderUnavailable,
     ProtocolError,
+    RoundBudgetExhausted,
     CallerCancellation,
     UnknownProviderError
 }

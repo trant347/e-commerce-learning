@@ -41,7 +41,8 @@ public enum JevFailureCategory
     RateLimited,
     Timeout,
     ProviderUnavailable,
-    ProtocolError
+    ProtocolError,
+    MalformedDecision
 }
 
 /// <summary>Safe provider failure metadata; raw response and decision content are not retained.</summary>

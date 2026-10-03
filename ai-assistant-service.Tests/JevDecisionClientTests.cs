@@ -81,17 +81,17 @@ public class JevDecisionClientTests
     }
 
     [Theory]
-    [InlineData("""{"error":{"code":400,"message":"private prompt"}}""")]
-    [InlineData("""{"answers":{"intent":{"type":"choice"}}}""")]
-    [InlineData("""{"answers":{},"answers":{},"model":"m","usage":{"input_tokens":1,"output_tokens":1}}""")]
-    [InlineData("""{"model":"m","answers":{"intent":{"type":"choice","choice":"service_search","confidence":0.9,"probabilities":{"service_search":0.8,"not_applicable":0.2}}},"usage":{"input_tokens":1,"output_tokens":1}}""")]
-    public async Task Decide_RejectsInvalidEnvelope(string response)
+    [InlineData("""{"error":{"code":400,"message":"private prompt"}}""", JevFailureCategory.ProtocolError)]
+    [InlineData("""{"answers":{"intent":{"type":"choice"}}}""", JevFailureCategory.MalformedDecision)]
+    [InlineData("""{"answers":{},"answers":{},"model":"m","usage":{"input_tokens":1,"output_tokens":1}}""", JevFailureCategory.MalformedDecision)]
+    [InlineData("""{"model":"m","answers":{"intent":{"type":"choice","choice":"service_search","confidence":0.9,"probabilities":{"service_search":0.8,"not_applicable":0.2}}},"usage":{"input_tokens":1,"output_tokens":1}}""", JevFailureCategory.MalformedDecision)]
+    public async Task Decide_RejectsInvalidEnvelope(string response, JevFailureCategory category)
     {
         using var handler = new CapturingHandler((_, _) => Task.FromResult(Reply(response)));
         using var http = new HttpClient(handler);
         var error = await Assert.ThrowsAsync<JevDecisionException>(
             () => Client(http).DecideAsync(Request(), CancellationToken.None));
-        Assert.Equal(JevFailureCategory.ProtocolError, error.Category);
+        Assert.Equal(category, error.Category);
     }
 
     [Theory]
@@ -114,7 +114,7 @@ public class JevDecisionClientTests
         if (valid)
             Assert.Equal("carpentry", (await Client(http).DecideAsync(Request(), CancellationToken.None)).Category.Choice);
         else
-            Assert.Equal(JevFailureCategory.ProtocolError,
+            Assert.Equal(JevFailureCategory.MalformedDecision,
                 (await Assert.ThrowsAsync<JevDecisionException>(
                     () => Client(http).DecideAsync(Request(), CancellationToken.None))).Category);
     }
@@ -129,7 +129,7 @@ public class JevDecisionClientTests
         using var handler = new CapturingHandler((_, _) => Task.FromResult(Reply(
             ValidAnswer.Replace("\"confidence\":0.75", confidence, StringComparison.Ordinal))));
         using var http = new HttpClient(handler);
-        Assert.Equal(JevFailureCategory.ProtocolError,
+        Assert.Equal(JevFailureCategory.MalformedDecision,
             (await Assert.ThrowsAsync<JevDecisionException>(
                 () => Client(http).DecideAsync(Request(), CancellationToken.None))).Category);
     }

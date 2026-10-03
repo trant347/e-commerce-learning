@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services.Telemetry;
 
 namespace ai_assistant_service.Services;
 
@@ -68,9 +69,10 @@ public sealed class SearchFilterExtractionService
         string request,
         IReadOnlyList<string> userHistory,
         ITaskChatModelClient client,
+        RequestRoundBudget budget,
         CancellationToken cancellationToken)
     {
-        var messages = new[]
+        var messages = new List<ChatModelMessage>
         {
             new ChatModelMessage(ChatModelRoles.System,
                 "Extract only explicitly user-stated search filters. Return one JSON object with hard (object), soft (array), " +
@@ -86,11 +88,24 @@ public sealed class SearchFilterExtractionService
                 clarificationHistory = userHistory
             }))
         };
-        var response = await client.ChatAsync(messages, tools: null, cancellationToken);
-        if (response.Message.ToolCalls is { Count: > 0 }
-            || !TryParse(response.Message.Content, request, userHistory, out var envelope))
-            return new SearchFilterEnvelope(new Dictionary<string, JsonElement>(), [], true);
-        return envelope!;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            budget.Spend();
+            var response = await client.ChatAsync(messages, tools: null, cancellationToken);
+            if (response.Message.ToolCalls is not { Count: > 0 }
+                && TryParse(response.Message.Content, request, userHistory, out var envelope))
+                return envelope!;
+            if (attempt == 0 && budget.TryClaimRepair())
+            {
+                AiAssistantTelemetry.RecordCategoryFilterRepair(client.Profile);
+                messages.Add(new ChatModelMessage(ChatModelRoles.System,
+                    "The prior filter envelope was invalid. Return only the specified JSON shape with user-substring evidence."));
+            }
+            else
+                break;
+        }
+        return new SearchFilterEnvelope(new Dictionary<string, JsonElement>(), [], true);
     }
 
     internal static bool TryParse(

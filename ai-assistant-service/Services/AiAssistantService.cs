@@ -100,6 +100,14 @@ public sealed class AiAssistantService : IAiAssistantService
                 client.Profile.Model,
                 "Category matching is temporarily unavailable. Please try again shortly.");
         }
+        catch (RoundBudgetExceededException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            telemetry.Failed(ChatModelFailureCategory.RoundBudgetExhausted, null);
+            _logger.LogWarning("Request-wide decision/model round budget exhausted");
+            return SafeAnswer(client.Profile.Model,
+                "I couldn't finish matching this request. Please try rephrasing.");
+        }
     }
 
     private async Task<ChatResponse> RunConversationAsync(
@@ -161,6 +169,7 @@ public sealed class AiAssistantService : IAiAssistantService
         var executedToolNames = new List<string>();
         var executedToolMessages = new List<ChatModelMessage>();
         string? finalContent = null;
+        var budget = new RequestRoundBudget(MaxToolRounds);
         CategoryCatalogSnapshot? capturedCatalog = null;
         CategoryDecision? categoryDecision = null;
         if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) == true)
@@ -170,7 +179,8 @@ public sealed class AiAssistantService : IAiAssistantService
 
             categoryDecision = await _categoryDecisions.ResolveAsync(
                 request, userHistory, capturedCatalog!, client,
-                TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                budget,
                 cancellationToken);
             switch (categoryDecision.Status)
             {
@@ -183,7 +193,7 @@ public sealed class AiAssistantService : IAiAssistantService
                 case CategoryDecisionStatus.Resolved:
                 {
                     var filters = await _filterExtraction.ExtractAsync(
-                        request.Message ?? string.Empty, userHistory, client, cancellationToken);
+                        request.Message ?? string.Empty, userHistory, client, budget, cancellationToken);
                     if (filters.NeedsClarification)
                     {
                         telemetry.Succeeded(false);
@@ -241,6 +251,7 @@ public sealed class AiAssistantService : IAiAssistantService
                 round + 1, MaxToolRounds, messages.Count);
 
             cancellationToken.ThrowIfCancellationRequested();
+            if (!budget.TrySpend()) break;
             telemetry.RoundStarted();
             var response = await client.ChatAsync(messages, toolDefinitions, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
@@ -279,7 +290,8 @@ public sealed class AiAssistantService : IAiAssistantService
                             return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
                         categoryDecision = await _categoryDecisions.ResolveAsync(
                             request, userHistory, capturedCatalog, client,
-                            TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                            () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                            budget,
                             cancellationToken);
                         if (categoryDecision.Status != CategoryDecisionStatus.Resolved)
                         {
@@ -287,7 +299,7 @@ public sealed class AiAssistantService : IAiAssistantService
                             return SafeAnswer(model, "Which single marketplace service would you like to find?");
                         }
                         var filters = await _filterExtraction.ExtractAsync(
-                            request.Message ?? string.Empty, userHistory, client, cancellationToken);
+                            request.Message ?? string.Empty, userHistory, client, budget, cancellationToken);
                         if (filters.NeedsClarification)
                         {
                             telemetry.Succeeded(false);

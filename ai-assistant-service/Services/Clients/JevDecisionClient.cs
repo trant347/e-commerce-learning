@@ -161,7 +161,7 @@ public sealed class JevDecisionClient : IJevDecisionClient
         }
         catch (JsonException)
         {
-            throw new JevDecisionException(JevFailureCategory.ProtocolError);
+            throw new JevDecisionException(JevFailureCategory.MalformedDecision);
         }
         catch (HttpRequestException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -179,9 +179,12 @@ public sealed class JevDecisionClient : IJevDecisionClient
         IEnumerable<string> categoryOptions,
         double tolerance)
     {
-        if (!TryObject(root, out var response)
-            || response.ContainsKey("error")
-            || !TryString(response, "model", out var model)
+        if (!TryObject(root, out var response))
+            throw new JevDecisionException(JevFailureCategory.MalformedDecision);
+        if (response.ContainsKey("error"))
+            throw new JevDecisionException(JevFailureCategory.ProtocolError);
+
+        if (!TryString(response, "model", out var model)
             || !TryObjectProperty(response, "answers", out var answers)
             || answers.Count != 2
             || !answers.TryGetValue("intent", out var intentElement)
@@ -191,13 +194,13 @@ public sealed class JevDecisionClient : IJevDecisionClient
             || !TryObjectProperty(response, "usage", out var usage)
             || !TryNonnegativeInt(usage, "input_tokens", out var inputTokens)
             || !TryNonnegativeInt(usage, "output_tokens", out var outputTokens))
-            throw new JevDecisionException(JevFailureCategory.ProtocolError);
+            throw new JevDecisionException(JevFailureCategory.MalformedDecision);
 
         double? cost = null;
         if (usage.TryGetValue("cost", out var costElement))
         {
             if (!TryNonnegativeNumber(costElement, out var parsedCost))
-                throw new JevDecisionException(JevFailureCategory.ProtocolError);
+                throw new JevDecisionException(JevFailureCategory.MalformedDecision);
             cost = parsedCost;
         }
 

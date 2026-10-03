@@ -5,6 +5,7 @@ using ai_assistant_service.Contracts;
 using ai_assistant_service.Services.Clients;
 using ai_assistant_service.Services.Contracts;
 using ai_assistant_service.Services.Mcp;
+using ai_assistant_service.Services.Telemetry;
 using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services;
@@ -45,14 +46,79 @@ public sealed class CategoryDecisionService
         IReadOnlyList<string> userHistory,
         CategoryCatalogSnapshot snapshot,
         ITaskChatModelClient chat,
-        TimeSpan remaining,
+        Func<TimeSpan> remaining,
+        RequestRoundBudget budget,
+        CancellationToken cancellationToken)
+    {
+        var isJev = string.Equals(
+            _options.SemanticProvider, CategorySemanticProviders.Jev,
+            StringComparison.OrdinalIgnoreCase);
+        using var telemetry = AiAssistantTelemetry.StartCategoryDecision(
+            isJev ? CategorySemanticProviders.Jev : chat.Profile.Provider,
+            isJev ? _options.Jev.Model! : chat.Profile.Model,
+            snapshot.CatalogVersion,
+            cancellationToken);
+        try
+        {
+            var decision = await ResolveCoreAsync(
+                request, userHistory, snapshot, chat, remaining, budget, telemetry,
+                cancellationToken);
+            telemetry.Succeeded(decision.Status);
+            return decision;
+        }
+        catch (JevDecisionException exception)
+        {
+            telemetry.Failed(exception.Category.ToString(), exception.HttpStatusCode);
+            throw;
+        }
+        catch (ChatModelException exception)
+        {
+            telemetry.Failed(exception.Category.ToString(), exception.Metadata.HttpStatusCode);
+            throw;
+        }
+        catch (RoundBudgetExceededException)
+        {
+            telemetry.Failed(ChatModelFailureCategory.RoundBudgetExhausted.ToString(), null);
+            throw;
+        }
+    }
+
+    private async Task<CategoryDecision> ResolveCoreAsync(
+        ChatRequest request,
+        IReadOnlyList<string> userHistory,
+        CategoryCatalogSnapshot snapshot,
+        ITaskChatModelClient chat,
+        Func<TimeSpan> remaining,
+        RequestRoundBudget budget,
+        AiAssistantTelemetry.CategoryDecisionTelemetry telemetry,
         CancellationToken cancellationToken)
     {
         if (string.Equals(_options.SemanticProvider, CategorySemanticProviders.Jev, StringComparison.OrdinalIgnoreCase))
         {
-            var response = await _jev.DecideAsync(
-                new JevDecisionRequest(request.Message, userHistory, snapshot, remaining),
-                cancellationToken);
+            JevDecisionResponse? response = null;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                budget.Spend();
+                try
+                {
+                    response = await _jev.DecideAsync(
+                        new JevDecisionRequest(request.Message, userHistory, snapshot, remaining()),
+                        cancellationToken);
+                    break;
+                }
+                catch (JevDecisionException exception)
+                    when (exception.Category == JevFailureCategory.MalformedDecision
+                          && attempt == 0 && !cancellationToken.IsCancellationRequested
+                          && budget.TryClaimRepair())
+                {
+                    telemetry.RepairAttempted();
+                }
+            }
+            if (response is null)
+                throw new JevDecisionException(JevFailureCategory.MalformedDecision);
+            telemetry.ReportProviderUsage(
+                response.ResolvedModel, response.InputTokens, response.OutputTokens);
             var policy = _options.Jev.Policy;
             if (!Accepted(response.Intent, policy))
                 return Decision(CategoryDecisionStatus.NeedsClarification);
@@ -65,7 +131,7 @@ public sealed class CategoryDecisionService
         }
 
         using var catalog = JsonDocument.Parse(snapshot.DecisionContext);
-        var messages = new[]
+        var messages = new List<ChatModelMessage>
         {
             new ChatModelMessage(ChatModelRoles.System,
                 "Decide whether the current request is a marketplace provider search. If so, select one category ID from the delimited catalog, " +
@@ -79,15 +145,31 @@ public sealed class CategoryDecisionService
                 catalog = catalog.RootElement
             }))
         };
-        var result = await chat.ChatAsync(messages, tools: null, cancellationToken);
-        if (result.Message.ToolCalls is { Count: > 0 }
-            || !TryParseChatDecision(result.Message.Content, out var intent, out var category))
-            return Decision(CategoryDecisionStatus.NeedsClarification);
-        if (intent == "not_applicable" && category is null)
-            return Decision(CategoryDecisionStatus.NotApplicable);
-        if (intent != "service_search" || category is null)
-            return Decision(CategoryDecisionStatus.NeedsClarification);
-        return Select(category);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            budget.Spend();
+            var result = await chat.ChatAsync(messages, tools: null, cancellationToken);
+            if (result.Message.ToolCalls is not { Count: > 0 }
+                && TryParseChatDecision(result.Message.Content, out var intent, out var category))
+            {
+                if (intent == "not_applicable" && category is null)
+                    return Decision(CategoryDecisionStatus.NotApplicable);
+                if (intent == "service_search" && category is not null
+                    && (category is JevDecisionClient.ClarificationOption or JevDecisionClient.NoMatchOption
+                        || snapshot.CategoryIds.Contains(category, StringComparer.Ordinal)))
+                    return Select(category);
+            }
+            if (attempt == 0 && budget.TryClaimRepair())
+            {
+                telemetry.RepairAttempted();
+                messages.Add(new ChatModelMessage(ChatModelRoles.System,
+                    "The prior decision was invalid. Return only the required JSON fields and a current catalog ID or explicit abstention."));
+            }
+            else
+                break;
+        }
+        return Decision(CategoryDecisionStatus.NeedsClarification);
 
         CategoryDecision Select(string choice) => choice switch
         {

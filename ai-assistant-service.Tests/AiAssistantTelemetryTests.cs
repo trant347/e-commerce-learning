@@ -205,6 +205,50 @@ public sealed class AiAssistantTelemetryTests
         Assert.Empty(capture.Measurements(T.FailuresMetric));
     }
 
+    [Fact]
+    public void CategoryDecisions_RecordBoundedOutcomesAndTraceOnlyProviderMetadata()
+    {
+        using var capture = new TelemetryCapture();
+        const string version =
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        using (var decision = T.StartCategoryDecision(
+                   "Jev", "typesafe/jev-1.13", version, CancellationToken.None))
+        {
+            decision.ReportProviderUsage("typesafe/resolved-model", 14, 6);
+            decision.RepairAttempted();
+            decision.Succeeded(CategoryDecisionStatus.Resolved);
+        }
+        using (var failed = T.StartCategoryDecision(
+                   "Jev", "typesafe/jev-1.13", version, CancellationToken.None))
+        {
+            failed.Failed(nameof(JevFailureCategory.InsufficientCredits), 402);
+        }
+
+        var decisions = capture.Measurements(T.CategoryDecisionsMetric);
+        Assert.Equal(2, decisions.Count);
+        Assert.Contains(decisions, m => Equals(m.Tag(T.OutcomeTag), nameof(CategoryDecisionStatus.Resolved)));
+        Assert.Contains(decisions, m => Equals(m.Tag(T.ErrorTypeTag), nameof(JevFailureCategory.InsufficientCredits)));
+        Assert.All(decisions, m =>
+        {
+            Assert.Equal("category", m.Tag(T.TaskTag));
+            Assert.Equal("Jev", m.Tag(T.ProviderTag));
+            Assert.Equal("typesafe/jev-1.13", m.Tag(T.RequestedModelTag));
+            Assert.Null(m.Tag(T.ResolvedModelTag));
+            Assert.Null(m.Tag("ai.category.catalog_version"));
+        });
+        Assert.Single(capture.Measurements(T.CategoryRepairsMetric));
+        Assert.Equal(2, capture.Measurements(T.CategoryDecisionDurationMetric).Count);
+
+        var activities = capture.Activities
+            .Where(activity => activity.OperationName == T.CategoryDecisionActivityName).ToList();
+        Assert.Equal(2, activities.Count);
+        Assert.Contains(activities, activity =>
+            Equals(activity.GetTagItem(T.ResolvedModelTag), "typesafe/resolved-model")
+            && Equals(activity.GetTagItem("ai.category.catalog_version"), version)
+            && Equals(activity.GetTagItem(T.InputTokensTag), 14));
+        capture.AssertNoSentinelValues();
+    }
+
     private static async Task<ChatResponse> ChatAsync(OpenRouterHandler handler, IToolDefinition tool)
     {
         using var host = new HostBuilder()

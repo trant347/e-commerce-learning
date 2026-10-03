@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using ai_assistant_service.Services.Contracts;
+using ai_assistant_service.Services;
 
 namespace ai_assistant_service.Services.Telemetry;
 
@@ -18,6 +19,10 @@ public static class AiAssistantTelemetry
     public const string ChatActivityName = "ai.chat";
     public const string ModelRoundActivityName = "ai.model.round";
     public const string RetryEventName = "ai.model.retry";
+    public const string CategoryDecisionActivityName = "ai.category.decision";
+    public const string CategoryDecisionDurationMetric = "ai_assistant.category_decision.duration";
+    public const string CategoryDecisionsMetric = "ai_assistant.category_decisions";
+    public const string CategoryRepairsMetric = "ai_assistant.category_repairs";
 
     public const string ChatDurationMetric = "ai_assistant.chat.duration";
     public const string ModelRoundDurationMetric = "ai_assistant.model_round.duration";
@@ -69,6 +74,12 @@ public static class AiAssistantTelemetry
         ToolCallsMetric, "{call}", "Tool calls executed for assistant requests.");
     private static readonly Counter<long> Tokens = Meter.CreateCounter<long>(
         TokensMetric, "{token}", "Model token usage reported by the provider.");
+    private static readonly Histogram<double> CategoryDecisionDuration = Meter.CreateHistogram<double>(
+        CategoryDecisionDurationMetric, "s", "End-to-end category decision duration.");
+    private static readonly Counter<long> CategoryDecisions = Meter.CreateCounter<long>(
+        CategoryDecisionsMetric, "{decision}", "Category decisions by bounded outcome.");
+    private static readonly Counter<long> CategoryRepairs = Meter.CreateCounter<long>(
+        CategoryRepairsMetric, "{repair}", "Bounded malformed category-decision repairs.");
 
     private static readonly AsyncLocal<ModelRoundTelemetry?> CurrentRound = new();
 
@@ -80,6 +91,93 @@ public static class AiAssistantTelemetry
         int roundNumber,
         CancellationToken callerToken) =>
         new(profile, roundNumber, callerToken);
+
+    public static CategoryDecisionTelemetry StartCategoryDecision(
+        string provider,
+        string requestedModel,
+        string catalogVersion,
+        CancellationToken callerToken) =>
+        new(provider, requestedModel, catalogVersion, callerToken);
+
+    public static void RecordCategoryFilterRepair(TaskModelProfile profile)
+    {
+        var tags = new TagList
+        {
+            { TaskTag, "category" },
+            { ProviderTag, profile.Provider },
+            { RequestedModelTag, profile.Model }
+        };
+        CategoryRepairs.Add(1, tags);
+    }
+
+    public sealed class CategoryDecisionTelemetry : IDisposable
+    {
+        private readonly string _provider;
+        private readonly string _model;
+        private readonly CancellationToken _callerToken;
+        private readonly long _startedAt = Stopwatch.GetTimestamp();
+        private readonly Activity? _activity;
+        private string? _outcome;
+        private string? _errorType;
+
+        internal CategoryDecisionTelemetry(
+            string provider, string model, string catalogVersion, CancellationToken callerToken)
+        {
+            _provider = provider;
+            _model = model;
+            _callerToken = callerToken;
+            _activity = ActivitySource.StartActivity(CategoryDecisionActivityName, ActivityKind.Internal);
+            _activity?.SetTag(TaskTag, "category");
+            _activity?.SetTag(ProviderTag, provider);
+            _activity?.SetTag(RequestedModelTag, model);
+            _activity?.SetTag("ai.category.catalog_version", catalogVersion);
+        }
+
+        public void ReportProviderUsage(string? resolvedModel, int inputTokens, int outputTokens)
+        {
+            _activity?.SetTag(ResolvedModelTag, resolvedModel);
+            _activity?.SetTag(InputTokensTag, inputTokens);
+            _activity?.SetTag(OutputTokensTag, outputTokens);
+        }
+
+        public void RepairAttempted()
+        {
+            CategoryRepairs.Add(1, Tags());
+            _activity?.AddEvent(new ActivityEvent("ai.category.repair"));
+        }
+
+        public void Succeeded(CategoryDecisionStatus status)
+        {
+            _outcome = status.ToString();
+            _activity?.SetTag(OutcomeTag, _outcome);
+        }
+
+        public void Failed(string failureCategory, int? status)
+        {
+            _outcome = Failure;
+            _errorType = failureCategory;
+            MarkFailure(_activity, failureCategory, status);
+        }
+
+        public void Dispose()
+        {
+            _outcome ??= CompleteOutcome(_activity, _callerToken, ref _errorType);
+            var tags = Tags();
+            tags.Add(OutcomeTag, _outcome);
+            if (_errorType is not null) tags.Add(ErrorTypeTag, _errorType);
+            CategoryDecisions.Add(1, tags);
+            CategoryDecisionDuration.Record(
+                Stopwatch.GetElapsedTime(_startedAt).TotalSeconds, tags);
+            _activity?.Dispose();
+        }
+
+        private TagList Tags() => new()
+        {
+            { TaskTag, "category" },
+            { ProviderTag, _provider },
+            { RequestedModelTag, _model }
+        };
+    }
 
     /// <summary>
     /// Records one adapter retry. The task label comes from the enclosing validated
