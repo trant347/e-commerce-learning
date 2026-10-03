@@ -1,6 +1,7 @@
-"""Offline structural validation for the REVIEW-PENDING JEV-08 v1 fixture."""
+"""Offline structural validation for the JEV-08 fixture against a frozen catalog snapshot."""
 
 import hashlib
+import argparse
 import json
 import re
 import sys
@@ -19,15 +20,20 @@ GROUPS = {
 SPLITS = {"tuning": "T", "heldout": "H"}
 OUTCOMES = {"Resolved", "NeedsClarification", "NoMatch", "NotApplicable"}
 HERE = Path(__file__).resolve().parent
-OBSERVED_DIGEST = "sha256:2268f76bdc93f84a1113a2b0efb1e6a9bc281d34e4756c253101e941f0208b62"
+# Frozen snapshot -> (observed live digest, whether aliases must be empty).
+CATALOGS = {
+    "v1": ("catalog.v1.json", "sha256:2268f76bdc93f84a1113a2b0efb1e6a9bc281d34e4756c253101e941f0208b62", True),
+    "v2": ("catalog.v2.json", "sha256:9ef188cab7be51a6c5a78667a1977c949ec727b491dc02ccb3f6dc164d961c6a", False),
+}
 
 
 def normalized(text):
     return " ".join(text.casefold().split())
 
 
-def validate():
-    snapshot = json.loads((HERE / "catalog.v1.json").read_text(encoding="utf-8"))
+def validate(catalog_name="v1"):
+    file_name, observed_digest, empty_aliases = CATALOGS[catalog_name]
+    snapshot = json.loads((HERE / file_name).read_text(encoding="utf-8"))
     catalog = snapshot["categories"]
     errors = []
     if set(snapshot) != {"schemaVersion", "catalogVersion", "categories"} or snapshot["schemaVersion"] != 1:
@@ -36,8 +42,10 @@ def validate():
         errors.append(f"catalog: expected 36 categories, found {len(catalog)}")
     if any(set(entry) != {"id", "displayName", "description", "aliases"} for entry in catalog):
         errors.append("catalog: expected only id, displayName, description and aliases")
-    if any(entry["aliases"] != [] for entry in catalog):
+    if empty_aliases and any(entry["aliases"] != [] for entry in catalog):
         errors.append("catalog: expected empty aliases")
+    if any(entry["aliases"] != sorted({normalized(alias) for alias in entry["aliases"]}) for entry in catalog):
+        errors.append("catalog: aliases must be unique, normalized and sorted")
     if [entry["id"] for entry in catalog] != sorted({entry["id"] for entry in catalog}):
         errors.append("catalog: IDs must be unique and sorted")
     names = {entry["id"]: entry["displayName"] for entry in catalog}
@@ -53,7 +61,7 @@ def validate():
     digest = "sha256:" + hashlib.sha256(
         json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    if digest != snapshot["catalogVersion"] or digest != OBSERVED_DIGEST:
+    if digest != snapshot["catalogVersion"] or digest != observed_digest:
         errors.append(f"catalog: computed {digest} does not match frozen and observed digests")
     counts = Counter()
     ids = set()
@@ -122,8 +130,14 @@ def validate():
 
 
 if __name__ == "__main__":
-    problems = validate()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--catalog", choices=sorted(CATALOGS), default="v1")
+    arguments = parser.parse_args()
+    problems = validate(arguments.catalog)
     if problems:
         print("\n".join(problems), file=sys.stderr)
         sys.exit(1)
-    print("JEV-08 v1 fixture valid: 120 cases; 20 per group; 10 per split per group; frozen catalog digest verified.")
+    print(
+        f"JEV-08 fixture valid against catalog {arguments.catalog}: 120 cases; "
+        "20 per group; 10 per split per group; frozen catalog digest verified."
+    )

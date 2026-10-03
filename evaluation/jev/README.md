@@ -51,7 +51,31 @@ Validate offline from the repository root with:
 
 ```text
 python evaluation\jev\validate.py
+python evaluation\jev\validate.py --catalog v2
 ```
+
+## Catalog v2 (October 3, 2026): reviewed descriptions and aliases
+
+`catalog.v2.json` freezes the revised product seed metadata after it was
+applied live: every description now states included work and the boundary
+with its overlapping neighbor, and 187 aliases (no alias shared between
+categories or equal to any ID/display name) were added. Its digest, computed
+from the live public metadata and identical to the seed file, is
+`sha256:9ef188cab7be51a6c5a78667a1977c949ec727b491dc02ccb3f6dc164d961c6a`.
+The serialized assistant catalog context is about 11,000 of the 12,000
+allowed characters.
+
+Metadata was written from general service knowledge and checked only for
+consistency with **tuning-split** label conventions (for example,
+one-to-one academic help is Tutoring, group learning is Education, a single
+evening is Babysitting, ongoing care is Childcare). Held-out prompts were not
+read. Alias wording does not copy fixture prompts. Live `education` now
+includes language teaching, as the seed always did; no case labels language
+teaching, so labels are unaffected.
+
+**Operator re-review of the v2 snapshot is required** before any inference
+against it. Then rerun tuning only (Jev and/or local Ollama) with
+`catalog.v2.json`; held-out evaluation remains gated on a tuning pass.
 
 The offline validator checks that case IDs refer to this snapshot and that
 the canonical digest matches both the frozen snapshot and reported digest;

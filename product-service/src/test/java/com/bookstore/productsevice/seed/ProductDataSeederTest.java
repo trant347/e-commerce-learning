@@ -2,6 +2,7 @@ package com.bookstore.productsevice.seed;
 
 import com.bookstore.productsevice.category.CategoryService;
 import com.bookstore.productsevice.location.LocationNormalizer;
+import com.bookstore.productsevice.model.Category;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.ApplicationRepository;
 import com.bookstore.productsevice.repository.CategoryRepository;
@@ -18,14 +19,21 @@ import org.springframework.core.io.ClassPathResource;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -76,7 +84,7 @@ public class ProductDataSeederTest {
         seeder.seedIfEmpty();
 
         verify(categoryService, times(36))
-                .createCategory(anyString(), anyString(), anyString(), anyString());
+                .createCategory(anyString(), anyString(), anyString(), anyList(), anyString());
 
         ArgumentCaptor<List<TaskMaster>> taskMastersCaptor = ArgumentCaptor.forClass(List.class);
         verify(taskMasterRepository).saveAll(taskMastersCaptor.capture());
@@ -94,7 +102,7 @@ public class ProductDataSeederTest {
 
         InOrder inOrder = inOrder(categoryService, productCacheService, taskMasterRepository);
         inOrder.verify(categoryService, times(36))
-                .createCategory(anyString(), anyString(), anyString(), anyString());
+                .createCategory(anyString(), anyString(), anyString(), anyList(), anyString());
         inOrder.verify(productCacheService).evictCategoryCatalog();
         inOrder.verify(taskMasterRepository).saveAll(any());
         inOrder.verify(productCacheService).evictOnCreate();
@@ -109,7 +117,7 @@ public class ProductDataSeederTest {
                 .hasMessageContaining("Reset the products database");
 
         verify(categoryService, never())
-                .createCategory(anyString(), anyString(), anyString(), anyString());
+                .createCategory(anyString(), anyString(), anyString(), anyList(), anyString());
         verify(taskMasterRepository, never()).saveAll(any());
         verify(productCacheService, never()).evictCategoryCatalog();
     }
@@ -126,16 +134,105 @@ public class ProductDataSeederTest {
     @Test
     public void seedIfEmpty_isRepeatableForExistingCatalogAndTaskMasters() throws Exception {
         when(categoryRepository.count()).thenReturn(36L);
-        when(categoryRepository.existsById(anyString())).thenReturn(true);
+        when(categoryRepository.findById(anyString()))
+                .thenAnswer(invocation -> Optional.of(seededCategory(invocation.getArgument(0))));
         when(taskMasterRepository.count()).thenReturn(18L);
 
         seeder.seedIfEmpty();
 
         verify(categoryService, never())
-                .createCategory(anyString(), anyString(), anyString(), anyString());
+                .createCategory(anyString(), anyString(), anyString(), anyList(), anyString());
+        verify(categoryService, never())
+                .updateCategory(anyString(), anyString(), anyString(), anyList(), anyString());
         verify(taskMasterRepository, never()).saveAll(any());
         verify(productCacheService).evictCategoryCatalog();
         verify(productCacheService, never()).evictOnCreate();
+    }
+
+    @Test
+    public void seedIfEmpty_refreshesOnlyStaleSeedOwnedCategories() throws Exception {
+        when(categoryRepository.count()).thenReturn(36L);
+        when(taskMasterRepository.count()).thenReturn(18L);
+        when(categoryRepository.findById(anyString()))
+                .thenAnswer(invocation -> Optional.of(seededCategory(invocation.getArgument(0))));
+        when(categoryRepository.findById("plumbing")).thenReturn(Optional.of(new Category()
+                .setId("plumbing")
+                .setDisplayName("Plumbing")
+                .setDescription("Old seed description.")
+                .setCreatedBy("system-seed")
+                .setUpdatedBy("system-seed")));
+        when(categoryRepository.findById("carpentry")).thenReturn(Optional.of(new Category()
+                .setId("carpentry")
+                .setDisplayName("Carpentry")
+                .setDescription("Administrator-reviewed description.")
+                .setCreatedBy("system-seed")
+                .setUpdatedBy("admin")));
+
+        seeder.seedIfEmpty();
+
+        Map<String, ProductDataSeeder.CategorySeed> seeds = readCategorySeeds();
+        ProductDataSeeder.CategorySeed plumbing = seeds.get("plumbing");
+        verify(categoryService).updateCategory(
+                eq("plumbing"),
+                eq(plumbing.displayName),
+                eq(plumbing.description),
+                eq(plumbing.aliases),
+                eq("system-seed"));
+        verify(categoryService, never())
+                .updateCategory(eq("carpentry"), anyString(), anyString(), anyList(), anyString());
+        verify(categoryService, times(1))
+                .updateCategory(anyString(), anyString(), anyString(), anyList(), anyString());
+        verify(categoryService, never())
+                .createCategory(anyString(), anyString(), anyString(), anyList(), anyString());
+    }
+
+    @Test
+    public void seedResources_aliasesAreNormalizedAndUnambiguous() throws Exception {
+        Map<String, ProductDataSeeder.CategorySeed> seeds = readCategorySeeds();
+        Set<String> reservedTerms = new HashSet<>();
+        seeds.values().forEach(seed -> {
+            reservedTerms.add(seed.id);
+            reservedTerms.add(seed.displayName.toLowerCase(Locale.ROOT));
+        });
+
+        Map<String, String> aliasOwners = new HashMap<>();
+        seeds.values().forEach(seed -> {
+            assertThat(seed.aliases).as("aliases for %s", seed.id).isNotNull().hasSizeLessThanOrEqualTo(20);
+            assertThat(seed.description).hasSizeLessThanOrEqualTo(500);
+            seed.aliases.forEach(alias -> {
+                assertThat(alias)
+                        .isEqualTo(alias.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT))
+                        .hasSizeBetween(2, 80);
+                assertThat(reservedTerms).as("alias %s repeats a category ID or name", alias)
+                        .doesNotContain(alias);
+                assertThat(aliasOwners.putIfAbsent(alias, seed.id))
+                        .as("alias %s is shared with %s", alias, aliasOwners.get(alias))
+                        .isNull();
+            });
+        });
+    }
+
+    private static Category seededCategory(String id) throws Exception {
+        ProductDataSeeder.CategorySeed seed = readCategorySeeds().get(id);
+        return new Category()
+                .setId(seed.id)
+                .setDisplayName(seed.displayName)
+                .setDescription(seed.description)
+                .setAliases(seed.aliases)
+                .setCreatedBy("system-seed")
+                .setUpdatedBy("system-seed");
+    }
+
+    private static Map<String, ProductDataSeeder.CategorySeed> readCategorySeeds() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (InputStream inputStream =
+                     new ClassPathResource("seed/categories.json").getInputStream()) {
+            Map<String, ProductDataSeeder.CategorySeed> seeds = new LinkedHashMap<>();
+            objectMapper.readValue(inputStream, ProductDataSeeder.CategorySeedPayload.class)
+                    .categories
+                    .forEach(seed -> seeds.put(seed.id, seed));
+            return seeds;
+        }
     }
 
     @Test

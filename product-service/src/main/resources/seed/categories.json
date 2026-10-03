@@ -3,182 +3,441 @@
     {
       "id": "alterations",
       "displayName": "Alterations",
-      "description": "Clothing adjustments, hemming, resizing, and garment repairs."
+      "description": "Adjusting or repairing existing clothing: hemming, taking in or letting out, resizing, and zipper or button replacement. Making new garments is Sewing.",
+      "aliases": [
+        "tailoring",
+        "tailor",
+        "clothing alterations",
+        "hemming",
+        "dress alterations",
+        "suit alterations"
+      ]
     },
     {
       "id": "automotive",
       "displayName": "Automotive",
-      "description": "General vehicle maintenance, care, and automotive services."
+      "description": "Mechanical vehicle maintenance and repair, such as oil changes, brakes, batteries, tires, and diagnostics. Cosmetic vehicle cleaning is Car Detailing.",
+      "aliases": [
+        "mechanic",
+        "car repair",
+        "auto repair",
+        "oil change",
+        "brake repair",
+        "car maintenance"
+      ]
     },
     {
       "id": "babysitting",
       "displayName": "Babysitting",
-      "description": "Short-term supervision and care for children."
+      "description": "Occasional, short-term child supervision, such as a single evening, date night, or a few hours. Regular, ongoing care is Childcare.",
+      "aliases": [
+        "babysitter",
+        "date night sitter",
+        "occasional child supervision",
+        "last-minute babysitter"
+      ]
     },
     {
       "id": "car-detailing",
       "displayName": "Car Detailing",
-      "description": "Interior and exterior vehicle cleaning and detailing."
+      "description": "Cosmetic vehicle cleaning: interior vacuuming and upholstery shampooing, exterior washing, waxing, and polishing. Mechanical work is Automotive.",
+      "aliases": [
+        "car wash",
+        "auto detailing",
+        "car cleaning",
+        "interior detailing",
+        "car waxing",
+        "mobile detailing"
+      ]
     },
     {
       "id": "carpentry",
       "displayName": "Carpentry",
-      "description": "Wood construction, modification, and repair."
+      "description": "Custom woodwork and wood repair: building, cutting, fitting, or fixing shelves, cabinets, trim, doors, decks, and wooden furniture parts. Assembling flat-pack furniture is Furniture Assembly.",
+      "aliases": [
+        "woodworking",
+        "carpenter",
+        "custom shelving",
+        "cabinet repair",
+        "trim work",
+        "wood repair"
+      ]
     },
     {
       "id": "catering",
       "displayName": "Catering",
-      "description": "Food preparation and service for gatherings and events."
+      "description": "Food prepared and served for events and gatherings, such as parties, weddings, and office functions. Everyday household meals are Cooking.",
+      "aliases": [
+        "caterer",
+        "event catering",
+        "party food",
+        "wedding catering",
+        "buffet service"
+      ]
     },
     {
       "id": "childcare",
       "displayName": "Childcare",
-      "description": "Ongoing care and support for children."
+      "description": "Regular, ongoing child care, such as a nanny, daily or weekly care, or after-school care. A one-off short session is Babysitting.",
+      "aliases": [
+        "nanny",
+        "daycare",
+        "after-school care",
+        "au pair",
+        "ongoing child care"
+      ]
     },
     {
       "id": "cleaning",
       "displayName": "Cleaning",
-      "description": "Residential and commercial cleaning services."
+      "description": "Cleaning homes and offices: dusting, vacuuming, mopping, kitchens, bathrooms, deep cleaning, and move-out cleaning. Decluttering and arranging belongings is Organizing.",
+      "aliases": [
+        "house cleaning",
+        "maid service",
+        "housekeeping",
+        "deep cleaning",
+        "move-out cleaning",
+        "office cleaning",
+        "cleaner"
+      ]
     },
     {
       "id": "computer-repair",
       "displayName": "Computer Repair",
-      "description": "Diagnosis and repair of computer hardware and software problems."
+      "description": "Diagnosing and fixing laptop or desktop hardware and software faults, such as failure to start, part replacement, virus removal, and data recovery. Setting up other devices is Tech Support.",
+      "aliases": [
+        "laptop repair",
+        "pc repair",
+        "desktop repair",
+        "virus removal",
+        "data recovery"
+      ]
     },
     {
       "id": "cooking",
       "displayName": "Cooking",
-      "description": "Meal preparation and personal cooking services."
+      "description": "Preparing everyday meals for a household, such as a personal chef or weekly meal prep. Food service for events is Catering.",
+      "aliases": [
+        "personal chef",
+        "private chef",
+        "meal prep",
+        "home cooking",
+        "home cook"
+      ]
     },
     {
       "id": "delivery",
       "displayName": "Delivery",
-      "description": "Pickup and delivery of items and household goods."
+      "description": "Picking up and transporting individual items, such as packages, purchases, or a single piece of furniture. Relocating a whole household is Moving.",
+      "aliases": [
+        "courier",
+        "package delivery",
+        "item pickup",
+        "same-day delivery",
+        "furniture delivery"
+      ]
     },
     {
       "id": "dog-walking",
       "displayName": "Dog Walking",
-      "description": "Scheduled walks and exercise for dogs."
+      "description": "Scheduled walks and exercise outings for dogs. Feeding, sitting, or other care for pets is Pet Care.",
+      "aliases": [
+        "dog walker",
+        "dog exercise",
+        "puppy walks"
+      ]
     },
     {
       "id": "education",
       "displayName": "Education",
-      "description": "Teaching and structured lessons, including language teaching such as English or Spanish, and general learning services."
+      "description": "Structured teaching, courses, and group learning, including language lessons such as English or Spanish and adult skills classes. One-to-one academic help is Tutoring; instrument lessons are Music Lessons.",
+      "aliases": [
+        "language lessons",
+        "english lessons",
+        "spanish lessons",
+        "esl teacher",
+        "adult education"
+      ]
     },
     {
       "id": "electrical",
       "displayName": "Electrical",
-      "description": "Electrical installation, maintenance, and repair."
+      "description": "Electrician work: wiring, outlets, switches, light fixtures, ceiling fans, breaker panels, and electrical fault repair. Configuring connected devices is Smart Home.",
+      "aliases": [
+        "electrician",
+        "wiring",
+        "outlet repair",
+        "light fixture installation",
+        "breaker panel",
+        "ceiling fan installation"
+      ]
     },
     {
       "id": "entertainment",
       "displayName": "Entertainment",
-      "description": "Live entertainment and performance services."
+      "description": "Live performers for events, such as DJs, live musicians, bands, magicians, and party entertainers.",
+      "aliases": [
+        "dj",
+        "party entertainer",
+        "magician",
+        "live band",
+        "live music"
+      ]
     },
     {
       "id": "errand-running",
       "displayName": "Errand Running",
-      "description": "Shopping, pickups, appointments, and everyday errands."
+      "description": "Running everyday errands for someone: grocery shopping, picking up prescriptions or dry cleaning, returns, and waiting in line.",
+      "aliases": [
+        "errands",
+        "errand runner",
+        "grocery shopping",
+        "prescription pickup",
+        "dry cleaning pickup"
+      ]
     },
     {
       "id": "fitness",
       "displayName": "Fitness",
-      "description": "Exercise instruction and general fitness support."
+      "description": "Group or general exercise instruction, such as yoga, pilates, and workout classes. Individual one-to-one coaching is Personal Training.",
+      "aliases": [
+        "yoga instructor",
+        "pilates",
+        "group fitness class",
+        "exercise class",
+        "workout class"
+      ]
     },
     {
       "id": "furniture-assembly",
       "displayName": "Furniture Assembly",
-      "description": "Assembly and installation of household furniture."
+      "description": "Assembling and installing ready-made or flat-pack furniture from supplied parts, such as beds, wardrobes, desks, and bookcases. Building or repairing wood is Carpentry.",
+      "aliases": [
+        "flat-pack assembly",
+        "ikea assembly",
+        "assemble furniture",
+        "bed assembly",
+        "desk assembly"
+      ]
     },
     {
       "id": "gardening",
       "displayName": "Gardening",
-      "description": "Plant care, garden maintenance, and garden improvement."
+      "description": "Caring for existing plants and gardens: watering, pruning, weeding, planting, and lawn mowing. Designing or building outdoor spaces is Landscaping.",
+      "aliases": [
+        "gardener",
+        "weeding",
+        "pruning",
+        "lawn mowing",
+        "plant care"
+      ]
     },
     {
       "id": "home-improvement",
       "displayName": "Home Improvement",
-      "description": "General improvements and upgrades for residential properties."
+      "description": "Upgrades and renovations that change a home, such as remodeling, new flooring, tiling, or installing new features. Fixing something broken is Home Repair.",
+      "aliases": [
+        "renovation",
+        "remodeling",
+        "flooring installation",
+        "tiling",
+        "kitchen remodel",
+        "bathroom remodel"
+      ]
     },
     {
       "id": "home-repair",
       "displayName": "Home Repair",
-      "description": "General household maintenance and minor repairs."
+      "description": "Handyman fixes for broken or worn household items, such as hinges, doors, drywall holes, and minor maintenance.",
+      "aliases": [
+        "handyman",
+        "drywall repair",
+        "door repair",
+        "household repairs"
+      ]
     },
     {
       "id": "landscaping",
       "displayName": "Landscaping",
-      "description": "Landscape design, installation, and outdoor maintenance."
+      "description": "Designing and building outdoor spaces: landscape design, new lawns or sod, patios, hardscaping, and outdoor installations. Routine plant care is Gardening.",
+      "aliases": [
+        "landscaper",
+        "landscape design",
+        "hardscaping",
+        "sod installation",
+        "patio installation",
+        "yard design"
+      ]
     },
     {
       "id": "moving",
       "displayName": "Moving",
-      "description": "Packing, loading, transport, and unloading assistance."
+      "description": "Relocating a household or office: packing, loading, transporting, and unloading belongings.",
+      "aliases": [
+        "movers",
+        "moving help",
+        "packing and loading",
+        "house move",
+        "relocation help"
+      ]
     },
     {
       "id": "music-lessons",
       "displayName": "Music Lessons",
-      "description": "Instruction in musical instruments, performance, and theory."
+      "description": "Instruction in playing instruments or singing, such as piano, guitar, violin, drums, and voice, and music theory. Live performance at events is Entertainment.",
+      "aliases": [
+        "piano lessons",
+        "guitar lessons",
+        "violin lessons",
+        "singing lessons",
+        "music teacher",
+        "voice lessons"
+      ]
     },
     {
       "id": "organizing",
       "displayName": "Organizing",
-      "description": "Home, office, and personal organization services."
+      "description": "Decluttering and arranging belongings in homes and offices, such as closets, garages, and storage systems.",
+      "aliases": [
+        "professional organizer",
+        "decluttering",
+        "closet organization",
+        "garage organization",
+        "home organization"
+      ]
     },
     {
       "id": "painting",
       "displayName": "Painting",
-      "description": "Interior and exterior painting and surface preparation."
+      "description": "Interior and exterior painting of walls, rooms, ceilings, trim, and fences, including surface preparation.",
+      "aliases": [
+        "painter",
+        "house painting",
+        "wall painting",
+        "interior painting",
+        "exterior painting"
+      ]
     },
     {
       "id": "personal-assistant",
       "displayName": "Personal Assistant",
-      "description": "Administrative and day-to-day personal support."
+      "description": "Administrative and day-to-day personal support, such as scheduling, email, bookings, and paperwork organization.",
+      "aliases": [
+        "virtual assistant",
+        "admin help",
+        "scheduling help",
+        "executive assistant"
+      ]
     },
     {
       "id": "personal-training",
       "displayName": "Personal Training",
-      "description": "Individual fitness coaching and exercise programming."
+      "description": "Individual one-to-one fitness coaching and personalized exercise programs. Group classes are Fitness.",
+      "aliases": [
+        "personal trainer",
+        "one-on-one training",
+        "strength coach",
+        "workout plan"
+      ]
     },
     {
       "id": "pet-care",
       "displayName": "Pet Care",
-      "description": "General care, feeding, supervision, and support for pets."
+      "description": "Non-medical care for pets: feeding, pet sitting, boarding, grooming, and supervision. Dog walks are Dog Walking; veterinary treatment is not offered.",
+      "aliases": [
+        "pet sitter",
+        "pet sitting",
+        "cat sitting",
+        "pet feeding",
+        "pet grooming",
+        "pet boarding"
+      ]
     },
     {
       "id": "photography",
       "displayName": "Photography",
-      "description": "Professional photography for people, properties, and events."
+      "description": "Still photography of people, properties, products, and events, such as portraits, headshots, and wedding photos. Video recording is Videography.",
+      "aliases": [
+        "photographer",
+        "photo shoot",
+        "portrait photography",
+        "headshots",
+        "wedding photography",
+        "real estate photography"
+      ]
     },
     {
       "id": "plumbing",
       "displayName": "Plumbing",
-      "description": "Pipe, fixture, drain, and water-system installation and repair."
+      "description": "Pipes, faucets, taps, toilets, drains, water heaters, and leaks: installation and repair.",
+      "aliases": [
+        "plumber",
+        "leaky faucet",
+        "clogged drain",
+        "toilet repair",
+        "water heater repair",
+        "pipe repair"
+      ]
     },
     {
       "id": "sewing",
       "displayName": "Sewing",
-      "description": "Custom sewing, garment construction, and fabric repairs."
+      "description": "Making new garments and fabric items from scratch, such as custom clothing, curtains, and costumes, and fabric repairs. Adjusting existing clothing is Alterations.",
+      "aliases": [
+        "seamstress",
+        "custom clothing",
+        "curtain making",
+        "costume making",
+        "dressmaking"
+      ]
     },
     {
       "id": "smart-home",
       "displayName": "Smart Home",
-      "description": "Installation and configuration of connected home devices."
+      "description": "Installing and configuring connected home devices, such as smart thermostats, video doorbells, smart lights, and home automation hubs.",
+      "aliases": [
+        "home automation",
+        "smart thermostat installation",
+        "video doorbell installation",
+        "smart lighting",
+        "security camera setup"
+      ]
     },
     {
       "id": "tech-support",
       "displayName": "Tech Support",
-      "description": "Setup, troubleshooting, and support for consumer technology."
+      "description": "Setting up and troubleshooting consumer technology, such as phones, tablets, printers, Wi-Fi, TVs, and software accounts. Repairing broken computers is Computer Repair.",
+      "aliases": [
+        "it support",
+        "wifi setup",
+        "printer setup",
+        "phone setup",
+        "tv setup"
+      ]
     },
     {
       "id": "tutoring",
       "displayName": "Tutoring",
-      "description": "One-on-one help with school subjects, homework, and test preparation. Language teaching belongs in Education."
+      "description": "One-to-one academic help with school subjects, homework, and test preparation. Language and group classes are Education.",
+      "aliases": [
+        "tutor",
+        "homework help",
+        "math tutor",
+        "test prep",
+        "exam preparation"
+      ]
     },
     {
       "id": "videography",
       "displayName": "Videography",
-      "description": "Professional video recording and production."
+      "description": "Professional video recording, filming, and editing for events, businesses, and personal projects. Still photos are Photography.",
+      "aliases": [
+        "videographer",
+        "video production",
+        "event filming",
+        "wedding video",
+        "video editing"
+      ]
     }
   ]
 }

@@ -3,6 +3,7 @@ package com.bookstore.productsevice.seed;
 import com.bookstore.productsevice.category.CategoryService;
 import com.bookstore.productsevice.location.LocationNormalizer;
 import com.bookstore.productsevice.location.NormalizedLocation;
+import com.bookstore.productsevice.model.Category;
 import com.bookstore.productsevice.model.TaskMaster;
 import com.bookstore.productsevice.repository.ApplicationRepository;
 import com.bookstore.productsevice.repository.CategoryRepository;
@@ -20,6 +21,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 @Component
 public class ProductDataSeeder {
@@ -125,24 +128,47 @@ public class ProductDataSeeder {
         }
 
         int createdCount = 0;
+        int refreshedCount = 0;
         for (CategorySeed category : categories) {
             String categoryId = categoryService.normalizeId(category.id);
-            if (categoryRepository.existsById(categoryId)) {
-                continue;
+            List<String> aliases = category.aliases == null ? List.of() : category.aliases;
+            Optional<Category> existing = categoryRepository.findById(categoryId);
+            if (existing.isEmpty()) {
+                categoryService.createCategory(
+                        categoryId,
+                        category.displayName,
+                        category.description,
+                        aliases,
+                        SEED_ACTOR);
+                createdCount++;
+            } else if (isSeedOwned(existing.get()) && !matchesSeed(existing.get(), category, aliases)) {
+                // Only records never edited by an administrator follow seed metadata revisions.
+                categoryService.updateCategory(
+                        categoryId,
+                        category.displayName,
+                        category.description,
+                        aliases,
+                        SEED_ACTOR);
+                refreshedCount++;
             }
-            categoryService.createCategory(
-                    categoryId,
-                    category.displayName,
-                    category.description,
-                    SEED_ACTOR);
-            createdCount++;
         }
 
-        if (createdCount > 0) {
-            log.info("Seeded {} categories from seed/categories.json", createdCount);
+        if (createdCount > 0 || refreshedCount > 0) {
+            log.info("Seeded {} and refreshed {} seed-owned categories from seed/categories.json",
+                    createdCount, refreshedCount);
         } else {
             log.info("Category catalog already contains all seed categories.");
         }
+    }
+
+    private static boolean isSeedOwned(Category category) {
+        return SEED_ACTOR.equals(category.getCreatedBy()) && SEED_ACTOR.equals(category.getUpdatedBy());
+    }
+
+    private static boolean matchesSeed(Category category, CategorySeed seed, List<String> aliases) {
+        return Objects.equals(category.getDisplayName(), seed.displayName)
+                && Objects.equals(category.getDescription(), seed.description)
+                && category.getAliases().equals(aliases);
     }
 
     private List<CategorySeed> readCategorySeeds() throws IOException {
@@ -167,6 +193,7 @@ public class ProductDataSeeder {
         public String id;
         public String displayName;
         public String description;
+        public List<String> aliases;
     }
 
     static class TaskMasterSeedPayload {
