@@ -1,0 +1,11 @@
+{
+  "version": "jev-policy-v3-20261003",
+  "evaluatedModel": "typesafe/jev-1.13",
+  "resolvedModel": "typesafe/jev-1.13-20260917",
+  "evaluatedCatalogVersion": "sha256:9ef188cab7be51a6c5a78667a1977c949ec727b491dc02ccb3f6dc164d961c6a",
+  "minimumConfidence": 0.0,
+  "minimumProbability": 0.0,
+  "minimumMargin": 0.65,
+  "distributionTolerance": 0.001,
+  "selectedFrom": "tuning split of cases.v2.jsonl only with the commit 077cac0 intent wording, frozen before any held-out inference"
+}
