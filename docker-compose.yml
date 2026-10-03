@@ -318,6 +318,18 @@ services:
     - AiModels__Tasks__chat__TimeoutSeconds=600
     - AiModels__Tasks__chat__RequestTimeoutSeconds=3000
     - AiModels__Tasks__chat__MaxOutputTokens=1024
+    - CategoryResolution__Mode=${JEV_CATEGORY_MODE:-legacy}
+    - CategoryResolution__SemanticProvider=${JEV_CATEGORY_SEMANTIC_PROVIDER:-ChatModel}
+    - CategoryResolution__Jev__Model=${JEV_CATEGORY_MODEL:-}
+    - CategoryResolution__Jev__Endpoint=${JEV_CATEGORY_ENDPOINT:-}
+    - CategoryResolution__Jev__TimeoutSeconds=${JEV_CATEGORY_TIMEOUT_SECONDS:-}
+    - CategoryResolution__Jev__Policy__Version=${JEV_POLICY_VERSION:-}
+    - CategoryResolution__Jev__Policy__EvaluatedModel=${JEV_POLICY_EVALUATED_MODEL:-}
+    - CategoryResolution__Jev__Policy__EvaluatedCatalogVersion=${JEV_POLICY_EVALUATED_CATALOG_VERSION:-}
+    - CategoryResolution__Jev__Policy__MinimumConfidence=${JEV_POLICY_MINIMUM_CONFIDENCE:-}
+    - CategoryResolution__Jev__Policy__MinimumProbability=${JEV_POLICY_MINIMUM_PROBABILITY:-}
+    - CategoryResolution__Jev__Policy__MinimumMargin=${JEV_POLICY_MINIMUM_MARGIN:-}
+    - CategoryResolution__Jev__Policy__DistributionTolerance=${JEV_POLICY_DISTRIBUTION_TOLERANCE:-}
     # Shared by every OpenRouter task. Optional here: an all-Ollama task map needs no key.
     - OpenRouter__ApiKey=${OPENROUTER_API_KEY:-}
     - OpenRouter__HttpReferer=${OPENROUTER_HTTP_REFERER:-}

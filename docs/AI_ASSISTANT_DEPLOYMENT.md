@@ -31,9 +31,9 @@ task never falls back to another task, model, or provider.
 `OPENROUTER_CHAT_MODEL=typesafe/jev-1.13`: this variable feeds the existing
 Chat Completions adapter, while Jev uses the separate Decisions API.
 [Jev category-first integration](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md#jev-category-first-integration-proposed)
-is specified but not implemented. Adding a category model variable to `.env`
-does not activate it. Keep the existing chat model and future category decision
-model separate; sharing an OpenRouter key does not make their APIs compatible.
+is implemented behind an opt-in switch, but has not passed its evaluation and
+release gates. Keep the chat and decision models separate; sharing an
+OpenRouter key does not make their APIs compatible.
 
 Compose does not forward host environment variables automatically. Every task
 setting must appear in the service's `environment` in a Compose file.
@@ -52,6 +52,71 @@ setting must appear in the service's `environment` in a Compose file.
     model page.
   - A review of the upstream provider's retention and training terms before
     production use.
+
+## Jev category decisions (disabled by default)
+
+The base Compose file explicitly forwards these `.env` variables to
+`CategoryResolution` and the separate Decisions client. The default
+`legacy` / `ChatModel` combination makes no Jev calls and needs no Jev key.
+An OpenRouter-only chat deployment still requires its own key and chat model.
+
+| `.env` variable | Forwarded setting |
+|---|---|
+| `JEV_CATEGORY_MODE` | `CategoryResolution:Mode` (`legacy`, `catalog-llm`, or `hybrid`) |
+| `JEV_CATEGORY_SEMANTIC_PROVIDER` | `CategoryResolution:SemanticProvider` (`ChatModel` or `Jev`) |
+| `JEV_CATEGORY_MODEL` | `CategoryResolution:Jev:Model` (Decisions model, not `OPENROUTER_CHAT_MODEL`) |
+| `JEV_CATEGORY_ENDPOINT` | `CategoryResolution:Jev:Endpoint` (HTTPS `/api/alpha/decisions`) |
+| `JEV_CATEGORY_TIMEOUT_SECONDS` | `CategoryResolution:Jev:TimeoutSeconds` (1–300) |
+| `JEV_POLICY_VERSION` | `CategoryResolution:Jev:Policy:Version` |
+| `JEV_POLICY_EVALUATED_MODEL` | `CategoryResolution:Jev:Policy:EvaluatedModel` (must match the decision model) |
+| `JEV_POLICY_EVALUATED_CATALOG_VERSION` | `CategoryResolution:Jev:Policy:EvaluatedCatalogVersion` (`sha256:` plus 64 lowercase hex digits) |
+| `JEV_POLICY_MINIMUM_CONFIDENCE`, `JEV_POLICY_MINIMUM_PROBABILITY`, `JEV_POLICY_MINIMUM_MARGIN` | Corresponding `CategoryResolution:Jev:Policy` thresholds (0–1) |
+| `JEV_POLICY_DISTRIBUTION_TOLERANCE` | `CategoryResolution:Jev:Policy:DistributionTolerance` (>0 and <=0.01) |
+| `OPENROUTER_API_KEY` | Shared `OpenRouter:ApiKey`, required for enabled Jev even with Ollama chat |
+
+**Do not enable Jev until JEV-08's separately approved, spend-bounded
+evaluation has pinned the model, current catalog digest, and reviewed
+thresholds.** There are intentionally no default policy values. Once
+approved, set `JEV_CATEGORY_MODE=catalog-llm` (or `hybrid`) and
+`JEV_CATEGORY_SEMANTIC_PROVIDER=Jev`, populate **all** the Jev/policy fields
+and the shared key in the untracked `.env`, then restart the assistant.
+For the OpenRouter endpoint, use
+`https://openrouter.ai/api/alpha/decisions`; the catalog digest comes from
+the live `get_category_catalog` snapshot and must match the evaluated
+catalog. Missing settings fail startup, and a later catalog-version mismatch
+blocks new Jev decisions rather than silently switching policies.
+
+For **Jev + Ollama chat**, use only the base `docker-compose.yml`; keep its
+Ollama dependency and `chat` profile. For **Jev + OpenRouter chat**, use the
+base and `docker-compose.openrouter.yml` together, and set
+`OPENROUTER_CHAT_MODEL` to a separately selected tool-capable chat model.
+Both workloads share the key's credit limit and spending alerts; a per-chat
+request is not a cap on total paid decisions. Check configuration without
+printing resolved secrets before any approved deployment:
+
+```powershell
+docker compose config --quiet
+# For OpenRouter chat instead:
+docker compose -f docker-compose.yml -f docker-compose.openrouter.yml config --quiet
+```
+
+**Rollback Jev without disrupting chat:** set `JEV_CATEGORY_MODE=legacy` and
+`JEV_CATEGORY_SEMANTIC_PROVIDER=ChatModel` in `.env`, then recreate only the
+assistant with the same Compose file set that supplies its existing chat
+provider:
+
+```powershell
+docker compose up -d --no-deps --force-recreate ai-assistant-service
+# If chat uses the OpenRouter-only override instead:
+docker compose -f docker-compose.yml -f docker-compose.openrouter.yml up -d --no-deps --force-recreate ai-assistant-service
+```
+
+Rollback needs no data reset or product-service change. Keep the shared key
+while any chat task still uses OpenRouter, and keep Ollama running while any
+chat task still uses it. `legacy` also avoids Jev calls if a previously
+configured model/policy remains in `.env`; remove those values only when no
+other deployment requires them. Changing `.env` without recreating the
+assistant does not switch the running configuration.
 
 ## Recipe 1: All-Ollama (default)
 
@@ -196,10 +261,12 @@ Run the same deterministic recipe check used by CI from the repository root:
 
 It renders all-Ollama, OpenRouter-only, and both mixed directions using only
 fake credentials, checks forwarded profiles and active service/dependency graphs,
-and verifies that OpenRouter-only requires a key and model. It does not start
-containers, download models, or call OpenRouter. On Linux CI, run it with `pwsh`.
+and verifies that OpenRouter-only requires a key and model. It also checks
+disabled Jev, incomplete settings, both Jev/chat topologies and Compose rollback
+with fake keys and reviewed-fixture policy values. It does not start containers,
+download models, or call OpenRouter. On Linux CI, run it with `pwsh`.
 This configuration check does not replace the operator-approved live smoke test
-in Phase 3 of the integration checklist.
+in JEV-08 or the end-to-end release verification in JEV-09.
 
 - `/health` only checks configuration and never calls a model.
 - An invalid or revoked key is only detected on the first real chat request. Users

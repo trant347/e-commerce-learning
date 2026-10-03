@@ -49,6 +49,16 @@ function Check-Chat($Recipe, [string]$Provider, [string]$Model, [string]$Round, 
     Require ($environment.AiModels__Tasks__chat__MaxOutputTokens -eq "1024") "Wrong output cap."
 }
 
+function Check-Jev($Recipe, [string]$Mode, [string]$Provider, [hashtable]$Settings) {
+    $environment = $Recipe.services.'ai-assistant-service'.environment
+    Require ($environment.CategoryResolution__Mode -eq $Mode) "Wrong category rollout mode."
+    Require ($environment.CategoryResolution__SemanticProvider -eq $Provider) "Wrong category decision provider."
+    foreach ($name in $Settings.Keys) {
+        $actual = $environment.("CategoryResolution__Jev__" + $name)
+        Require ($actual -eq $Settings[$name]) "Jev setting $name was not forwarded."
+    }
+}
+
 try {
     # Override inherited shell secrets with the sample's disposable placeholders.
     foreach ($line in Get-Content $example) {
@@ -57,8 +67,15 @@ try {
         }
     }
     Set-TestEnvironment "COMPOSE_PROFILES" ""
+    $emptyJev = @{
+        Model = ""; Endpoint = ""; TimeoutSeconds = ""; Policy__Version = ""
+        Policy__EvaluatedModel = ""; Policy__EvaluatedCatalogVersion = ""
+        Policy__MinimumConfidence = ""; Policy__MinimumProbability = ""
+        Policy__MinimumMargin = ""; Policy__DistributionTolerance = ""
+    }
     $local = Render-Recipe @($base)
     Check-Chat $local "Ollama" "qwen3:8b" "600" "3000"
+    Check-Jev $local "legacy" "ChatModel" $emptyJev
     Require ($null -ne $local.services.ollama -and $null -ne $local.services.'ollama-init') "Local Ollama services missing."
     Require ($null -ne $local.services.'ai-assistant-service'.depends_on.ollama) "Local Ollama dependency missing."
     Require ([string]::IsNullOrEmpty($local.services.'ai-assistant-service'.environment.OpenRouter__ApiKey)) "All-Ollama requires a key."
@@ -73,6 +90,7 @@ try {
     Set-TestEnvironment "OPENROUTER_CHAT_MODEL" "vendor/fake-tool-model"
     $openRouter = Render-Recipe @($base, $remote)
     Check-Chat $openRouter "OpenRouter" "vendor/fake-tool-model" "60" "300"
+    Check-Jev $openRouter "legacy" "ChatModel" $emptyJev
     Require ($null -eq $openRouter.services.ollama -and $null -eq $openRouter.services.'ollama-init') "OpenRouter-only starts Ollama."
     $dependencies = $openRouter.services.'ai-assistant-service'.depends_on
     Require ($null -eq $dependencies.ollama) "OpenRouter-only retains the Ollama dependency."
@@ -82,6 +100,53 @@ try {
         }
     }
     Require ($openRouter.services.'ai-assistant-service'.environment.OpenRouter__ApiKey -eq "fake-compose-test-key") "Shared key is not forwarded."
+
+    Set-TestEnvironment "JEV_CATEGORY_MODE" "catalog-llm"
+    Set-TestEnvironment "JEV_CATEGORY_SEMANTIC_PROVIDER" "Jev"
+    $missingPolicy = Render-Recipe @($base)
+    Check-Jev $missingPolicy "catalog-llm" "Jev" $emptyJev
+
+    $jevVariables = @{
+        JEV_CATEGORY_MODEL = "typesafe/jev-1.13"
+        JEV_CATEGORY_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
+        JEV_CATEGORY_TIMEOUT_SECONDS = "30"
+        JEV_POLICY_VERSION = "reviewed-fixture"
+        JEV_POLICY_EVALUATED_MODEL = "typesafe/jev-1.13"
+        JEV_POLICY_EVALUATED_CATALOG_VERSION = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        JEV_POLICY_MINIMUM_CONFIDENCE = "0.8"
+        JEV_POLICY_MINIMUM_PROBABILITY = "0.8"
+        JEV_POLICY_MINIMUM_MARGIN = "0.2"
+        JEV_POLICY_DISTRIBUTION_TOLERANCE = "0.001"
+    }
+    foreach ($name in $jevVariables.Keys) { Set-TestEnvironment $name $jevVariables[$name] }
+    $configuredJev = @{
+        Model = $jevVariables.JEV_CATEGORY_MODEL
+        Endpoint = $jevVariables.JEV_CATEGORY_ENDPOINT
+        TimeoutSeconds = $jevVariables.JEV_CATEGORY_TIMEOUT_SECONDS
+        Policy__Version = $jevVariables.JEV_POLICY_VERSION
+        Policy__EvaluatedModel = $jevVariables.JEV_POLICY_EVALUATED_MODEL
+        Policy__EvaluatedCatalogVersion = $jevVariables.JEV_POLICY_EVALUATED_CATALOG_VERSION
+        Policy__MinimumConfidence = $jevVariables.JEV_POLICY_MINIMUM_CONFIDENCE
+        Policy__MinimumProbability = $jevVariables.JEV_POLICY_MINIMUM_PROBABILITY
+        Policy__MinimumMargin = $jevVariables.JEV_POLICY_MINIMUM_MARGIN
+        Policy__DistributionTolerance = $jevVariables.JEV_POLICY_DISTRIBUTION_TOLERANCE
+    }
+    $localJev = Render-Recipe @($base)
+    Check-Chat $localJev "Ollama" "qwen3:8b" "600" "3000"
+    Check-Jev $localJev "catalog-llm" "Jev" $configuredJev
+    Require ($localJev.services.'ai-assistant-service'.environment.OpenRouter__ApiKey -eq "fake-compose-test-key") "Jev with Ollama chat lost the shared key."
+    $remoteJev = Render-Recipe @($base, $remote)
+    Check-Chat $remoteJev "OpenRouter" "vendor/fake-tool-model" "60" "300"
+    Check-Jev $remoteJev "catalog-llm" "Jev" $configuredJev
+    Require ($null -eq $remoteJev.services.ollama -and $null -eq $remoteJev.services.'ollama-init') "Jev with OpenRouter chat starts Ollama."
+    Require ($remoteJev.services.'ai-assistant-service'.environment.OpenRouter__ApiKey -eq "fake-compose-test-key") "Jev with OpenRouter chat lost the shared key."
+
+    Set-TestEnvironment "JEV_CATEGORY_MODE" "legacy"
+    Set-TestEnvironment "JEV_CATEGORY_SEMANTIC_PROVIDER" "ChatModel"
+    $rolledBack = Render-Recipe @($base)
+    Check-Chat $rolledBack "Ollama" "qwen3:8b" "600" "3000"
+    Check-Jev $rolledBack "legacy" "ChatModel" $configuredJev
+    Require ($null -ne $rolledBack.services.'ai-assistant-service'.depends_on.ollama) "Jev rollback lost Ollama."
 
     foreach ($direction in @("remote-chat", "local-chat")) {
         $chatProvider = "OpenRouter"

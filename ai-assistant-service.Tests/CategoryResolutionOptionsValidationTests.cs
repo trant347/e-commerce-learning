@@ -212,13 +212,61 @@ public class CategoryResolutionOptionsValidationTests
         Assert.DoesNotContain("JwtSecret", failure.Message, StringComparison.Ordinal);
     }
 
-    private sealed class JevStartupFactory : WebApplicationFactory<Program>
+    [Theory]
+    [InlineData("Ollama")]
+    [InlineData("OpenRouter")]
+    public void HostStartup_AcceptsConfiguredJevWithEitherChatProvider(string chatProvider)
+    {
+        using var factory = new JevStartupFactory(configured: true, chatProvider: chatProvider);
+        using var client = factory.CreateClient();
+        Assert.NotNull(client);
+    }
+
+    [Fact]
+    public void HostStartup_LegacyWithEmptyJevFieldsDoesNotRequireKey()
+    {
+        using var factory = new JevStartupFactory(
+            mode: CategoryResolutionModes.Legacy,
+            semanticProvider: CategorySemanticProviders.ChatModel);
+        using var client = factory.CreateClient();
+        Assert.NotNull(client);
+    }
+
+    private sealed class JevStartupFactory(
+        bool configured = false,
+        string chatProvider = "Ollama",
+        string mode = CategoryResolutionModes.CatalogLlm,
+        string semanticProvider = CategorySemanticProviders.Jev)
+        : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("JwtSettings:Secret", "test-jwt-secret-that-is-at-least-32-bytes");
-            builder.UseSetting("CategoryResolution:Mode", CategoryResolutionModes.CatalogLlm);
-            builder.UseSetting("CategoryResolution:SemanticProvider", CategorySemanticProviders.Jev);
+            builder.UseSetting("CategoryResolution:Mode", mode);
+            builder.UseSetting("CategoryResolution:SemanticProvider", semanticProvider);
+            builder.UseSetting("CategoryResolution:Jev:TimeoutSeconds", "");
+            builder.UseSetting("CategoryResolution:Jev:Policy:MinimumConfidence", "");
+            builder.UseSetting("CategoryResolution:Jev:Policy:MinimumProbability", "");
+            builder.UseSetting("CategoryResolution:Jev:Policy:MinimumMargin", "");
+            builder.UseSetting("CategoryResolution:Jev:Policy:DistributionTolerance", "");
+            if (configured)
+            {
+                builder.UseSetting("AiModels:Tasks:chat:Provider", chatProvider);
+                builder.UseSetting("AiModels:Tasks:chat:Model",
+                    chatProvider == "Ollama" ? "qwen3:8b" : "vendor/fake-tool-model");
+                builder.UseSetting("OpenRouter:ApiKey", "fake-deployment-test-key");
+                builder.UseSetting("CategoryResolution:Jev:Model", "typesafe/jev-1.13");
+                builder.UseSetting("CategoryResolution:Jev:Endpoint", "https://openrouter.ai/api/alpha/decisions");
+                builder.UseSetting("CategoryResolution:Jev:TimeoutSeconds", "30");
+                builder.UseSetting("CategoryResolution:Jev:Policy:Version", "reviewed-fixture");
+                builder.UseSetting("CategoryResolution:Jev:Policy:EvaluatedModel", "typesafe/jev-1.13");
+                builder.UseSetting("CategoryResolution:Jev:Policy:EvaluatedCatalogVersion",
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+                builder.UseSetting("CategoryResolution:Jev:Policy:MinimumConfidence", "0.8");
+                builder.UseSetting("CategoryResolution:Jev:Policy:MinimumProbability", "0.8");
+                builder.UseSetting("CategoryResolution:Jev:Policy:MinimumMargin", "0.2");
+                builder.UseSetting("CategoryResolution:Jev:Policy:DistributionTolerance", "0.001");
+            }
             builder.ConfigureServices(services => services.RemoveAll<IHostedService>());
         }
     }
