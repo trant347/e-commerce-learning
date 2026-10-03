@@ -52,7 +52,7 @@ Removing referenced categories requires an explicit reassignment policy.
 
 ### Resume here
 
-As of September 30, 2026, **JEV-03 is the next implementation task**.
+As of October 3, 2026, **JEV-04 is the next implementation task**.
 Jev is not wired into the assistant, and multi-category search is not enabled.
 The intended flow is user request -> category decision against product-owned
 metadata -> validated MCP search -> grounded answer from a separate chat model.
@@ -87,7 +87,7 @@ feature complete merely because its configuration or specification exists.
 
 ### Assistant integration (pending)
 
-- [ ] **JEV-03. Implement rich-catalog snapshot lifecycle.**
+- [x] **JEV-03. Implement rich-catalog snapshot lifecycle.**
   Depends on JEV-02. In new modes, refresh `get_category_catalog` and atomically
   publish immutable IDs, metadata, version and last-successful-refresh time.
   Build schema and decision context from the same request-captured snapshot.
@@ -98,6 +98,7 @@ feature complete merely because its configuration or specification exists.
   last-good retention, five-minute expiry, refresh interval validation,
   degraded readiness, cancellation and replacement tools. Unusable snapshots
   block category searches, not unrelated tools.
+  **Completed:** `75c0e3b`.
 
 - [ ] **JEV-04. Add the separate Jev decision client and opt-in settings.**
   Depends on JEV-02. Implement typed Decisions request/response contracts and
