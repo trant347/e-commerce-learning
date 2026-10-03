@@ -1,5 +1,7 @@
 using System.Text.Json;
+using ai_assistant_service.Configuration;
 using ai_assistant_service.Services.Tools;
+using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Services.Mcp;
 
@@ -13,9 +15,13 @@ public sealed class McpCategoryEnumRefresher
 {
     internal const string SearchToolName = "search_task_masters";
     internal const string CategoriesToolName = "get_categories";
+    internal const string CategoryCatalogToolName = "get_category_catalog";
     internal const string CategoryParameterName = "category";
 
     private readonly ToolRegistry _toolRegistry;
+    private readonly CategoryResolutionOptions _options;
+    private readonly CategoryCatalogSnapshotStore _snapshotStore;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<McpCategoryEnumRefresher> _logger;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private IReadOnlyList<string> _appliedCategories = Array.Empty<string>();
@@ -23,14 +29,25 @@ public sealed class McpCategoryEnumRefresher
 
     public McpCategoryEnumRefresher(
         ToolRegistry toolRegistry,
+        IOptions<CategoryResolutionOptions> options,
+        CategoryCatalogSnapshotStore snapshotStore,
+        TimeProvider timeProvider,
         ILogger<McpCategoryEnumRefresher> logger)
     {
         _toolRegistry = toolRegistry;
+        _options = options.Value;
+        _snapshotStore = snapshotStore;
+        _timeProvider = timeProvider;
         _logger = logger;
     }
 
     /// <summary>The category list currently applied to the search tool schema.</summary>
     public IReadOnlyList<string> AppliedCategories => _appliedCategories;
+
+    public string ActiveCatalogToolName =>
+        CategoryResolutionModes.IsRichCatalogMode(_options.Mode)
+            ? CategoryCatalogToolName
+            : CategoriesToolName;
 
     /// <summary>Upper bound for one <c>get_categories</c> call, so a half-open session cannot stall the refresh loop.</summary>
     public TimeSpan CallTimeout { get; set; } = TimeSpan.FromSeconds(15);
@@ -56,8 +73,12 @@ public sealed class McpCategoryEnumRefresher
 
     private void ApplyKnownCategoriesLocked(IParameterEnumConstrainable searchTool)
     {
-        if (ReferenceEquals(searchTool, _appliedTo) || _appliedCategories.Count == 0) return;
-        searchTool.SetParameterEnum(CategoryParameterName, _appliedCategories);
+        var knownCategories = CategoryResolutionModes.IsRichCatalogMode(_options.Mode)
+            ? _snapshotStore.Current?.CategoryIds ?? []
+            : _appliedCategories;
+        if (ReferenceEquals(searchTool, _appliedTo) || knownCategories.Count == 0) return;
+        searchTool.SetParameterEnum(CategoryParameterName, knownCategories);
+        _appliedCategories = knownCategories;
         _appliedTo = searchTool;
     }
 
@@ -69,11 +90,11 @@ public sealed class McpCategoryEnumRefresher
     public async Task<CategoryRefreshResult> RefreshAsync(CancellationToken cancellationToken)
     {
         var searchTool = _toolRegistry.Get(SearchToolName) as IParameterEnumConstrainable;
-        var categoriesTool = _toolRegistry.Get(CategoriesToolName);
-        if (searchTool is null || categoriesTool is null)
+        var catalogTool = _toolRegistry.Get(ActiveCatalogToolName);
+        if (searchTool is null || catalogTool is null)
         {
             _logger.LogDebug(
-                "[MCP Categories] Skipping category enum refresh — required tools not registered");
+                "[MCP Categories] Skipping category refresh — required tools not registered");
             return CategoryRefreshResult.ToolsUnavailable;
         }
 
@@ -89,34 +110,14 @@ public sealed class McpCategoryEnumRefresher
                 "system:mcp-discovery",
                 Array.Empty<string>(),
                 Guid.NewGuid().ToString("N"));
-            var raw = await categoriesTool.ExecuteAsync(
+            var raw = await catalogTool.ExecuteAsync(
                 executionContext,
                 new Dictionary<string, string>(),
                 timeoutCts.Token);
 
-            var categories = ParseCategories(raw);
-            if (categories.Count == 0)
-            {
-                _logger.LogWarning(
-                    "[MCP Categories] get_categories returned no usable values — keeping {Count} existing categories",
-                    _appliedCategories.Count);
-                return CategoryRefreshResult.NoUsableCategories;
-            }
-
-            if (ReferenceEquals(searchTool, _appliedTo)
-                && categories.SequenceEqual(_appliedCategories, StringComparer.OrdinalIgnoreCase))
-            {
-                return CategoryRefreshResult.Unchanged;
-            }
-
-            searchTool.SetParameterEnum(CategoryParameterName, categories);
-            var previousCount = _appliedCategories.Count;
-            _appliedCategories = categories;
-            _appliedTo = searchTool;
-            _logger.LogInformation(
-                "[MCP Categories] Updated search_task_masters category enum: {PreviousCount} → {Count} categories",
-                previousCount, categories.Count);
-            return CategoryRefreshResult.Updated;
+            return CategoryResolutionModes.IsRichCatalogMode(_options.Mode)
+                ? RefreshRichCatalogLocked(searchTool, raw)
+                : RefreshLegacyCategoriesLocked(searchTool, raw);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -124,18 +125,21 @@ public sealed class McpCategoryEnumRefresher
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
         {
+            var toolName = ActiveCatalogToolName;
+            _snapshotStore.RecordFailure($"{toolName} timed out.");
             _logger.LogWarning(
-                "[MCP Categories] get_categories timed out after {Timeout}s — keeping {Count} existing categories",
-                CallTimeout.TotalSeconds, _appliedCategories.Count);
+                "[MCP Categories] {ToolName} timed out after {Timeout}s — keeping the last usable catalog",
+                toolName, CallTimeout.TotalSeconds);
             return CategoryRefreshResult.Failed;
         }
         catch (Exception ex)
         {
+            _snapshotStore.RecordFailure("Category catalog refresh failed.");
             // Logged without the stack trace: this repeats every interval while
             // product-service is down. The full exception is available at Debug.
             _logger.LogWarning(
-                "[MCP Categories] Failed to refresh category enum ({Error}) — keeping {Count} existing categories",
-                ex.Message.Length > 200 ? ex.Message[..200] + "…" : ex.Message, _appliedCategories.Count);
+                "[MCP Categories] Failed to refresh categories ({Error}) — keeping the last usable catalog",
+                ex.Message.Length > 200 ? ex.Message[..200] + "…" : ex.Message);
             _logger.LogDebug(ex, "[MCP Categories] Category refresh failure details");
             return CategoryRefreshResult.Failed;
         }
@@ -143,6 +147,101 @@ public sealed class McpCategoryEnumRefresher
         {
             _refreshLock.Release();
         }
+    }
+
+    private CategoryRefreshResult RefreshLegacyCategoriesLocked(
+        IParameterEnumConstrainable searchTool,
+        string raw)
+    {
+        var categories = ParseCategories(raw);
+        if (categories.Count == 0)
+        {
+            _logger.LogWarning(
+                "[MCP Categories] get_categories returned no usable values — keeping {Count} existing categories",
+                _appliedCategories.Count);
+            return CategoryRefreshResult.NoUsableCategories;
+        }
+
+        if (ReferenceEquals(searchTool, _appliedTo)
+            && categories.SequenceEqual(_appliedCategories, StringComparer.OrdinalIgnoreCase))
+        {
+            return CategoryRefreshResult.Unchanged;
+        }
+
+        searchTool.SetParameterEnum(CategoryParameterName, categories);
+        var previousCount = _appliedCategories.Count;
+        _appliedCategories = categories;
+        _appliedTo = searchTool;
+        _logger.LogInformation(
+            "[MCP Categories] Updated search_task_masters category enum: {PreviousCount} → {Count} categories",
+            previousCount, categories.Count);
+        return CategoryRefreshResult.Updated;
+    }
+
+    private CategoryRefreshResult RefreshRichCatalogLocked(
+        IParameterEnumConstrainable searchTool,
+        string raw)
+    {
+        if (!CategoryCatalogParser.TryParse(
+                raw,
+                _options.MaxCatalogContextChars,
+                _timeProvider.GetUtcNow(),
+                out var snapshot,
+                out var error))
+        {
+            _snapshotStore.RecordFailure(error);
+            _logger.LogWarning(
+                "[MCP Categories] get_category_catalog returned no usable snapshot ({Reason}) — keeping the last usable catalog",
+                error);
+            return CategoryRefreshResult.NoUsableCategories;
+        }
+
+        var validatedSnapshot = snapshot!;
+        var previous = _snapshotStore.Current;
+        if (previous is not null
+            && string.Equals(
+                previous.CatalogVersion,
+                validatedSnapshot.CatalogVersion,
+                StringComparison.Ordinal)
+            && !string.Equals(
+                previous.DecisionContext,
+                validatedSnapshot.DecisionContext,
+                StringComparison.Ordinal))
+        {
+            const string integrityError =
+                "The category catalog content changed without a catalogVersion change.";
+            _snapshotStore.RecordFailure(integrityError);
+            _logger.LogWarning("[MCP Categories] {Reason}", integrityError);
+            return CategoryRefreshResult.NoUsableCategories;
+        }
+
+        var metadataChanged = previous is null
+            || !string.Equals(
+                previous.CatalogVersion,
+                validatedSnapshot.CatalogVersion,
+                StringComparison.Ordinal);
+        var idsChanged = !validatedSnapshot.CategoryIds.SequenceEqual(
+            _appliedCategories,
+            StringComparer.Ordinal);
+        var replacementTool = !ReferenceEquals(searchTool, _appliedTo);
+
+        _snapshotStore.Publish(validatedSnapshot);
+        if (idsChanged || replacementTool)
+        {
+            searchTool.SetParameterEnum(CategoryParameterName, validatedSnapshot.CategoryIds);
+            _appliedCategories = validatedSnapshot.CategoryIds;
+            _appliedTo = searchTool;
+        }
+
+        if (!metadataChanged)
+        {
+            return CategoryRefreshResult.Unchanged;
+        }
+
+        _logger.LogInformation(
+            "[MCP Categories] Published category catalog {CatalogVersion} with {Count} categories",
+            validatedSnapshot.CatalogVersion, validatedSnapshot.Categories.Length);
+        return CategoryRefreshResult.Updated;
     }
 
     internal static IReadOnlyList<string> ParseCategories(string raw)

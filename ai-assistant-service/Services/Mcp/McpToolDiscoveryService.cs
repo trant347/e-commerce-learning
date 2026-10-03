@@ -1,5 +1,7 @@
 using ai_assistant_service.Services.Tools;
 using ModelContextProtocol.Client;
+using Microsoft.Extensions.Options;
+using ai_assistant_service.Configuration;
 
 namespace ai_assistant_service.Services.Mcp;
 
@@ -14,14 +16,13 @@ namespace ai_assistant_service.Services.Mcp;
 /// </summary>
 public sealed class McpToolDiscoveryService : BackgroundService
 {
-    internal const string CategoryRefreshIntervalKey = "McpDiscovery:CategoryRefreshIntervalSeconds";
-    private const int DefaultCategoryRefreshIntervalSeconds = 60;
     private const int MaxRetryAttempts = 10;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
     // Replaced clients stay alive briefly so chat tool calls already in flight can finish.
     private static readonly TimeSpan RetiredClientGracePeriod = TimeSpan.FromSeconds(30);
 
     private readonly IConfiguration _configuration;
+    private readonly McpDiscoveryOptions _discoveryOptions;
     private readonly ToolRegistry _toolRegistry;
     private readonly McpCategoryEnumRefresher _categoryRefresher;
     private readonly ILogger<McpToolDiscoveryService> _logger;
@@ -33,11 +34,13 @@ public sealed class McpToolDiscoveryService : BackgroundService
 
     public McpToolDiscoveryService(
         IConfiguration configuration,
+        IOptions<McpDiscoveryOptions> discoveryOptions,
         ToolRegistry toolRegistry,
         McpCategoryEnumRefresher categoryRefresher,
         ILogger<McpToolDiscoveryService> logger)
     {
         _configuration = configuration;
+        _discoveryOptions = discoveryOptions.Value;
         _toolRegistry = toolRegistry;
         _categoryRefresher = categoryRefresher;
         _logger = logger;
@@ -67,14 +70,12 @@ public sealed class McpToolDiscoveryService : BackgroundService
         McpServerConfig[] servers,
         CancellationToken stoppingToken)
     {
-        var intervalSeconds = _configuration.GetValue(
-            CategoryRefreshIntervalKey,
-            DefaultCategoryRefreshIntervalSeconds);
+        var intervalSeconds = _discoveryOptions.CategoryRefreshIntervalSeconds;
         if (intervalSeconds <= 0)
         {
             _logger.LogInformation(
-                "[MCP Discovery] Periodic category refresh and reconnect disabled ({Key}={Value})",
-                CategoryRefreshIntervalKey, intervalSeconds);
+                "[MCP Discovery] Periodic category refresh and reconnect disabled ({Value})",
+                intervalSeconds);
             return;
         }
 
@@ -112,14 +113,16 @@ public sealed class McpToolDiscoveryService : BackgroundService
         HashSet<string> connected;
         lock (_stateLock)
         {
-            _serverByTool.TryGetValue(McpCategoryEnumRefresher.CategoriesToolName, out categoriesOwner);
+            _serverByTool.TryGetValue(_categoryRefresher.ActiveCatalogToolName, out categoriesOwner);
             connected = new HashSet<string>(_clientsByServer.Keys, StringComparer.OrdinalIgnoreCase);
         }
 
         foreach (var server in servers)
         {
             var ownsCategories = string.Equals(server.Name, categoriesOwner, StringComparison.OrdinalIgnoreCase);
-            if (!ownsCategories && connected.Contains(server.Name))
+            if (categoriesOwner is not null
+                && !ownsCategories
+                && connected.Contains(server.Name))
             {
                 continue;
             }

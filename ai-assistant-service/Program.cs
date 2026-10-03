@@ -13,6 +13,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using System.Text;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -73,6 +74,16 @@ builder.Services.AddLogging();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAiModelRouting(builder.Configuration);
+builder.Services
+    .AddOptions<McpDiscoveryOptions>()
+    .Bind(builder.Configuration.GetSection(McpDiscoveryOptions.SectionName));
+builder.Services
+    .AddOptions<CategoryResolutionOptions>()
+    .Bind(builder.Configuration.GetSection(CategoryResolutionOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<CategoryResolutionOptions>, CategoryResolutionOptionsValidator>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<CategoryCatalogSnapshotStore>();
 
 builder.Services.AddCors(options =>
 {
@@ -110,6 +121,24 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "ai-assistant-service" }));
+app.MapGet("/health/ready", (CategoryCatalogSnapshotStore snapshots) =>
+{
+    var readiness = snapshots.GetReadiness();
+    var body = new
+    {
+        status = readiness.Status,
+        service = "ai-assistant-service",
+        categoryCatalog = new
+        {
+            required = readiness.Required,
+            usable = readiness.Usable,
+            catalogVersion = readiness.CatalogVersion,
+            lastSuccessfulRefreshAt = readiness.LastSuccessfulRefreshAt,
+            detail = readiness.Detail
+        }
+    };
+    return readiness.Usable ? Results.Ok(body) : Results.Json(body, statusCode: 503);
+});
 app.MapControllers();
 
 app.Run();

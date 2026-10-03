@@ -10,14 +10,15 @@ public enum CategoryRefreshResult
     Unchanged,
 
     /// <summary>
-    /// <c>get_categories</c> threw or timed out, so the MCP session is presumed dead
-    /// and should be reconnected.
+    /// The active category catalog tool threw or timed out, so the MCP session is
+    /// presumed dead and should be reconnected.
     /// </summary>
     Failed,
 
     /// <summary>
-    /// <c>get_categories</c> responded but without usable values (empty catalog or
-    /// tool error). The session is healthy, so no reconnect is needed.
+    /// The active category catalog tool responded but without usable values
+    /// (empty/malformed catalog or tool error). The session is healthy, so no
+    /// reconnect is needed.
     /// </summary>
     NoUsableCategories,
 

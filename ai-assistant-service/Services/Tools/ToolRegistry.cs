@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Text.Json;
+using ai_assistant_service.Services.Mcp;
 using ai_assistant_service.Services.Contracts;
 
 namespace ai_assistant_service.Services.Tools;
@@ -27,12 +28,16 @@ public sealed class ToolRegistry
         StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, IToolDefinition> _tools;
+    private readonly CategoryCatalogSnapshotStore? _categoryCatalogSnapshots;
 
-    public ToolRegistry(IEnumerable<IToolDefinition> tools)
+    public ToolRegistry(
+        IEnumerable<IToolDefinition> tools,
+        CategoryCatalogSnapshotStore? categoryCatalogSnapshots = null)
     {
         _tools = new ConcurrentDictionary<string, IToolDefinition>(
             tools.ToDictionary(t => t.Name),
             StringComparer.OrdinalIgnoreCase);
+        _categoryCatalogSnapshots = categoryCatalogSnapshots;
     }
 
     /// <summary>All registered tools — used to build shared model tool definitions.</summary>
@@ -72,6 +77,24 @@ public sealed class ToolRegistry
             {
                 error = "reserved_execution_metadata",
                 message = $"Tool argument '{reservedArgument}' is controlled by the application and cannot be supplied by the model."
+            });
+        }
+
+        if (string.Equals(
+                toolName,
+                McpCategoryEnumRefresher.SearchToolName,
+                StringComparison.OrdinalIgnoreCase)
+            && arguments.TryGetValue(
+                McpCategoryEnumRefresher.CategoryParameterName,
+                out var categoryArgument)
+            && !string.IsNullOrWhiteSpace(FlattenToString(categoryArgument))
+            && _categoryCatalogSnapshots is not null
+            && !_categoryCatalogSnapshots.TryCaptureUsable(out _, out _))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                error = "category_catalog_unavailable",
+                message = "Category search is temporarily unavailable."
             });
         }
 

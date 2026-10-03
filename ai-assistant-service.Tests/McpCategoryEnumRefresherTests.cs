@@ -1,7 +1,9 @@
 using System.Text.Json;
+using ai_assistant_service.Configuration;
 using ai_assistant_service.Services.Mcp;
 using ai_assistant_service.Services.Tools;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace ai_assistant_service.Tests;
@@ -52,9 +54,7 @@ public class McpCategoryEnumRefresherTests
     {
         var categories = new FakeCategoriesTool { Result = "[\"carpentry\"]" };
         var registry = new ToolRegistry(new IToolDefinition[] { new FakeSearchTool(), categories });
-        var refresher = new McpCategoryEnumRefresher(
-            registry,
-            NullLogger<McpCategoryEnumRefresher>.Instance);
+        var refresher = CreateRefresher(registry);
         await refresher.RefreshAsync(CancellationToken.None);
 
         var reconnectedSearch = new FakeSearchTool();
@@ -70,9 +70,7 @@ public class McpCategoryEnumRefresherTests
     {
         var categories = new FakeCategoriesTool { Result = "[\"carpentry\"]" };
         var registry = new ToolRegistry(new IToolDefinition[] { new FakeSearchTool(), categories });
-        var refresher = new McpCategoryEnumRefresher(
-            registry,
-            NullLogger<McpCategoryEnumRefresher>.Instance);
+        var refresher = CreateRefresher(registry);
         await refresher.RefreshAsync(CancellationToken.None);
 
         var reconnectedSearch = new FakeSearchTool();
@@ -156,9 +154,7 @@ public class McpCategoryEnumRefresherTests
     public async Task RefreshAsync_MissingToolsIsNoOp()
     {
         var registry = new ToolRegistry(Array.Empty<IToolDefinition>());
-        var refresher = new McpCategoryEnumRefresher(
-            registry,
-            NullLogger<McpCategoryEnumRefresher>.Instance);
+        var refresher = CreateRefresher(registry);
 
         var result = await refresher.RefreshAsync(CancellationToken.None);
 
@@ -172,10 +168,21 @@ public class McpCategoryEnumRefresherTests
         var search = new FakeSearchTool();
         var categories = new FakeCategoriesTool { Result = categoriesResult };
         var registry = new ToolRegistry(new IToolDefinition[] { search, categories });
-        var refresher = new McpCategoryEnumRefresher(
-            registry,
-            NullLogger<McpCategoryEnumRefresher>.Instance);
+        var refresher = CreateRefresher(registry);
         return (refresher, search, categories);
+    }
+
+    private static McpCategoryEnumRefresher CreateRefresher(ToolRegistry registry)
+    {
+        var options = Options.Create(new CategoryResolutionOptions());
+        var timeProvider = TimeProvider.System;
+        var snapshots = new CategoryCatalogSnapshotStore(options, timeProvider);
+        return new McpCategoryEnumRefresher(
+            registry,
+            options,
+            snapshots,
+            timeProvider,
+            NullLogger<McpCategoryEnumRefresher>.Instance);
     }
 
     private sealed class FakeSearchTool : IToolDefinition, IParameterEnumConstrainable
