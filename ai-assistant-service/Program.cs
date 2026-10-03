@@ -82,6 +82,8 @@ builder.Services
     .Bind(builder.Configuration.GetSection(CategoryResolutionOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<CategoryResolutionOptions>, CategoryResolutionOptionsValidator>();
+builder.Services.AddHttpClient<IJevDecisionClient, JevDecisionClient>(
+    client => client.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<CategoryCatalogSnapshotStore>();
 
