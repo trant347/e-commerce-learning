@@ -8,9 +8,10 @@ public class CategoryResolutionOptionsValidationTests
 {
     [Theory]
     [InlineData("catalog-llm", 0)]
-    [InlineData("catalog-llm", 301)]
+    [InlineData("catalog-llm", 286)]
+    [InlineData("catalog-llm", 300)]
     [InlineData("hybrid", 0)]
-    [InlineData("hybrid", 301)]
+    [InlineData("hybrid", 286)]
     public void Validator_RejectsInvalidRefreshIntervalInRichModes(
         string mode,
         int intervalSeconds)
@@ -31,6 +32,27 @@ public class CategoryResolutionOptionsValidationTests
             failure => failure.Contains(
                 "McpDiscovery:CategoryRefreshIntervalSeconds",
                 StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("catalog-llm", 1)]
+    [InlineData("hybrid", 285)]
+    public void Validator_AcceptsRichRefreshIntervalWithCallTimeoutHeadroom(
+        string mode,
+        int intervalSeconds)
+    {
+        var validator = new CategoryResolutionOptionsValidator(
+            Options.Create(new McpDiscoveryOptions
+            {
+                CategoryRefreshIntervalSeconds = intervalSeconds
+            }));
+
+        var result = validator.Validate(
+            Options.DefaultName,
+            new CategoryResolutionOptions { Mode = mode });
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(285, CategoryResolutionOptionsValidator.MaximumRichRefreshIntervalSeconds);
     }
 
     [Theory]

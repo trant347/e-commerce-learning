@@ -103,35 +103,43 @@ public sealed class McpToolDiscoveryService : BackgroundService
     }
 
     /// <summary>
-    /// Reconnects the server that provided <c>get_categories</c> (its session is
-    /// presumed dead) and any server that has never connected. One attempt per
-    /// server; the next timer tick retries if it still fails.
+    /// Reconnects the server that provided the active category catalog tool (its
+    /// session is presumed dead) and any server that has never connected. One attempt
+    /// per server; the next timer tick retries if it still fails.
     /// </summary>
     private async Task ReconnectAsync(McpServerConfig[] servers, CancellationToken stoppingToken)
     {
-        string? categoriesOwner;
+        string? catalogOwner;
         HashSet<string> connected;
         lock (_stateLock)
         {
-            _serverByTool.TryGetValue(_categoryRefresher.ActiveCatalogToolName, out categoriesOwner);
+            _serverByTool.TryGetValue(_categoryRefresher.ActiveCatalogToolName, out catalogOwner);
             connected = new HashSet<string>(_clientsByServer.Keys, StringComparer.OrdinalIgnoreCase);
         }
 
-        foreach (var server in servers)
+        foreach (var server in SelectServersToReconnect(servers, catalogOwner, connected))
         {
-            var ownsCategories = string.Equals(server.Name, categoriesOwner, StringComparison.OrdinalIgnoreCase);
-            if (categoriesOwner is not null
-                && !ownsCategories
-                && connected.Contains(server.Name))
-            {
-                continue;
-            }
-
             _logger.LogInformation(
                 "[MCP Discovery] Reconnecting to '{Name}' at {Endpoint}",
                 server.Name, server.Endpoint);
             await TryDiscoverOnceAsync(server, logFailureDetails: false, stoppingToken);
         }
+    }
+
+    /// <summary>
+    /// Selects the active catalog tool's owner plus never-connected servers; with no
+    /// known owner every server is selected, since any of them may provide the tool.
+    /// </summary>
+    internal static IReadOnlyList<McpServerConfig> SelectServersToReconnect(
+        IEnumerable<McpServerConfig> servers,
+        string? catalogOwner,
+        IReadOnlySet<string> connectedServers)
+    {
+        return servers
+            .Where(server => catalogOwner is null
+                || string.Equals(server.Name, catalogOwner, StringComparison.OrdinalIgnoreCase)
+                || !connectedServers.Contains(server.Name))
+            .ToList();
     }
 
     private async Task DiscoverWithRetryAsync(McpServerConfig server, CancellationToken stoppingToken)

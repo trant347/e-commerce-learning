@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -16,8 +17,11 @@ internal static partial class CategoryCatalogParser
     private const int MaximumAliases = 20;
     private const int MaximumAliasLength = 80;
 
+    // The context is model input, never HTML, so keep non-ASCII text literal
+    // instead of inflating it with \uXXXX escapes that count against the limit.
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never
     };

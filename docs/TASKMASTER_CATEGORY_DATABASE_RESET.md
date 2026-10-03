@@ -217,4 +217,4 @@ identity, and `403` for non-administrators.
   value to `0` disables both the refresh and the automatic reconnect. REST
   search and forms see new categories immediately. The proposed
   `catalog-llm` and `hybrid` resolution modes will require an interval of
-  1-300 seconds; `0` remains valid only for the current behavior.
+  1-285 seconds; `0` remains valid only for the current behavior.

@@ -1,3 +1,4 @@
+using ai_assistant_service.Services.Mcp;
 using Microsoft.Extensions.Options;
 
 namespace ai_assistant_service.Configuration;
@@ -38,6 +39,14 @@ public sealed class McpDiscoveryOptions
 public sealed class CategoryResolutionOptionsValidator
     : IValidateOptions<CategoryResolutionOptions>
 {
+    /// <summary>
+    /// Snapshot age is measured from fetch completion, and a fetch may finish up to one
+    /// call timeout after its tick, so the interval leaves that headroom below the expiry.
+    /// </summary>
+    public static readonly int MaximumRichRefreshIntervalSeconds =
+        (int)(CategoryCatalogSnapshotStore.MaximumSnapshotAge
+              - McpCategoryEnumRefresher.DefaultCallTimeout).TotalSeconds;
+
     private readonly McpDiscoveryOptions _discoveryOptions;
 
     public CategoryResolutionOptionsValidator(IOptions<McpDiscoveryOptions> discoveryOptions)
@@ -63,10 +72,11 @@ public sealed class CategoryResolutionOptionsValidator
         }
 
         if (CategoryResolutionModes.IsRichCatalogMode(mode)
-            && _discoveryOptions.CategoryRefreshIntervalSeconds is < 1 or > 300)
+            && (_discoveryOptions.CategoryRefreshIntervalSeconds < 1
+                || _discoveryOptions.CategoryRefreshIntervalSeconds > MaximumRichRefreshIntervalSeconds))
         {
             return ValidateOptionsResult.Fail(
-                "McpDiscovery:CategoryRefreshIntervalSeconds must be between 1 and 300 " +
+                $"McpDiscovery:CategoryRefreshIntervalSeconds must be between 1 and {MaximumRichRefreshIntervalSeconds} " +
                 "when CategoryResolution:Mode is catalog-llm or hybrid.");
         }
 

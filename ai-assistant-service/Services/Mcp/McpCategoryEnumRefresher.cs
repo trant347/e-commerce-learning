@@ -50,7 +50,9 @@ public sealed class McpCategoryEnumRefresher
             : CategoriesToolName;
 
     /// <summary>Upper bound for one <c>get_categories</c> call, so a half-open session cannot stall the refresh loop.</summary>
-    public TimeSpan CallTimeout { get; set; } = TimeSpan.FromSeconds(15);
+    public TimeSpan CallTimeout { get; set; } = DefaultCallTimeout;
+
+    public static readonly TimeSpan DefaultCallTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// Applies the last known category list to a replacement search tool before it

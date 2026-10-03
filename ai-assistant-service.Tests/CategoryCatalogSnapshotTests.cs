@@ -31,6 +31,18 @@ public class CategoryCatalogSnapshotTests
     }
 
     [Fact]
+    public async Task RefreshAsync_KeepsNonAsciiMetadataLiteralInDecisionContext()
+    {
+        var fixture = CreateFixture(Catalog(VersionA, "Café and résumé fixtures.", []));
+
+        await fixture.Refresher.RefreshAsync(CancellationToken.None);
+
+        var context = Assert.IsType<CategoryCatalogSnapshot>(fixture.Snapshots.Current).DecisionContext;
+        Assert.Contains("Café and résumé fixtures.", context);
+        Assert.DoesNotContain("\\u00", context);
+    }
+
+    [Fact]
     public async Task RefreshAsync_MetadataOnlyChangePublishesUpdatedSnapshotWithoutRebuildingEnum()
     {
         var fixture = CreateFixture(Catalog(VersionA, "Wood construction.", []));
