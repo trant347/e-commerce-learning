@@ -1,6 +1,6 @@
 # TaskMaster Category Management and Jev Tasks
 
-Status: **Original catalog phase complete. Jev prerequisites JEV-01 and JEV-02 complete; remaining category-first and multi-category tasks pending.**
+Status: **Original catalog phase and JEV-01 through JEV-08 complete; release (JEV-09) and multi-category tasks pending.**
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 Multi-category extension: [TaskMaster Multi-Category Search Specification](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md).
@@ -52,10 +52,15 @@ Removing referenced categories requires an explicit reassignment policy.
 
 ### Resume here
 
-As of October 3, 2026, **JEV-04 is the next implementation task**.
-Jev is not wired into the assistant, and multi-category search is not enabled.
+As of October 3, 2026, **JEV-09 release verification is the next gated task**.
+Jev category-first orchestration is wired behind the rich-catalog modes; legacy
+remains the default, and multi-category search is not enabled.
 The intended flow is user request -> category decision against product-owned
-metadata -> validated MCP search -> grounded answer from a separate chat model.
+metadata plus typed filter extraction by the configured chat model (intended:
+Ollama) -> validated MCP search -> grounded answer from the chat model.
+Classification/extraction may run concurrently, but search must wait for both
+validated outcomes. Product-service retrieval order is preserved; there is no
+post-retrieval Jev scoring stage.
 The first gated release retains one category; the MC tasks below add the
 planned maximum of one primary plus two alternatives.
 
@@ -100,7 +105,7 @@ feature complete merely because its configuration or specification exists.
   block category searches, not unrelated tools.
   **Completed:** `75c0e3b`.
 
-- [ ] **JEV-04. Add the separate Jev decision client and opt-in settings.**
+- [x] **JEV-04. Add the separate Jev decision client and opt-in settings.**
   Depends on JEV-02. Implement typed Decisions request/response contracts and
   an HTTP adapter, separate from chat clients. Use server-owned intent/category
   questions, live catalog criteria and explicit abstention options. Add
@@ -111,20 +116,26 @@ feature complete merely because its configuration or specification exists.
   wire shape, strict option/distribution validation and numeric boundaries,
   safe HTTP/error-envelope handling, cancellation and bounded deadlines.
   Missing enabled settings fail startup safely; the chat profile is unchanged.
+  **Completed:** `643bf01`.
 
-- [ ] **JEV-05. Wire category-first orchestration and locked search arguments.**
+- [x] **JEV-05. Wire category-first orchestration and locked search arguments.**
   Depends on JEV-03 and JEV-04. Implement the typed resolution outcomes and
   semantic-provider selection behind `CategoryResolution:Mode`. Apply the
   category gate to native and inline-recovered search calls, including searches
   requested later in an initially non-search conversation. Lock accepted IDs;
   the chat model extracts only explicit filters and produces grounded prose.
-  Preserve clarification history and user filters across replies.
+  Extract a typed hard-constraint/soft-preference envelope; validate supported
+  filters, hourly USD versus total budgets, ranges and location before search.
+  Never turn soft preferences into exclusion filters or invent availability.
+  Preserve clarification history and user filters across replies. If extraction
+  runs concurrently, join both validated outcomes before tool execution.
   **Done when:** uncertain intent, clarification, no-match and invalid
   decisions search nothing; accepted decisions use only the captured catalog.
   Empty provider results do not broaden categories. Public response/auth
   contracts and unrelated booking flows remain unchanged.
+  **Completed:** `c1850cb`.
 
-- [ ] **JEV-06. Add cross-boundary failure and response-integrity coverage.**
+- [x] **JEV-06. Add cross-boundary failure and response-integrity coverage.**
   Depends on JEV-05. Share the request-wide deadline and existing repair/round
   budget; allow at most one eligible malformed-decision repair, never auth,
   credit or infrastructure repair. Surface safe unavailability without silent
@@ -135,8 +146,10 @@ feature complete merely because its configuration or specification exists.
   Sources and mentions come only from tools executed for the current request,
   never decisions, refreshes or few-shot results. Logs contain no decision
   state, criteria, probability maps or raw provider bodies.
+  **Completed:** `8b314f8`. CMD test execution passed: 93 focused tests and
+  410 tests in the full assistant suite.
 
-- [ ] **JEV-07. Wire deployment variables and document rollback.**
+- [x] **JEV-07. Wire deployment variables and document rollback.**
   Depends on JEV-04 and JEV-05. Forward explicit Jev settings through Compose,
   document `.env.example` and deployment recipes, and keep the Decisions model
   separate from `OPENROUTER_CHAT_MODEL`. Support Jev with Ollama chat and with
@@ -145,10 +158,13 @@ feature complete merely because its configuration or specification exists.
   disabled/misconfigured modes without containers making inference calls.
   Rollback restores legacy/provider settings without resetting data or
   removing credentials/infrastructure still needed by another caller.
+  **Completed:** `708d3d5`. Explicit Compose forwarding, fake-secret
+  topology/startup checks and rollback instructions. No live inference or
+  operator approval.
 
-### Evaluation and release (pending; operator gates)
+### Evaluation and release (operator gates)
 
-- [ ] **JEV-08. Review metadata, prepare evaluation and freeze acceptance policy.**
+- [x] **JEV-08. Review metadata, prepare evaluation and freeze acceptance policy.**
   Fixture/metadata preparation depends on JEV-02; live evaluation depends on
   JEV-06 and JEV-07 plus explicit operator approval and a spend cap.
   Review descriptions/aliases and version at least 120 labeled prompts across
@@ -159,6 +175,16 @@ feature complete merely because its configuration or specification exists.
   **Done when:** reviewed thresholds and numeric tolerance are frozen and
   held-out results are recorded. Do not guess production confidence thresholds.
   If approval or a gate is missing, record the blocker and keep Jev disabled.
+  **Completed (category-stage gates):** Fixture `339d6a3`; catalog v2 with
+  reviewed descriptions and aliases `8f06e7f`; clarified intent question
+  `077cac0`; fresh operator-reviewed held-out cases `c841df6`; frozen policy
+  `evaluation/jev/policy.v3.json` (`1b512d3`: confidence 0, probability 0,
+  margin 0.65, tolerance 0.001). Held-out with the frozen policy: 111/111
+  correct automatic, 60/60 correct abstention, 0/60 forced, 9/9
+  NotApplicable; Jev call p50 179 ms, p95 242 ms. Results `809c9bd`; history
+  of the failed v1 tuning and v2 held-out runs is in `evaluation/jev/README.md`.
+  Not measured: end-to-end latency and the legacy-baseline comparison; cover
+  them in JEV-09. Jev stays disabled until the operator approves release.
 
 - [ ] **JEV-09. Verify and release the single-category end-to-end flow.**
   Depends on JEV-06, JEV-07 and JEV-08. Add deterministic end-to-end coverage
