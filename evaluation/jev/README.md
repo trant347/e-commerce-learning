@@ -97,6 +97,33 @@ frozen policy or release result**: freezing a policy and a held-out run with
 `catalog.v2.json` require separate operator approval. Ollama still forces a
 category on most requests that need abstention.
 
+### v2 held-out result with frozen policy (October 3, 2026): FAIL
+
+Policy `policy.v2.json` (`jev-policy-v2-20261003`) was committed before any
+held-out inference. All 60 held-out cases were then run three times
+(180 runs, reported cost **$0.050516**) and scored only with that policy:
+
+```text
+python scripts\score_jev_heldout.py C:\private\jev-heldout-v2.jsonl --policy evaluation\jev\policy.v2.json
+```
+
+| Held-out measure | Result | Gate |
+|---|---:|---|
+| Correct automatic selections | 96/108 (88.9%) | **FAIL** (at least 90%) |
+| Correct safe abstentions | 54/66 (81.8%) | **FAIL** (at least 95%) |
+| Incorrect forced selections | 3/66 (4.5%) | PASS (at most 5%) |
+| NotApplicable correct | 6/6 | not gated |
+
+There were no wrong-category selections or unavailable results. Post-hoc
+diagnosis (not a result): 21 of the 24 failing runs came from the **intent**
+question answering `not_applicable` while the category question chose the
+labelled category or correct abstention; the remaining 3 were one
+overlapping-category case forced to a category. The catalog changes cannot
+address the intent question. Because this diagnosis used held-out
+outcomes, these held-out cases are now **consumed**: any intent-question or
+policy change must be measured on new, independently written held-out cases,
+not by rescoring this set. JEV-08 remains blocked and Jev stays disabled.
+
 The offline validator checks that case IDs refer to this snapshot and that
 the canonical digest matches both the frozen snapshot and reported digest;
 it does not contact product-service or MCP.

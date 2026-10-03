@@ -208,14 +208,23 @@ static CategoryEntry ParseCategory(JsonElement item) => new(
 
 static async Task<KeyUsage> GetUsageAsync(HttpClient client)
 {
-    using var response = await client.GetAsync("https://openrouter.ai/api/v1/key");
-    response.EnsureSuccessStatusCode();
-    using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-    var data = body.RootElement.GetProperty("data");
-    return new KeyUsage(
-        data.GetProperty("limit").GetDouble(),
-        data.GetProperty("usage").GetDouble(),
-        data.GetProperty("limit_reset").GetString());
+    // The usage check gates every paid call; wait out rate limits instead of aborting the run.
+    for (var attempt = 1; ; attempt++)
+    {
+        using var response = await client.GetAsync("https://openrouter.ai/api/v1/key");
+        if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests && attempt < 5)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(10 * attempt));
+            continue;
+        }
+        response.EnsureSuccessStatusCode();
+        using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var data = body.RootElement.GetProperty("data");
+        return new KeyUsage(
+            data.GetProperty("limit").GetDouble(),
+            data.GetProperty("usage").GetDouble(),
+            data.GetProperty("limit_reset").GetString());
+    }
 }
 
 sealed record CategoryEntry(string Id, string DisplayName, string Description, string[] Aliases);
