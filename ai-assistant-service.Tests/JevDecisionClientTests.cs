@@ -43,6 +43,10 @@ public class JevDecisionClientTests
         Assert.Equal("I meant wood", root.GetProperty("state").GetProperty("clarificationHistory")[0].GetString());
         Assert.Equal(CatalogVersion, root.GetProperty("state").GetProperty("catalog").GetProperty("catalogVersion").GetString());
         Assert.Equal("choice", root.GetProperty("questions").GetProperty("intent").GetProperty("type").GetString());
+        var intent = root.GetProperty("questions").GetProperty("intent");
+        Assert.Contains("clarification history", intent.GetProperty("instructions").GetString());
+        Assert.Contains("booking a provider", intent.GetProperty("criteria").GetProperty("service_search").GetString());
+        Assert.Contains("existing booking", intent.GetProperty("criteria").GetProperty("not_applicable").GetString());
         var criteria = root.GetProperty("questions").GetProperty("category").GetProperty("criteria");
         Assert.Equal(3, criteria.EnumerateObject().Count());
         Assert.Contains("Wood repair", criteria.GetProperty("carpentry").GetString());
