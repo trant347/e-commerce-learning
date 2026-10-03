@@ -27,11 +27,20 @@ CATALOGS = {
 }
 
 
+CASES = {"v1": "cases.v1.jsonl", "v2": "cases.v2.jsonl"}
+
+
 def normalized(text):
     return " ".join(text.casefold().split())
 
 
-def validate(catalog_name="v1"):
+def consumed_heldout_prompts():
+    lines = (HERE / CASES["v1"]).read_text(encoding="utf-8").splitlines()
+    cases = [json.loads(line) for line in lines]
+    return {normalized(case["messages"][-1]) for case in cases if case["split"] == "heldout"}
+
+
+def validate(catalog_name="v1", cases_name="v1"):
     file_name, observed_digest, empty_aliases = CATALOGS[catalog_name]
     snapshot = json.loads((HERE / file_name).read_text(encoding="utf-8"))
     catalog = snapshot["categories"]
@@ -49,6 +58,7 @@ def validate(catalog_name="v1"):
     if [entry["id"] for entry in catalog] != sorted({entry["id"] for entry in catalog}):
         errors.append("catalog: IDs must be unique and sorted")
     names = {entry["id"]: entry["displayName"] for entry in catalog}
+    explicit_terms = {entry["id"]: [entry["displayName"], *entry["aliases"]] for entry in catalog}
     canonical = [
         {
             "id": entry["id"],
@@ -66,8 +76,10 @@ def validate(catalog_name="v1"):
     counts = Counter()
     ids = set()
     prompts = set()
+    # v1 held-out prompts were consumed by a scored run; v2 must use fresh H11-H20 cases.
+    consumed = consumed_heldout_prompts() if cases_name != "v1" else set()
 
-    for line_number, line in enumerate((HERE / "cases.v1.jsonl").read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate((HERE / CASES[cases_name]).read_text(encoding="utf-8").splitlines(), 1):
         try:
             case = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -95,6 +107,8 @@ def validate(catalog_name="v1"):
             counts[group, split] += 1
             if not re.fullmatch(rf"JEV08-{GROUPS[group]}-{SPLITS[split]}\d{{2}}", case_id or ""):
                 errors.append(f"line {line_number}: ID does not match group and split")
+            elif consumed and split == "heldout" and not 11 <= int(case_id[-2:]) <= 20:
+                errors.append(f"line {line_number}: fresh held-out IDs must be H11-H20")
         if not isinstance(messages, list) or not messages or any(
             not isinstance(message, str) or not message.strip() for message in messages
         ):
@@ -105,6 +119,8 @@ def validate(catalog_name="v1"):
             prompt = normalized(messages[-1])
             if prompt in prompts:
                 errors.append(f"line {line_number}: duplicate final prompt")
+            if split == "heldout" and prompt in consumed:
+                errors.append(f"line {line_number}: reuses a consumed v1 held-out prompt")
             prompts.add(prompt)
         if not isinstance(expected, dict) or expected.get("outcome") not in OUTCOMES:
             errors.append(f"line {line_number}: invalid expected outcome")
@@ -115,8 +131,8 @@ def validate(catalog_name="v1"):
                 errors.append(f"line {line_number}: Resolved requires one frozen catalog ID")
             elif group == "explicit_categories_aliases" and isinstance(messages, list) and messages and isinstance(
                 messages[-1], str
-            ) and normalized(names[category_id]) not in normalized(messages[-1]):
-                errors.append(f"line {line_number}: explicit case must use frozen display name")
+            ) and not any(normalized(term) in normalized(messages[-1]) for term in explicit_terms[category_id]):
+                errors.append(f"line {line_number}: explicit case must use a frozen display name or alias")
         elif set(expected) != {"outcome"}:
             errors.append(f"line {line_number}: abstention must not include category ID")
 
@@ -132,12 +148,13 @@ def validate(catalog_name="v1"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", choices=sorted(CATALOGS), default="v1")
+    parser.add_argument("--cases", choices=sorted(CASES), default="v1")
     arguments = parser.parse_args()
-    problems = validate(arguments.catalog)
+    problems = validate(arguments.catalog, arguments.cases)
     if problems:
         print("\n".join(problems), file=sys.stderr)
         sys.exit(1)
     print(
-        f"JEV-08 fixture valid against catalog {arguments.catalog}: 120 cases; "
+        f"JEV-08 fixture {arguments.cases} valid against catalog {arguments.catalog}: 120 cases; "
         "20 per group; 10 per split per group; frozen catalog digest verified."
     )
