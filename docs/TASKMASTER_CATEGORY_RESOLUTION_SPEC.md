@@ -1,6 +1,7 @@
 # TaskMaster Category Catalog and Hybrid Resolution Specification
 
-> Status: **Product catalog, aliases, rich MCP catalog and search-category validation implemented; assistant snapshots, hybrid resolution and Jev integration proposed, not implemented**
+> Status: **Product catalog, assistant snapshots and opt-in single-category
+> Jev flow implemented; evaluation, release and multi-category extension pending**
 >
 > This is the authoritative category design specification. It consolidates the
 > implemented catalog contract and the proposed hybrid AI matching design.
@@ -8,9 +9,14 @@
 > project's phase numbering.
 >
 > Jev amendment (September 30, 2026): category-first decisions may use
-> TypeSafe Jev through OpenRouter's Decisions API. This integration is
-> **proposed, not implemented**, and is separate from the implemented
-> OpenRouter chat adapter.
+> TypeSafe Jev through OpenRouter's Decisions API. The opt-in integration is
+> implemented but not approved for live evaluation or release; it remains
+> separate from the OpenRouter chat adapter.
+>
+> Matching-pipeline amendment (October 2, 2026): the separate
+> [matching pipeline spec](TASKMASTER_MATCHING_PIPELINE_SPEC.md) defines
+> Jev classification, Ollama filter extraction, validated retrieval and the
+> grounded final answer. It intentionally has no post-retrieval Jev scoring.
 >
 > Superseded proposals: interim multi-category search, object/action scoring,
 > related-category expansion, and replacing LLM interpretation with a general
@@ -56,7 +62,8 @@ do not replace the catalog, and an enum does not prove semantic correctness.
   or dropping a category filter when a search returns no providers.
 - Category deletion, merging, retirement, or new profile attribute schemas.
 - Implementing missing-category proposals in this rollout.
-- Changing booking, payment, provider ranking, or search-result limits.
+- Changing booking, payment, product-service retrieval order, or search-result
+  limits. The assistant preserves the returned candidate order.
 - Resetting databases or replacing existing canonical category IDs.
 
 ## 2. Current implementation and preserved contracts
@@ -206,8 +213,12 @@ helpers. Applicant/profile selection stays ID-based and cannot edit aliases.
 
 No database reset is needed. Missing aliases read as empty; bootstrap must
 continue preserving administrator-edited records. Populate useful aliases and
-refine existing descriptions through reviewed admin updates or an explicit,
-idempotent migration, not by overwriting metadata at every startup.
+refine existing descriptions through reviewed admin updates or the seed file.
+Startup bootstrap creates missing seed categories with their aliases and
+refreshes an existing category from the seed only while both `createdBy` and
+`updatedBy` are `system-seed` and its name, description or aliases differ. Any
+administrator edit transfers ownership and is never overwritten; unchanged
+records are not rewritten, so repeated startups are idempotent.
 
 ## 4. Rich MCP catalog (implemented) and assistant snapshots (proposed)
 
@@ -274,9 +285,11 @@ that same snapshot; never combine old descriptions with new IDs.
 - In `catalog-llm` and `hybrid` modes, snapshots older than 5 minutes are
   unusable for new category decisions. A successful unchanged fetch refreshes
   their age. These modes therefore require
-  `McpDiscovery:CategoryRefreshIntervalSeconds` between 1 and 300; startup
-  rejects `0` or larger values instead of letting category search stop five
-  minutes after startup. `legacy` mode keeps the current meaning of `0`
+  `McpDiscovery:CategoryRefreshIntervalSeconds` between 1 and 285 (the 5-minute
+  expiry minus the 15-second catalog call timeout, because age is measured from
+  fetch completion); startup rejects `0` or larger values instead of letting
+  category search stop five minutes after startup or blink unavailable at the
+  end of each healthy refresh cycle. `legacy` mode keeps the current meaning of `0`
   (refresh and automatic reconnect disabled) and has no snapshot expiry.
 - Without a usable snapshot, block category search and explain temporary
   unavailability. Other independent tools may continue.
@@ -328,13 +341,14 @@ self-reported confidence or invent probability thresholds. Jev supplies actual
 decision distributions, but their meaning and activation gates are governed by
 the separate contract below, not by a chat model's confidence claims.
 
-For the chat-model engine, produce the structured decision in the initial model turn used for category
-routing, rather than requiring both a separate classifier call and another
-model call to select the same category. A resolved decision may also carry the
-existing optional search filters in a typed orchestration envelope. Those
-filters remain separate from category resolution and may only reflect values
-explicitly supplied by the user. Then execute the product search and use the
-existing tool-result-grounded final answer generation.
+For the chat-model engine, produce the structured decision in the initial model
+turn used for category routing, rather than requiring both a separate classifier
+call and another model call to select the same category. The current
+implementation uses a second chat turn for typed filter extraction, separate
+from category resolution; this must be measured against the latency gate.
+Filters may only reflect values explicitly supplied by the user. Then execute
+the product search and use the existing tool-result-grounded final answer
+generation.
 
 This is an internal orchestration change, not a new model-executable domain
 tool or a change to the public `ChatResponse` shape. Use typed parsing and
@@ -346,8 +360,10 @@ decision before executing it.
 
 ### Jev category-first integration (proposed)
 
-Use Jev only for the narrow category decision. Keep the existing configured
-`chat` model for conversation, explicit filter extraction and final answers.
+Use Jev for bounded category decisions before retrieval. Keep the existing
+configured `chat` model for conversation, explicit filter extraction and final
+answers. The intended mixed deployment
+uses Ollama for those chat responsibilities; OpenRouter chat remains supported.
 Jev is made by TypeSafe and reached through OpenRouter; it is not an OpenAI
 chat model and does not generate prose or native assistant tool calls.
 
@@ -379,8 +395,9 @@ base URL ending in `/api/v1`.
 Build `state` from the complete current user request, relevant user-authored
 clarification history, and one immutable rich catalog snapshot from section 4.
 Exclude few-shot results, provider records, credentials, actor IDs, authorization
-scopes, and other execution metadata. Delimit catalog descriptions/aliases as
-untrusted data; neither metadata nor user text can override the fixed questions.
+scopes, and other execution metadata from category state. Delimit catalog
+descriptions/aliases as untrusted data; neither metadata nor user text can
+override the fixed questions.
 
 Ask two independent Choice questions in one request:
 
@@ -446,9 +463,18 @@ the existing snapshot-version reconciliation rules. Proposed multi-category
 search is a separate amendment; do not interpret Jev probabilities as automatic
 OR searches or implement that feature merely to add Jev.
 
+#### Matching pipeline extension
+
+The separate [matching pipeline spec](TASKMASTER_MATCHING_PIPELINE_SPEC.md)
+defines concurrent category/filter processing, typed hard-versus-soft filter
+extraction, validated retrieval and grounded presentation. Product-service
+retrieval order is preserved; there is no post-retrieval Jev scoring stage.
+Category authorization and the Decisions Choice protocol remain defined here.
+
 #### Configuration, failures and deployment
 
-Proposed application settings, **not currently wired**:
+Application settings (client, validation and category-first orchestration are
+implemented behind opt-in rich-catalog modes; release evaluation remains pending):
 
 | Setting | Required behavior |
 |---|---|
@@ -456,22 +482,35 @@ Proposed application settings, **not currently wired**:
 | `CategoryResolution:Jev:Model` | Explicit decision-model slug, initially `typesafe/jev-1.13`; never taken from `OPENROUTER_CHAT_MODEL` |
 | `CategoryResolution:Jev:Endpoint` | Explicit absolute HTTPS Decisions endpoint; production uses `https://openrouter.ai/api/alpha/decisions` |
 | `CategoryResolution:Jev:TimeoutSeconds` | Positive per-decision budget within the request-wide chat deadline |
-| Decision acceptance policy | Validated, versioned thresholds/tolerance and evaluated model/catalog combination required before enabling Jev mode |
-| `OpenRouter:ApiKey` | Shared server-side secret; required for enabled Jev even when `chat` uses Ollama |
+| `CategoryResolution:Jev:Policy:*` | Explicit `Version`, `EvaluatedModel` matching the requested model, `EvaluatedCatalogVersion` digest, `MinimumConfidence`, `MinimumProbability`, `MinimumMargin` (each 0–1) and `DistributionTolerance` (>0 and ≤0.01) required for Jev in a rich mode. A catalog version change requires review before further Jev decisions. No default acceptance thresholds are supplied. |
+| `OpenRouter:ApiKey` | Shared server-side secret; required for any enabled Jev caller even when `chat` uses Ollama |
 
 Keep `AiModels:Tasks:chat` unchanged. A Jev selection does not add a production
 chat-task mapping or inherit chat output limits. Snapshot enabled settings at
 startup; public input cannot change them. Legacy mode performs no Jev calls
 and does not require Jev credentials.
 
-When implemented, add explicit Compose environment forwarding for these
-settings. A proposed deployment variable such as
-`JEV_CATEGORY_MODEL=typesafe/jev-1.13` must map to
-`CategoryResolution__Jev__Model`; merely putting it in `.env` has no effect.
+The Decisions client requires an explicit absolute HTTPS endpoint whose path
+is `/api/alpha/decisions` and a per-decision timeout of 1–300 seconds. It
+uses the shorter of that timeout and the caller's remaining request budget.
+For each Choice question, the response must contain exactly the requested
+option keys with finite probabilities in [0,1], a finite confidence in [0,1],
+and a selected option tied for the maximum within the configured tolerance.
+The probabilities must sum to 1 within that tolerance (allowing 1e-12 for
+floating-point rounding). A non-2xx response is classified by HTTP status;
+a 200 error envelope is a protocol error. The client performs no HTTP retry.
+
+Compose now explicitly forwards these settings, including
+`JEV_CATEGORY_MODEL` to `CategoryResolution__Jev__Model` and the reviewed
+policy fields. The base deployment remains `legacy` / `ChatModel` by default;
+putting a model in `.env` alone does not enable Jev. See
+[AI assistant deployment](AI_ASSISTANT_DEPLOYMENT.md#jev-category-decisions-disabled-by-default)
+for both chat topologies, validation and rollback.
 Keep `OPENROUTER_CHAT_MODEL` reserved for a tool-capable conversational model.
 Jev plus Ollama chat requires the base/mixed topology, not the OpenRouter-only
 chat override. Jev plus OpenRouter chat can share the same credit-limited key;
-its budget covers both workloads.
+its budget covers every enabled chat and category-decision workload. No setting
+enables paid evaluation without operator approval.
 
 Do not make inference calls at startup. Missing enabled configuration fails
 startup safely; invalid/revoked keys fail on requests. Validate non-2xx and
@@ -483,7 +522,15 @@ malformed-decision repair may consume the existing shared repair/tool-round
 budget; authentication, policy, exhausted-credit and infrastructure failures
 are not output-repair candidates. Never reset the end-to-end deadline or
 silently fall back to another model/provider. Propagate caller cancellation.
-Failure produces explicit safe unavailability and no provider search.
+Category failure produces explicit safe unavailability and no provider search.
+
+The request-wide five-round budget is shared by Decisions calls (including
+the one eligible malformed-answer repair), structured chat category/filter
+turns and final conversation/tool rounds. The single repair allowance is
+shared across category and filter output; malformed HTTP 200 answer data is
+repairable, but HTTP 200 error envelopes, oversized bodies and non-2xx
+responses are not. Each decision attempt receives the remaining request
+deadline; no repair resets the shared cancellation token.
 
 Reuse metadata-only telemetry conventions. Never log state, criteria,
 probability maps, raw response/error bodies, credentials or user payloads.
@@ -491,8 +538,8 @@ Keep task/provider/model/outcome labels bounded; snapshot versions, resolved
 models, generation IDs and optional numeric usage remain diagnostic metadata
 as appropriate. Decisions do not become marketplace `sources` or mentions.
 
-Rollback restores the semantic provider/mode and restarts the assistant while
-leaving the chat profile unchanged. Retain the shared OpenRouter key and local
+Restore the semantic provider/mode and restart the assistant while leaving
+the chat profile unchanged. Retain the shared OpenRouter key and local
 Ollama infrastructure whenever another enabled caller still requires them.
 
 #### Implementation sequence and completion gate
@@ -510,15 +557,17 @@ Ollama infrastructure whenever another enabled caller still requires them.
    before enabling the feature. Approval of a chat smoke test is not approval
    of an additional Jev evaluation.
 
-Until these steps are implemented and their gates pass, Jev end-to-end testing
-is not supported. OpenRouter integration task 12 prepares evaluation of the
-existing chat foundation, not implementation of these category prerequisites.
+Deterministic fake-secret topology and startup tests do not constitute a live
+end-to-end release test. Operator-approved, spend-bounded evaluation (JEV-08)
+and end-to-end verification (JEV-09) remain separate gates.
 
-Implementation progress (September 30, 2026): alias persistence, strict API
+Implementation progress (October 3, 2026): alias persistence, strict API
 validation, legacy omission versus clearing, public metadata arrays, admin
 editing, deterministic rich MCP catalog snapshots and authoritative
-search-category validation are implemented. Assistant rich-snapshot handling
-and the Jev decision client/search gate remain unimplemented.
+search-category validation and assistant rich-snapshot handling are implemented.
+The Jev decision client, category-first search gate, cross-boundary repair,
+response integrity, telemetry and opt-in deployment wiring are implemented
+behind rich-catalog modes. Evaluation and release verification remain pending.
 
 ### Hybrid phase 1: catalog-grounded semantic interpretation
 
@@ -723,12 +772,15 @@ Initial release gates (targets, not measured claims):
 - If accuracy or latency gates fail, keep the new mode disabled and revise
   the implementation; do not claim improvement based only on valid IDs.
 
+Filter-extraction and grounded-response evaluation are defined in the
+[matching pipeline spec](TASKMASTER_MATCHING_PIPELINE_SPEC.md#5-evaluation-and-release-gates).
+
 ## 8. Phased implementation and rollout
 
 Use one assistant rollout setting, `CategoryResolution:Mode`, with values
 `legacy`, `catalog-llm`, and `hybrid`; default to `legacy` until gates pass.
 Reject unknown configuration values at startup, and in `catalog-llm` or
-`hybrid` mode reject a category refresh interval outside 1-300 seconds
+`hybrid` mode reject a category refresh interval outside 1-285 seconds
 (section 4). This is a migration switch,
 not a separate taxonomy configuration system.
 
@@ -780,6 +832,7 @@ removing product capabilities.
 | Assistant orchestration/client | Typed decision validation, bounded repair, native/inline call gate, locked exact result, version mismatch, clarification history, explicit filters |
 | Jev decision client and configuration | Separate Decisions endpoint/DTOs, exact question/option sets, distributions and threshold boundaries, error envelopes/statuses, any-enabled-caller key requirement, no silent fallback |
 | Jev category-first flow | Locked category on every search path, uncertain/no-match decisions search nothing, unchanged chat profile/public model, no metadata leaks, disabled mode makes no paid calls |
+| Matching pipeline extension | Filter extraction, search authorization and grounded presentation are owned by [the matching pipeline spec](TASKMASTER_MATCHING_PIPELINE_SPEC.md#6-implementation-coverage-and-sequence) |
 | Frontend admin | Alias CRUD UI, omitted legacy fields, loading/save errors, no changes to applicant category semantics |
 | Response integrity | No fabricated providers; no sources/mentions from background refresh or few-shot examples |
 | End-to-end | Admin metadata update affects new decisions; unknown ID rejected; ambiguity searches nothing; clarification preserves user filters |

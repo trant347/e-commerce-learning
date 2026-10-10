@@ -77,9 +77,13 @@ public sealed class SearchFilterExtractionService
             new ChatModelMessage(ChatModelRoles.System,
                 "Extract only explicitly user-stated search filters. Return one JSON object with hard (object), soft (array), " +
                 "and unsupportedHard (array). Hard fields can only be location, minRate, maxRate or minRating. " +
+                "The hard value must be a JSON object keyed by field, never an array; for example, " +
+                "{\"location\":{\"value\":\"Chicago\",\"evidence\":\"Chicago\",\"unit\":\"place\"}}. " +
                 "Each hard field is {value,evidence,unit}; location uses unit 'place', rates 'usd_per_hour', rating 'rating_0_5'. " +
                 "Evidence must be an exact substring of a user message. Numeric rates require explicit hourly USD units; " +
                 "total-job budgets must go in unsupportedHard if mandatory. Soft preferences must never become hard filters. " +
+                "Qualitative price preferences such as cheapest, lowest price or most affordable are not hard constraints; " +
+                "when they have no numeric value, omit them from both soft and unsupportedHard. " +
                 "Each soft entry is {field,value,unit,evidence}; each unsupportedHard entry is {evidence}. " +
                 "Do not assume availability or date support. Unspecified filters stay absent. " +
                 "If there are no supported filters or mandatory unsupported requirements, return exactly " +

@@ -51,3 +51,21 @@ Playwright intentionally uses one worker because scenarios share cross-actor sta
 - Product MCP tools are registered explicitly through `McpToolsConfig`; `TaskMasterMcpTools` is intentionally not a component. When adding a domain tool, define it in the owning service and let `McpToolDiscoveryService` register it dynamically.
 - Frontend authentication state uses the existing local-storage keys and bearer-token helpers. E2E storage state depends on those exact keys, so coordinate changes with `e2e/helpers.ts`/`global-setup.ts`.
 - Root specification files contain valuable invariants, but some sections are marked proposed, superseded, or historical. Check each document's status and current implementation before treating it as executable behavior; `PAYMENT_SAGA_SPEC.md` documents both historical synchronous flow and the implemented asynchronous flow.
+
+## Code Quality
+- Review across five axes: correctness, readability, architecture, security, performance
+- Every PR must pass: lint, type check, tests, build
+- No secrets in code or version control
+
+## Implementation
+- Build in small, verifiable increments
+- Each increment: implement → test → verify → commit
+- Never mix formatting changes with behavior changes
+
+## Security
+- Follow the principle of least privilege for all services and database access.
+- Validate and sanitize all user inputs to prevent injection attacks.
+- Use HTTPS for all external and internal communications.
+- Rotate secrets and credentials regularly and store them securely.
+- Monitor and log security-relevant events for auditing and incident response.
+- Never commit secrets, credentials, or sensitive information to version control.

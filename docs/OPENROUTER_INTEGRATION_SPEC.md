@@ -41,6 +41,8 @@ instead of generated text or assistant tool calls.
 
 The category-first design belongs in
 [TaskMaster category resolution](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md#jev-category-first-integration-proposed).
+The end-to-end Jev/Ollama flow belongs in the separate
+[TaskMaster matching pipeline spec](TASKMASTER_MATCHING_PIPELINE_SPEC.md).
 It requires a separate Decisions API client:
 
 ```text
@@ -53,16 +55,21 @@ for every chat/tool round. Changing the slug does not change the API endpoint,
 request shape, parser, or workflow. Likewise, adding a `category_resolution`
 chat profile does not create a Decisions API caller.
 
-The intended separate feature is: user request -> Jev category decision ->
+The intended separate feature is: user request -> Jev category decision plus
+typed filter extraction by the configured chat model (intended: Ollama) ->
 application validation against the product-owned catalog -> marketplace search
--> grounded response from the configured chat model. Jev never executes tools
-or supplies provider results. The same server-side OpenRouter key may be reused;
+-> grounded response from the configured chat model. Classification and
+extraction may run concurrently; search waits for validation of both. Hard
+constraints remain product-enforced; soft preferences must not become exclusion
+filters. Jev never executes tools, supplies provider results or reranks the
+retrieved candidates.
+The same server-side OpenRouter key may be reused across enabled callers;
 credential reuse does not imply protocol compatibility.
 
 Only the chat foundation is implemented. Jev configuration, Decisions API
-translation, category gating and confidence evaluation remain proposed in the
-category spec. OpenRouter tasks 12-14 evaluate and deploy the existing chat
-foundation; they do not implicitly implement Jev.
+translation, category/filter gating and quality evaluation remain proposed in
+the category spec. OpenRouter tasks 12-14 evaluate and deploy the existing
+chat foundation; they do not implicitly implement Jev.
 
 ### Goals
 

@@ -47,8 +47,9 @@ searching.
   category returns no providers.
 - Related-category inference, object/action scoring, embeddings, or any
   deterministic keyword-to-category rules engine.
-- Changing provider ranking, sort order, filter semantics, or the location
-  normalization contract.
+- Changing product-service retrieval ranking, sort order, filter semantics, or
+  the location normalization contract. The assistant preserves grouped search
+  order and does not perform a post-retrieval Jev reranking pass.
 - Changing the public `ChatResponse` shape or the frontend.
 - New durable conversation state.
 
@@ -208,8 +209,8 @@ Add `CategorySearch:MaxCategories`:
 - when the value is `N > 1`, the assistant allows at most `N - 1`
   alternatives.
 
-This is the only rollout and rollback switch. Product-service support is
-additive and stays deployed in every mode.
+This is the only multi-category rollout and rollback switch. Product-service
+support is additive and stays deployed in every mode.
 
 ### 4.2 Schema offered to the model
 

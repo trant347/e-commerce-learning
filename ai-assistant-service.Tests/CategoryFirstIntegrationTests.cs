@@ -388,6 +388,35 @@ public class CategoryFirstIntegrationTests
     }
 
     [Fact]
+    public async Task QualitativeCheapestPreference_SearchesWithoutInventingRateFilter()
+    {
+        const string filters = """
+            {"hard":{"location":{"value":"Chicago","unit":"place","evidence":"Chicago"}},
+             "soft":[],"unsupportedHard":[]}
+            """;
+        var model = new RecordingChat(round => round == 1
+            ? Answer(filters)
+            : Answer("Found Alice."));
+        var search = new RecordingTool(
+            "search_task_masters", """[{"id":"tm-1","name":"Alice"}]""");
+
+        var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
+            .ChatAsync(new ChatRequest
+            {
+                Message = "I live in Chicago. Fix my wooden cupboard. Cheapest price please."
+            }, Context, CancellationToken.None);
+
+        Assert.Equal(1, search.Calls);
+        Assert.Equal("Chicago", search.Arguments!["location"]);
+        Assert.False(search.Arguments.ContainsKey("minRate"));
+        Assert.False(search.Arguments.ContainsKey("maxRate"));
+        Assert.Equal(["search_task_masters"], response.Sources);
+        var filterPrompt = model.Requests[0].Messages[0].Content!;
+        Assert.Contains("hard value must be a JSON object keyed by field", filterPrompt);
+        Assert.Contains("Qualitative price preferences", filterPrompt);
+    }
+
+    [Fact]
     public void RepeatedSoftAndHardEvidence_CannotHideLaterHardRequirement()
     {
         const string text = "Preferably under $50/hour, but I must be under $50/hour";
