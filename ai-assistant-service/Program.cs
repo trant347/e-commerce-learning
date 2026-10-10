@@ -78,6 +78,11 @@ builder.Services
     .AddOptions<McpDiscoveryOptions>()
     .Bind(builder.Configuration.GetSection(McpDiscoveryOptions.SectionName));
 builder.Services
+    .AddOptions<AiChatOptions>()
+    .Bind(builder.Configuration.GetSection(AiChatOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<AiChatOptions>, AiChatOptionsValidator>();
+builder.Services
     .AddOptions<CategoryResolutionOptions>()
     .Bind(builder.Configuration.GetSection(CategoryResolutionOptions.SectionName))
     .ValidateOnStart();

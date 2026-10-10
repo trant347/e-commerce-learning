@@ -18,7 +18,17 @@ export interface ChatHistoryMessage {
     content: string;
 }
 
+export interface AiAssistantConfig {
+    historyMessageLimit: number;
+}
+
 class AiAssistantServices {
+    getConfig(): Promise<AiAssistantConfig> {
+        return axios
+            .get('/api/ai-assistant/config')
+            .then((res) => res.data);
+    }
+
     chat(message: string, history?: ChatHistoryMessage[]): Promise<ChatResponse> {
         const token = Auth.getToken();
         const headers = token ? { Authorization: `Bearer ${token}` } : {};

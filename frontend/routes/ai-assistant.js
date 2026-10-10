@@ -3,6 +3,24 @@ const router = express.Router();
 const httpProxy = require('express-http-proxy');
 const ServiceLocation = require('../consul/serviceLocation');
 
+const DEFAULT_HISTORY_MESSAGE_LIMIT = 5;
+const MAXIMUM_HISTORY_MESSAGE_LIMIT = 20;
+const configuredHistoryMessageLimit =
+    process.env.AI_CHAT_HISTORY_MESSAGE_LIMIT ?? String(DEFAULT_HISTORY_MESSAGE_LIMIT);
+const historyMessageLimit = Number(configuredHistoryMessageLimit);
+
+if (!Number.isInteger(historyMessageLimit)
+    || historyMessageLimit < 0
+    || historyMessageLimit > MAXIMUM_HISTORY_MESSAGE_LIMIT) {
+    throw new Error(
+        `AI_CHAT_HISTORY_MESSAGE_LIMIT must be an integer between 0 and ${MAXIMUM_HISTORY_MESSAGE_LIMIT}.`
+    );
+}
+
+router.get('/config', (_req, res) => {
+    res.json({ historyMessageLimit });
+});
+
 router.use('/', httpProxy(() => ServiceLocation.getServiceLocationPath('ai-assistant-service'), {
     proxyReqPathResolver: (req) => {
         const upstream = `${ServiceLocation.getServiceLocationPath('ai-assistant-service')}/api/ai-assistant${req.url}`;

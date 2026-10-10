@@ -139,6 +139,7 @@ interface IChatOverlayState {
     minimized: boolean;
     inputText: string;
     loading: boolean;
+    historyMessageLimit: number;
     messages: IChatMessage[];
 }
 
@@ -149,6 +150,7 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
             minimized: false,
             inputText: '',
             loading: false,
+            historyMessageLimit: 5,
             messages: [
                 {
                     role: 'assistant',
@@ -156,6 +158,16 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
                 }
             ]
         };
+    }
+
+    componentDidMount() {
+        AiAssistantServices.getConfig()
+            .then(config => this.setState({
+                historyMessageLimit: config.historyMessageLimit
+            }))
+            .catch(error => {
+                console.error('[AI chat] Failed to load runtime configuration.', error);
+            });
     }
 
     toggleMinimize() {
@@ -188,9 +200,12 @@ export default class ChatOverlay extends React.Component<{}, IChatOverlayState> 
         });
 
         try {
-            // Send only the immediately previous user+assistant exchange as history
             const prior = nextMessages.slice(1, -1); // exclude welcome greeting and current user message
-            const history = prior.slice(-2).map(m => ({ role: m.role, content: m.content }));
+            const history = this.state.historyMessageLimit === 0
+                ? []
+                : prior
+                    .slice(-this.state.historyMessageLimit)
+                    .map(m => ({ role: m.role, content: m.content }));
             const response = await AiAssistantServices.chat(text, history);
             const assistantMessage: IChatMessage = {
                 role: 'assistant',

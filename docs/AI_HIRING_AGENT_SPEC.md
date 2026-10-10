@@ -55,7 +55,7 @@ The LLM runs a tool-calling loop inside a single HTTP request. Product tools are
 | Limitation | Current behavior | Impact |
 |---|---|---|
 | Request-scoped execution | The tool loop ends when the chat HTTP request returns | The assistant cannot wait for a TaskMaster response and resume later |
-| Artificially short chat context | Both the browser (`prior.slice(-2)`) and service (`MaxChatMemorySize = 2`) independently restrict history to two messages | Both limits must be addressed; conversation history still cannot be the authoritative record of hiring constraints or approvals |
+| Artificially short chat context | The shared `AI_CHAT_HISTORY_MESSAGE_LIMIT` currently bounds browser and service history to five messages | Fixed message-count selection should eventually become token-budgeted; conversation history still cannot be the authoritative record of hiring constraints or approvals |
 | No durable agent state | The service has no workflow database or persisted plan | Restarts and new chat sessions lose negotiation progress |
 | Fixed tool loop | A request is limited to five tool-calling rounds | It supports short lookups, not long-running business workflows |
 | Request authentication implemented; tool identity propagation missing | Chat now validates the marketplace JWT and obtains username and roles through `ICurrentUserAccessor`; tool execution has no trusted identity parameter | Preserve AH-01 authentication and extend trusted identity into tool execution rather than trusting request-body or model-supplied identity |
@@ -74,7 +74,11 @@ The current assistant is therefore a **tool-using chatbot**, not an agent. It ca
 
 ### 2.3 Chat context versus agent memory
 
-The current `MaxChatMemorySize = 2` restriction and the independent `prior.slice(-2)` in `frontend/ui/components/chat-overlay/chat-overlay.tsx` must be replaced together with a configurable context strategy. Changing the server alone cannot restore history already discarded by the browser. A larger workstation can support a larger model and context window, allowing the assistant to include substantially more conversation history.
+The current shared `AI_CHAT_HISTORY_MESSAGE_LIMIT` setting keeps the browser and
+assistant aligned at runtime and accepts values from 0 through 20. It should
+eventually be replaced with a token-budgeted context strategy. A larger
+workstation can support a larger model and context window, allowing the
+assistant to include substantially more conversation history.
 
 This improves:
 

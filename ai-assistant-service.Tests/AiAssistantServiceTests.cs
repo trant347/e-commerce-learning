@@ -28,8 +28,11 @@ public class AiAssistantServiceTests
             Message = "new question",
             History = [
                 new() { Role = "user", Content = "discard this old message" },
-                new() { Role = "user", Content = "recent question" },
-                new() { Role = "assistant", Content = "recent answer" }
+                new() { Role = "user", Content = "recent question one" },
+                new() { Role = "assistant", Content = "recent answer one" },
+                new() { Role = "user", Content = "recent question two" },
+                new() { Role = "assistant", Content = "recent answer two" },
+                new() { Role = "user", Content = "recent question three" }
             ]
         }, Context, CancellationToken.None);
 
@@ -45,12 +48,17 @@ public class AiAssistantServiceTests
         Assert.Equal(1, second.CallCount);
 
         var initial = client.Requests[0].Messages;
-        Assert.Equal(["system", "user", "assistant", "tool", "assistant", "user", "assistant", "user"],
+        Assert.Equal(
+            ["system", "user", "assistant", "tool", "assistant",
+             "user", "assistant", "user", "assistant", "user", "user"],
             initial.Select(m => m.Role));
         Assert.Equal("test system prompt", initial[0].Content);
-        Assert.Equal("recent question", initial[5].Content);
-        Assert.Equal("recent answer", initial[6].Content);
-        Assert.Equal("new question", initial[7].Content);
+        Assert.Equal("recent question one", initial[5].Content);
+        Assert.Equal("recent answer one", initial[6].Content);
+        Assert.Equal("recent question two", initial[7].Content);
+        Assert.Equal("recent answer two", initial[8].Content);
+        Assert.Equal("recent question three", initial[9].Content);
+        Assert.Equal("new question", initial[10].Content);
         Assert.Equal(Assert.Single(initial[2].ToolCalls!).Id, initial[3].ToolCallId);
         var followUp = client.Requests[1].Messages;
         Assert.Equal(["live-search", "live-bookings"],
@@ -76,6 +84,55 @@ public class AiAssistantServiceTests
         Assert.Empty(response.Sources);
         Assert.Empty(response.Mentions);
         Assert.Equal(0, tool.CallCount);
+    }
+
+    [Fact]
+    public async Task ConfiguredHistoryLimit_UsesOnlyThatManyRecentMessages()
+    {
+        var client = new RecordingClient((_, _) => Task.FromResult(Answer("Hello!")));
+        var (service, _) = Service(client, [], historyMessageLimit: 3);
+
+        await service.ChatAsync(new ChatRequest
+        {
+            Message = "current",
+            History =
+            [
+                new() { Role = "user", Content = "discard one" },
+                new() { Role = "assistant", Content = "discard two" },
+                new() { Role = "user", Content = "keep one" },
+                new() { Role = "assistant", Content = "keep two" },
+                new() { Role = "user", Content = "keep three" }
+            ]
+        }, Context, CancellationToken.None);
+
+        var messages = client.Requests[0].Messages;
+        Assert.DoesNotContain(messages, message => message.Content == "discard one");
+        Assert.DoesNotContain(messages, message => message.Content == "discard two");
+        Assert.Equal(
+            ["keep one", "keep two", "keep three", "current"],
+            messages.TakeLast(4).Select(message => message.Content));
+    }
+
+    [Fact]
+    public async Task ZeroHistoryLimit_ExcludesAllPreviousMessages()
+    {
+        var client = new RecordingClient((_, _) => Task.FromResult(Answer("Hello!")));
+        var (service, _) = Service(client, [], historyMessageLimit: 0);
+
+        await service.ChatAsync(new ChatRequest
+        {
+            Message = "current",
+            History =
+            [
+                new() { Role = "user", Content = "previous question" },
+                new() { Role = "assistant", Content = "previous answer" }
+            ]
+        }, Context, CancellationToken.None);
+
+        var messages = client.Requests[0].Messages;
+        Assert.DoesNotContain(messages, message => message.Content == "previous question");
+        Assert.DoesNotContain(messages, message => message.Content == "previous answer");
+        Assert.Equal("current", messages[^1].Content);
     }
 
     [Fact]
@@ -391,7 +448,8 @@ public class AiAssistantServiceTests
     private static (AiAssistantService, Mock<ITaskChatModelResolver>) Service(
         RecordingClient client,
         IReadOnlyList<IToolDefinition> tools,
-        ILogger<AiAssistantService>? logger = null)
+        ILogger<AiAssistantService>? logger = null,
+        int historyMessageLimit = AiChatOptions.DefaultHistoryMessageLimit)
     {
         var resolver = new Mock<ITaskChatModelResolver>(MockBehavior.Strict);
         resolver.Setup(r => r.Resolve("chat")).Returns(client);
@@ -413,8 +471,15 @@ public class AiAssistantServiceTests
                 ]
             }]
         }));
-        return (new AiAssistantService(prompt, resolver.Object,
-            new ToolRegistry(tools), logger ?? NullLogger<AiAssistantService>.Instance), resolver);
+        return (new AiAssistantService(
+            prompt,
+            resolver.Object,
+            new ToolRegistry(tools),
+            logger ?? NullLogger<AiAssistantService>.Instance,
+            aiChatOptions: Options.Create(new AiChatOptions
+            {
+                HistoryMessageLimit = historyMessageLimit
+            })), resolver);
     }
 
     private static ChatModelToolCall Call(string id, string name, string arguments = "{}")

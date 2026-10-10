@@ -16,6 +16,7 @@ services:
     - "3000:3000"
     environment:
     - NODE_ENV=production
+    - AI_CHAT_HISTORY_MESSAGE_LIMIT=${AI_CHAT_HISTORY_MESSAGE_LIMIT:-5}
     - OTEL_SDK_DISABLED=true
     # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # - OTEL_SERVICE_NAME=frontend
@@ -318,6 +319,7 @@ services:
     - AiModels__Tasks__chat__TimeoutSeconds=600
     - AiModels__Tasks__chat__RequestTimeoutSeconds=3000
     - AiModels__Tasks__chat__MaxOutputTokens=1024
+    - AiChat__HistoryMessageLimit=${AI_CHAT_HISTORY_MESSAGE_LIMIT:-5}
     - CategoryResolution__Mode=${JEV_CATEGORY_MODE:-legacy}
     - CategoryResolution__SemanticProvider=${JEV_CATEGORY_SEMANTIC_PROVIDER:-ChatModel}
     - CategoryResolution__Jev__Model=${JEV_CATEGORY_MODEL:-}

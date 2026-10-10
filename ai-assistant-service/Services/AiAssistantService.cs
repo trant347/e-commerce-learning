@@ -21,9 +21,7 @@ public sealed class AiAssistantService : IAiAssistantService
     private readonly CategoryCatalogSnapshotStore? _snapshots;
     private readonly CategoryDecisionService? _categoryDecisions;
     private readonly SearchFilterExtractionService? _filterExtraction;
-
-    // To keep prompts concise, only include the last 2 messages from history (if any) as context for the model.
-    private const int MaxChatMemorySize = 2;
+    private readonly int _historyMessageLimit;
 
     // Guard against infinite tool-call loops
     private const int MaxToolRounds = 5;
@@ -43,7 +41,8 @@ public sealed class AiAssistantService : IAiAssistantService
         IOptions<CategoryResolutionOptions>? categoryOptions = null,
         CategoryCatalogSnapshotStore? snapshots = null,
         CategoryDecisionService? categoryDecisions = null,
-        SearchFilterExtractionService? filterExtraction = null)
+        SearchFilterExtractionService? filterExtraction = null,
+        IOptions<AiChatOptions>? aiChatOptions = null)
     {
         _prompt = prompt;
         _modelResolver = modelResolver;
@@ -53,6 +52,8 @@ public sealed class AiAssistantService : IAiAssistantService
         _snapshots = snapshots;
         _categoryDecisions = categoryDecisions;
         _filterExtraction = filterExtraction;
+        _historyMessageLimit = aiChatOptions?.Value.HistoryMessageLimit
+            ?? AiChatOptions.DefaultHistoryMessageLimit;
     }
 
     public async Task<ChatResponse> ChatAsync(
@@ -147,11 +148,10 @@ public sealed class AiAssistantService : IAiAssistantService
         var userMessages = new List<string?> { request.Message };
         userMessages.AddRange(userHistory);
 
-        // Include only the last exchange (up to 2 messages) for multi-turn context
-        if (request.History is { Count: > 0 })
+        if (_historyMessageLimit > 0 && request.History is { Count: > 0 })
         {
-            var recent = request.History.Count > 2
-                ? request.History.Skip(request.History.Count - MaxChatMemorySize).ToList()
+            var recent = request.History.Count > _historyMessageLimit
+                ? request.History.Skip(request.History.Count - _historyMessageLimit).ToList()
                 : request.History;
 
             foreach (var h in recent)

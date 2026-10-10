@@ -441,8 +441,9 @@
 
 **Scope**
 
-- Replace both service `MaxChatMemorySize = 2` and browser `prior.slice(-2)` in
-  `chat-overlay.tsx`; changing only the server cannot recover discarded history.
+- Replace the shared fixed-count `AI_CHAT_HISTORY_MESSAGE_LIMIT` behavior with
+  token-budgeted selection; changing only the server cannot recover history
+  already discarded by the browser.
 - Assemble context from current structured state, recent messages, relevant
   earlier messages, tool results, and a rolling summary.
 - Enforce a configurable token budget.
