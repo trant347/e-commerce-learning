@@ -266,7 +266,14 @@ disabled Jev, incomplete settings, both Jev/chat topologies and Compose rollback
 with fake keys and reviewed-fixture policy values. It does not start containers,
 download models, or call OpenRouter. On Linux CI, run it with `pwsh`.
 This configuration check does not replace the operator-approved live smoke test
-in JEV-08 or the end-to-end release verification in JEV-09.
+or JEV-09's warm end-to-end latency/baseline measurement. Deterministic JEV-09
+coverage separately verifies metadata refreshes affecting subsequent decisions,
+no-search ambiguity handling, preserved hard filters and grounded responses.
+
+The October 10, 2026 JEV-09 comparison passed quality and safety gates but
+failed the latency gate: Jev p95 was 2.424 seconds versus legacy 1.689 seconds
+(1.435x; maximum 1.2x). Keep Jev disabled until a reviewed optimization and
+remeasurement pass; the quality result alone does not authorize deployment.
 
 - `/health` only checks configuration and never calls a model.
 - An invalid or revoked key is only detected on the first real chat request. Users

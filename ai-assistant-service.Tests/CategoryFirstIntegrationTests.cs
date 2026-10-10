@@ -413,6 +413,24 @@ public class CategoryFirstIntegrationTests
     }
 
     [Fact]
+    public async Task NoFilterRequest_PromptDefinesExactEmptyEnvelope()
+    {
+        var model = new RecordingChat(round => round == 1
+            ? Answer(NoFilters)
+            : Answer("Found Alice."));
+        var search = new RecordingTool(
+            "search_task_masters", """[{"id":"tm-1","name":"Alice"}]""");
+
+        await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
+            .ChatAsync(new ChatRequest { Message = "Find a carpenter" },
+                Context, CancellationToken.None);
+
+        Assert.Contains(
+            """{"hard":{},"soft":[],"unsupportedHard":[]}""",
+            model.Requests[0].Messages[0].Content);
+    }
+
+    [Fact]
     public async Task ClarificationReply_PreservesEarlierExplicitHardFilters()
     {
         var model = new RecordingChat(round => round == 1
@@ -441,6 +459,61 @@ public class CategoryFirstIntegrationTests
         Assert.Equal("Chicago, IL", search.Arguments!["location"]);
         Assert.Equal("50", search.Arguments["maxRate"]);
         Assert.Equal(["search_task_masters"], response.Sources);
+    }
+
+    [Fact]
+    public async Task MetadataRefresh_AffectsNextDecisionWithoutRestartingOrRebuildingEnum()
+    {
+        const string alias = "fixture repair";
+        var config = Options.Create(ResolutionOptions());
+        var snapshots = new CategoryCatalogSnapshotStore(config, TimeProvider.System);
+        var search = new RecordingTool(
+            "search_task_masters", """[{"id":"tm-1","name":"Pat"}]""");
+        var catalog = new MutableCatalogTool
+        {
+            Result = Catalog(
+                Version,
+                ("plumbing", "Plumbing", "Pipe and fixture work.", new[] { alias }),
+                ("home-repair", "Home Repair", "General household repairs.", Array.Empty<string>()))
+        };
+        var registry = new ToolRegistry([search, catalog], snapshots);
+        var refresher = new McpCategoryEnumRefresher(
+            registry, config, snapshots, TimeProvider.System,
+            NullLogger<McpCategoryEnumRefresher>.Instance);
+        var model = new RecordingChat(round => round % 2 == 1
+            ? Answer(NoFilters)
+            : Answer("Found Pat."));
+        var jev = new CatalogMetadataJev(alias);
+        var assistant = Service(model, jev, search, catalog, snapshots: snapshots);
+
+        Assert.Equal(CategoryRefreshResult.Updated,
+            await refresher.RefreshAsync(CancellationToken.None));
+        var first = await assistant.ChatAsync(
+            new ChatRequest { Message = "Find someone for fixture repair" },
+            Context, CancellationToken.None);
+
+        var nextVersion =
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        catalog.Result = Catalog(
+            nextVersion,
+            ("plumbing", "Plumbing", "Pipe installation and leak repair.", Array.Empty<string>()),
+            ("home-repair", "Home Repair", "General household and fixture repairs.", new[] { alias }));
+
+        Assert.Equal(CategoryRefreshResult.Updated,
+            await refresher.RefreshAsync(CancellationToken.None));
+        var second = await assistant.ChatAsync(
+            new ChatRequest { Message = "Find someone for fixture repair" },
+            Context, CancellationToken.None);
+
+        Assert.Equal(["plumbing", "home-repair"],
+            search.ArgumentHistory.Select(arguments => arguments["category"]));
+        Assert.Equal([Version, nextVersion],
+            jev.Requests.Select(request => request.Catalog.CatalogVersion));
+        Assert.Equal(1, search.SetCount);
+        Assert.Equal(["search_task_masters"], first.Sources);
+        Assert.Equal(["search_task_masters"], second.Sources);
+        Assert.Equal("Pat", Assert.Single(first.Mentions).Name);
+        Assert.Equal("Pat", Assert.Single(second.Mentions).Name);
     }
 
     [Theory]
@@ -813,6 +886,22 @@ public class CategoryFirstIntegrationTests
             } }),
             DateTimeOffset.UtcNow);
 
+    private static string Catalog(
+        string version,
+        params (string Id, string DisplayName, string Description, string[] Aliases)[] categories) =>
+        JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            catalogVersion = version,
+            categories = categories.Select(category => new
+            {
+                id = category.Id,
+                displayName = category.DisplayName,
+                description = category.Description,
+                aliases = category.Aliases
+            })
+        });
+
     private static CategoryResolutionOptions ResolutionOptions(string semanticProvider = CategorySemanticProviders.Jev) =>
         new()
         {
@@ -845,7 +934,7 @@ public class CategoryFirstIntegrationTests
         RecordingChat model,
         IJevDecisionClient jev,
         RecordingTool search,
-        RecordingTool? other = null,
+        IToolDefinition? other = null,
         string semanticProvider = CategorySemanticProviders.Jev,
         CategoryCatalogSnapshotStore? snapshots = null,
         ITaskChatModelClient? chatOverride = null,
@@ -941,13 +1030,23 @@ public class CategoryFirstIntegrationTests
         }
     }
 
-    private sealed class RecordingTool(string name, string result) : IToolDefinition
+    private sealed class RecordingTool(string name, string result)
+        : IToolDefinition, IParameterEnumConstrainable
     {
         public string Name => name;
         public string Description => "Test tool";
         public object ParametersSchema => new { type = "object" };
         public int Calls { get; private set; }
         public IReadOnlyDictionary<string, string>? Arguments { get; private set; }
+        public List<IReadOnlyDictionary<string, string>> ArgumentHistory { get; } = [];
+        public IReadOnlyList<string>? AppliedEnum { get; private set; }
+        public int SetCount { get; private set; }
+
+        public void SetParameterEnum(string parameterName, IReadOnlyList<string> values)
+        {
+            AppliedEnum = values.ToArray();
+            SetCount++;
+        }
 
         public Task<string> ExecuteAsync(
             ToolExecutionContext context,
@@ -955,8 +1054,53 @@ public class CategoryFirstIntegrationTests
             CancellationToken cancellationToken)
         {
             Calls++;
-            Arguments = arguments;
+            Arguments = new Dictionary<string, string>(arguments);
+            ArgumentHistory.Add(Arguments);
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class MutableCatalogTool : IToolDefinition
+    {
+        public string Name => "get_category_catalog";
+        public string Description => "Test category catalog";
+        public object ParametersSchema => new { type = "object" };
+        public string Result { get; set; } = string.Empty;
+
+        public Task<string> ExecuteAsync(
+            ToolExecutionContext context,
+            IReadOnlyDictionary<string, string> arguments,
+            CancellationToken cancellationToken) => Task.FromResult(Result);
+    }
+
+    private sealed class CatalogMetadataJev(string alias) : IJevDecisionClient
+    {
+        public List<JevDecisionRequest> Requests { get; } = [];
+
+        public Task<JevDecisionResponse> DecideAsync(
+            JevDecisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var selected = request.Catalog.Categories.Single(
+                category => category.Aliases.Contains(alias, StringComparer.Ordinal)).Id;
+            var categoryProbabilities = request.Catalog.CategoryIds.ToDictionary(
+                id => id,
+                id => id == selected ? 0.9 : 0.0,
+                StringComparer.Ordinal);
+            categoryProbabilities[JevDecisionClient.ClarificationOption] = 0.05;
+            categoryProbabilities[JevDecisionClient.NoMatchOption] = 0.05;
+
+            return Task.FromResult(new JevDecisionResponse(
+                new JevChoiceAnswer(
+                    "service_search", 0.9,
+                    new Dictionary<string, double>
+                    {
+                        ["service_search"] = 0.9,
+                        ["not_applicable"] = 0.1
+                    }),
+                new JevChoiceAnswer(selected, 0.9, categoryProbabilities),
+                "typesafe/jev-1.13-dated", 10, 5, null));
         }
     }
 

@@ -43,7 +43,8 @@ strict admin API validation, omission-preserving updates and alias editing in
 the admin UI. The next prerequisite added versioned rich MCP catalog exposure
 and authoritative search-category validation, also on September 30, 2026.
 Existing documents need no reset. Assistant rich snapshots and Jev
-interpretation remain unimplemented; see the source specification.
+interpretation are implemented behind the disabled-by-default rollout modes;
+see the source specification.
 Object terms, related-category scoring, merging,
 retirement, and required profile attributes remain outside the current rollout.
 Removing referenced categories requires an explicit reassignment policy.
@@ -52,7 +53,8 @@ Removing referenced categories requires an explicit reassignment policy.
 
 ### Resume here
 
-As of October 3, 2026, **JEV-09 release verification is the next gated task**.
+As of October 10, 2026, **JEV-09 deterministic verification and the first live
+end-to-end comparison are complete, but release is blocked by the latency gate**.
 Jev category-first orchestration is wired behind the rich-catalog modes; legacy
 remains the default, and multi-category search is not enabled.
 The intended flow is user request -> category decision against product-owned
@@ -194,6 +196,26 @@ feature complete merely because its configuration or specification exists.
   operator approval after the gates pass.
   **Done when:** the approved flow and rollback are verified and documented.
   Multi-category support stays disabled until the separate MC gates pass.
+  **Deterministic verification complete (October 10, 2026):**
+  `CategoryFirstIntegrationTests` now covers a metadata-only catalog refresh
+  changing the next Jev decision and locked search without restart or enum
+  rebuild. Existing cases cover ambiguity searching nothing, clarification
+  history preserving hard filters, and responses/sources/mentions grounded
+  only in the current search result. All 415 AI assistant tests pass; the v2
+  120-case fixture validates; base and OpenRouter Compose rendering plus
+  `scripts\Test-AiAssistantDeployments.ps1` pass, including rollback checks.
+  **Live comparison completed (October 10, 2026):** 60 fresh held-out cases,
+  three repeats each, with the frozen v2 catalog/policy, `qwen3:8b`, identical
+  provider fixtures and private raw results. Jev passed automatic resolution
+  (108/111, 97.3%), abstention (60/60), forced-selection (0/60), grounding
+  (180/180) and no-search safety (zero violations). Its p50/p95 was
+  1.658/2.424 seconds versus legacy 1.248/1.689 seconds. The p95 ratio was
+  **1.435x**, failing the required maximum of 1.2x. The candidate's measured
+  Jev cost was $0.051165; total key usage including the discarded pre-fix run
+  was $0.102899, within the approved $0.50 ceiling.
+  **Release blocker:** reduce and remeasure warm end-to-end p95 without
+  weakening quality/safety gates. No production opt-in was performed;
+  `legacy` remains the default.
 
 ## Planned extension: up to three categories
 

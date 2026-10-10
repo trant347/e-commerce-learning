@@ -165,6 +165,68 @@ The offline validator checks that case IDs refer to this snapshot and that
 the canonical digest matches both the frozen snapshot and reported digest;
 it does not contact product-service or MCP.
 
+## JEV-09 deterministic end-to-end verification (October 10, 2026)
+
+Deterministic release-path coverage now verifies all four required scenarios
+with stubbed model/network boundaries:
+
+- a metadata-only catalog refresh changes the next Jev decision and locked
+  search category without restarting the assistant or rebuilding an unchanged
+  category enum;
+- ambiguous and uncertain decisions execute no provider search;
+- explicit hard filters survive a clarification reply and remain locked;
+- provider answers, sources and mentions come only from the current validated
+  search result.
+
+The complete `ai-assistant-service.Tests` project passed 415/415 tests. The
+frozen fixture passed
+`python evaluation\jev\validate.py --catalog v2 --cases v2`. Base and
+OpenRouter Compose rendering passed, and
+`scripts\Test-AiAssistantDeployments.ps1` verified fake-secret startup
+topologies and rollback without starting containers or calling models.
+
+### Live end-to-end comparison (October 10, 2026): FAIL
+
+An explicitly approved run used the 60 fresh v2 held-out cases, three repeats
+per case, frozen catalog/policy, local `qwen3:8b`, and one deterministic
+provider fixture per category. Raw request-level results and reports remain
+private in the session workspace. The committed scorer contains no prompts or
+provider response bodies.
+
+The first full run exposed a real filter-extraction boundary: for requests with
+no filters, `qwen3:8b` returned `{}` because the prompt did not state the exact
+empty envelope. The prompt now requires
+`{"hard":{},"soft":[],"unsupportedHard":[]}`; focused live and automated tests
+passed before the comparison was rerun. The discarded pre-fix run is not part
+of the measurements below.
+
+| Held-out end-to-end measure | Legacy | Jev category-first | Gate |
+|---|---:|---:|---|
+| Correct automatic resolution | 85/111 (76.6%) | **108/111 (97.3%)** | Jev at least 90%: PASS |
+| Correct abstention | 9/60 (15.0%) | **60/60 (100%)** | Jev at least 95%: PASS |
+| Incorrect forced selection | 51/60 (85.0%) | **0/60 (0%)** | Jev at most 5%: PASS |
+| Correct NotApplicable | 0/9 | **9/9** | Reported, not separately gated |
+| Grounding violations | 19/180 | **0/180** | Zero: PASS |
+| Search-safety violations | 51/69 | **0/69** | Zero: PASS |
+| End-to-end p50 | 1.248 s | **1.658 s** | Reported |
+| End-to-end p95 | 1.689 s | **2.424 s** | Jev at most 1.2x baseline: **FAIL (1.435x)** |
+| Jev calls | 0 | 181 (one repair) | Reported |
+| Measured candidate cost | $0 | $0.051165 | Within approved ceiling |
+
+Three Jev runs for the same gardening request did not reach search after filter
+extraction; they count as automatic-resolution misses. This does not change the
+passing quality rate, but should be included in latency/flow diagnosis.
+
+Total evaluation-key usage was $0.102899 because the discarded pre-fix run also
+consumed $0.0517. This remained below the explicitly approved $0.50 ceiling.
+No production opt-in or multi-category enablement occurred.
+
+JEV-09 remains open. Reduce and remeasure warm end-to-end p95 without weakening
+the passing quality, abstention, grounding or search-safety behavior. Keep
+`CategoryResolution:Mode=legacy` and
+`CategoryResolution:SemanticProvider=ChatModel` until the latency gate and
+operator release decision pass.
+
 ## Measured tuning status (October 3, 2026)
 
 An operator-approved dedicated key had a **$2 lifetime limit with no reset**

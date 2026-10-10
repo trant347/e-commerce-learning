@@ -81,7 +81,9 @@ public sealed class SearchFilterExtractionService
                 "Evidence must be an exact substring of a user message. Numeric rates require explicit hourly USD units; " +
                 "total-job budgets must go in unsupportedHard if mandatory. Soft preferences must never become hard filters. " +
                 "Each soft entry is {field,value,unit,evidence}; each unsupportedHard entry is {evidence}. " +
-                "Do not assume availability or date support. Unspecified filters stay absent. No prose or code fences."),
+                "Do not assume availability or date support. Unspecified filters stay absent. " +
+                "If there are no supported filters or mandatory unsupported requirements, return exactly " +
+                "{\"hard\":{},\"soft\":[],\"unsupportedHard\":[]}. No prose or code fences."),
             new ChatModelMessage(ChatModelRoles.User, JsonSerializer.Serialize(new
             {
                 currentRequest = request,
