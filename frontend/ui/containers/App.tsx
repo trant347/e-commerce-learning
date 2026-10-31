@@ -59,7 +59,10 @@ export default class App extends React.Component<{}, IAppContext> {
                             <PageHeader />
                             <React.Suspense fallback={<LoadingComponent />}>
                                 <Routes>
-                                    <Route path="/" element={<><AsyncHome /><ChatOverlay /></>} />
+                                    <Route
+                                        path="/"
+                                        element={<><AsyncHome />{this.state.username && <ChatOverlay />}</>}
+                                    />
                                     <Route path="/product/:id" element={<AsyncProduct />} />
                                     <Route path="/register" element={<AsyncRegistration />} />
                                     <Route path="/signin" element={<AsyncSignin />} />
