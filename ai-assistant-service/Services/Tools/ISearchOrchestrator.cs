@@ -14,12 +14,31 @@ public sealed record SearchRequestContext(
     RequestRoundBudget Budget,
     ToolExecutionContext ExecutionContext);
 
-public sealed record SearchResult(
-    CategoryDecision Decision,
-    SearchFilterEnvelope? Filters = null,
-    IReadOnlyDictionary<string, JsonElement>? Arguments = null,
-    string? Content = null,
-    string? SoftPreferenceContext = null);
+public enum SearchClarificationReason
+{
+    Category,
+    Filters
+}
+
+public abstract record SearchResult
+{
+    private SearchResult() { }
+
+    public sealed record Results(
+        IReadOnlyDictionary<string, JsonElement> Arguments,
+        string Content,
+        string? SoftPreferenceContext = null) : SearchResult;
+
+    public sealed record NeedsClarification(
+        SearchClarificationReason Reason,
+        string Message) : SearchResult;
+
+    public sealed record NoMatch : SearchResult;
+
+    public sealed record Unavailable : SearchResult;
+
+    public sealed record NotApplicable : SearchResult;
+}
 
 public interface ISearchOrchestrator
 {

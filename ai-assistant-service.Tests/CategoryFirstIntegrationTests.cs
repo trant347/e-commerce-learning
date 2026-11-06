@@ -85,12 +85,12 @@ public class CategoryFirstIntegrationTests
         var catalog = Snapshot(Version);
         var budget = new RequestRoundBudget(2);
         var remaining = TimeSpan.FromSeconds(7);
-        var first = await orchestrator.RunAsync(new SearchRequestContext(
+        var first = Assert.IsType<SearchResult.Results>(await orchestrator.RunAsync(new SearchRequestContext(
             new ChatRequest
             {
                 Message = "Find a carpenter in Chicago, IL under $50/hour, preferably rated 4.5 stars"
             },
-            ["Repair my table"], catalog, model, () => remaining, budget, Context));
+            ["Repair my table"], catalog, model, () => remaining, budget, Context)));
 
         Assert.Equal("[]", first.Content);
         Assert.NotNull(first.SoftPreferenceContext);
@@ -103,9 +103,9 @@ public class CategoryFirstIntegrationTests
         Assert.Same(Context, search.ExecutionContext);
 
         var nextContext = new ToolExecutionContext("bob", ["calendar.read"], "next-request");
-        var second = await orchestrator.RunAsync(new SearchRequestContext(
+        var second = Assert.IsType<SearchResult.Results>(await orchestrator.RunAsync(new SearchRequestContext(
             new ChatRequest { Message = "Find a carpenter" }, [], catalog, model,
-            () => remaining, new RequestRoundBudget(2), nextContext));
+            () => remaining, new RequestRoundBudget(2), nextContext)));
 
         Assert.Equal("[]", second.Content);
         Assert.Null(second.SoftPreferenceContext);
@@ -135,10 +135,88 @@ public class CategoryFirstIntegrationTests
     }
 
     [Theory]
-    [InlineData("decision:needs_clarification", CategoryDecisionStatus.NeedsClarification)]
-    [InlineData("decision:no_match", CategoryDecisionStatus.NoMatch)]
+    [InlineData("decision:needs_clarification", "Find help", true, "[]",
+        typeof(SearchResult.NeedsClarification), SearchClarificationReason.Category, 0)]
+    [InlineData("decision:no_match", "Find help", true, "[]",
+        typeof(SearchResult.NoMatch), null, 0)]
+    [InlineData("not_applicable", "Hello", true, "[]",
+        typeof(SearchResult.NotApplicable), null, 0)]
+    [InlineData("carpentry", "I need someone available tomorrow", true, "[]",
+        typeof(SearchResult.NeedsClarification), SearchClarificationReason.Filters, 0)]
+    [InlineData("carpentry", "Find a carpenter", false, "[]",
+        typeof(SearchResult.Unavailable), null, 0)]
+    [InlineData("carpentry", "Find a carpenter", true, "{\"error\":\"unavailable\"}",
+        typeof(SearchResult.Unavailable), null, 1)]
+    [InlineData("carpentry", "Find a carpenter", true, "[]",
+        typeof(SearchResult.Results), null, 1)]
+    public async Task SearchOrchestrator_ReturnsExplicitOutcomes(
+        string selected, string message, bool toolRegistered, string payload,
+        Type expectedType, SearchClarificationReason? expectedReason, int expectedSearchCalls)
+    {
+        var jev = new RecordingJev(_ => selected == "not_applicable"
+            ? Resolved("carpentry") with
+            {
+                Intent = new JevChoiceAnswer(
+                    "not_applicable", 0.9,
+                    new Dictionary<string, double> { ["service_search"] = 0.1, ["not_applicable"] = 0.9 })
+            }
+            : Resolved(selected));
+        var model = new RecordingChat(_ => Answer(NoFilters));
+        var search = new RecordingTool("search_task_masters", payload);
+        var orchestrator = new SearchOrchestrator(
+            new CategoryDecisionService(Options.Create(ResolutionOptions()), jev),
+            new SearchFilterExtractionService(), new ToolRegistry(toolRegistered ? [search] : []),
+            NullLogger<SearchOrchestrator>.Instance);
+
+        var outcome = await orchestrator.RunAsync(new SearchRequestContext(
+            new ChatRequest { Message = message }, [], Snapshot(Version),
+            model, () => TimeSpan.FromSeconds(7), new RequestRoundBudget(2), Context));
+
+        Assert.IsType(expectedType, outcome);
+        Assert.Equal(expectedSearchCalls, search.Calls);
+        if (outcome is SearchResult.NeedsClarification clarification)
+        {
+            Assert.Equal(expectedReason, clarification.Reason);
+            Assert.False(string.IsNullOrWhiteSpace(clarification.Message));
+        }
+        if (selected != "carpentry")
+            Assert.Empty(model.Requests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchOrchestrator_RetrievalFailureIsUnavailable_ButCancellationPropagates(
+        bool canceled)
+    {
+        var model = new RecordingChat(_ => Answer(NoFilters));
+        var search = new Mock<IToolDefinition>();
+        search.SetupGet(tool => tool.Name).Returns("search_task_masters");
+        search.Setup(tool => tool.ExecuteAsync(
+                Context, It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(canceled
+                ? new OperationCanceledException()
+                : new InvalidOperationException("Private tool failure details"));
+        var orchestrator = new SearchOrchestrator(
+            new CategoryDecisionService(Options.Create(ResolutionOptions()),
+                new RecordingJev(_ => Resolved("carpentry"))),
+            new SearchFilterExtractionService(), new ToolRegistry([search.Object]),
+            NullLogger<SearchOrchestrator>.Instance);
+        var context = new SearchRequestContext(
+            new ChatRequest { Message = "Find a carpenter" }, [], Snapshot(Version),
+            model, () => TimeSpan.FromSeconds(7), new RequestRoundBudget(2), Context);
+
+        if (canceled)
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orchestrator.RunAsync(context));
+        else
+            Assert.IsType<SearchResult.Unavailable>(await orchestrator.RunAsync(context));
+    }
+
+    [Theory]
+    [InlineData("decision:needs_clarification", "Which single marketplace service would you like to find?")]
+    [InlineData("decision:no_match", "I couldn't match that request to an offered service. Could you describe the service you need?")]
     public async Task Abstention_NeverSearchesOrExtractsFilters(
-        string selected, CategoryDecisionStatus _)
+        string selected, string expectedAnswer)
     {
         var model = new RecordingChat(_ => throw new InvalidOperationException("Model must not run"));
         var jev = new RecordingJev(_ => Resolved(selected));
@@ -150,6 +228,7 @@ public class CategoryFirstIntegrationTests
         Assert.Empty(response.Sources);
         Assert.Equal(0, search.Calls);
         Assert.Empty(model.Requests);
+        Assert.Equal(expectedAnswer, response.Answer);
     }
 
     [Fact]
@@ -249,6 +328,41 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(0, search.Calls);
         Assert.Empty(response.Sources);
         Assert.Equal(2, jev.Calls);
+    }
+
+    [Theory]
+    [InlineData("decision:needs_clarification", "Find help", "[]",
+        "Which single marketplace service would you like to find?")]
+    [InlineData("decision:no_match", "Find help", "[]",
+        "Which single marketplace service would you like to find?")]
+    [InlineData("carpentry", "I need someone available tomorrow", "[]",
+        "Could you clarify the required search filters before I search?")]
+    [InlineData("carpentry", "Find a carpenter", "{\"error\":\"unavailable\"}",
+        "Marketplace search is temporarily unavailable. Please try again shortly.")]
+    public async Task LateSearch_TypedOutcomesPreserveSafeAnswers(
+        string selected, string message, string payload, string expectedAnswer)
+    {
+        var model = new RecordingChat(round => round == 1
+            ? Calls("late", "search_task_masters")
+            : Answer(NoFilters));
+        var jev = new RecordingJev(call => call == 1
+            ? Resolved("carpentry") with
+            {
+                Intent = new JevChoiceAnswer(
+                    "not_applicable", 0.9,
+                    new Dictionary<string, double> { ["service_search"] = 0.1, ["not_applicable"] = 0.9 })
+            }
+            : Resolved(selected));
+        var search = new RecordingTool("search_task_masters", payload);
+
+        var response = await Service(model, jev, search).ChatAsync(
+            new ChatRequest { Message = message }, Context, CancellationToken.None);
+
+        Assert.Equal(expectedAnswer, response.Answer);
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
+        Assert.Equal(2, jev.Calls);
+        Assert.Equal(payload == "[]" ? 0 : 1, search.Calls);
     }
 
     [Fact]
@@ -395,6 +509,9 @@ public class CategoryFirstIntegrationTests
             }, Context, CancellationToken.None);
         Assert.Equal(0, search.Calls);
         Assert.Empty(response.Sources);
+        Assert.Equal(
+            "Could you clarify the required location, hourly USD rate, rating, or other requirement before I search?",
+            response.Answer);
     }
 
     [Theory]
@@ -411,6 +528,9 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(1, search.Calls);
         Assert.Empty(response.Sources);
         Assert.Empty(response.Mentions);
+        Assert.Equal(
+            "Marketplace search is temporarily unavailable. Please try again shortly.",
+            response.Answer);
     }
 
     [Theory]

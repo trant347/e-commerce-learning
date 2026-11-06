@@ -16,15 +16,30 @@ public sealed class SearchOrchestrator(
         var decision = await categoryDecisions.ResolveAsync(
             context.Request, context.UserHistory, context.Catalog, context.Client,
             context.RemainingTime, context.Budget, cancellationToken);
-        if (decision.Status != CategoryDecisionStatus.Resolved)
-            return new SearchResult(decision);
+        switch (decision.Status)
+        {
+            case CategoryDecisionStatus.NeedsClarification:
+                return new SearchResult.NeedsClarification(
+                    SearchClarificationReason.Category, decision.Clarification!);
+            case CategoryDecisionStatus.NoMatch:
+                return new SearchResult.NoMatch();
+            case CategoryDecisionStatus.NotApplicable:
+                return new SearchResult.NotApplicable();
+            case CategoryDecisionStatus.Resolved:
+                break;
+            default:
+                throw new InvalidOperationException("Unsupported category decision status.");
+        }
 
         var filters = await filterExtraction.ExtractAsync(
             context.Request.Message ?? string.Empty, context.UserHistory,
             context.Client, context.Budget, cancellationToken);
-        if (filters.NeedsClarification
-            || toolRegistry.Get(SearchFilterGrounding.SearchToolName) is null)
-            return new SearchResult(decision, filters);
+        if (filters.NeedsClarification)
+            return new SearchResult.NeedsClarification(
+                SearchClarificationReason.Filters,
+                "Could you clarify the required location, hourly USD rate, rating, or other requirement before I search?");
+        if (toolRegistry.Get(SearchFilterGrounding.SearchToolName) is null)
+            return new SearchResult.Unavailable();
 
         var arguments = LockedSearchArguments(decision.CategoryId!, filters);
         var result = await ExecuteLockedSearchAsync(
@@ -33,7 +48,7 @@ public sealed class SearchOrchestrator(
         if (SearchFailed(result))
         {
             logger.LogWarning("Locked category search returned an unusable result");
-            return new SearchResult(decision, filters, arguments);
+            return new SearchResult.Unavailable();
         }
 
         var softPreferenceContext = filters.SoftPreferences.Count > 0
@@ -46,7 +61,7 @@ public sealed class SearchOrchestrator(
                 })
             })
             : null;
-        return new SearchResult(decision, filters, arguments, result, softPreferenceContext);
+        return new SearchResult.Results(arguments, result, softPreferenceContext);
     }
 
     private static IReadOnlyDictionary<string, JsonElement> LockedSearchArguments(

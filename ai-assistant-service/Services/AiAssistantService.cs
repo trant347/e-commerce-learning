@@ -168,40 +168,30 @@ public sealed class AiAssistantService : IAiAssistantService
         string? finalContent = null;
         var budget = new RequestRoundBudget(MaxToolRounds);
         CategoryCatalogSnapshot? capturedCatalog = null;
-        CategoryDecision? categoryDecision = null;
+        SearchResult? searchResult = null;
         if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) == true)
         {
             if (_searchOrchestrator is null)
                 throw new ChatModelException(ChatModelFailureCategory.InvalidConfiguration);
 
-            var search = await _searchOrchestrator.RunAsync(
+            searchResult = await _searchOrchestrator.RunAsync(
                 new SearchRequestContext(
                     request, userHistory, capturedCatalog!, client,
                     () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
                     budget, executionContext),
                 cancellationToken);
-            categoryDecision = search.Decision;
-            switch (categoryDecision.Status)
+            switch (searchResult)
             {
-                case CategoryDecisionStatus.NeedsClarification:
+                case SearchResult.NeedsClarification or SearchResult.NoMatch:
                     telemetry.Succeeded(false);
-                    return SafeAnswer(model, categoryDecision.Clarification!);
-                case CategoryDecisionStatus.NoMatch:
-                    telemetry.Succeeded(false);
-                    return SafeAnswer(model, "I couldn't match that request to an offered service. Could you describe the service you need?");
-                case CategoryDecisionStatus.Resolved:
+                    return SafeAnswer(model, SearchSafeAnswer(searchResult));
+                case SearchResult.Unavailable:
+                    return SafeAnswer(model, SearchSafeAnswer(searchResult));
+                case SearchResult.Results search:
                 {
-                    if (search.Filters!.NeedsClarification)
-                    {
-                        telemetry.Succeeded(false);
-                        return SafeAnswer(model, "Could you clarify the required location, hourly USD rate, rating, or other requirement before I search?");
-                    }
-                    if (search.Content is null)
-                        return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
-
                     var prefetchCall = new ChatModelToolCall(
                         $"catalog-search-{Guid.NewGuid():N}",
-                        SearchFilterGrounding.SearchToolName, search.Arguments!);
+                        SearchFilterGrounding.SearchToolName, search.Arguments);
                     messages.Add(new ChatModelMessage(ChatModelRoles.Assistant, null, [prefetchCall]));
                     var prefetchResult = new ChatModelMessage(ChatModelRoles.Tool, search.Content, toolCallId: prefetchCall.Id);
                     messages.Add(prefetchResult);
@@ -218,6 +208,10 @@ public sealed class AiAssistantService : IAiAssistantService
                             search.SoftPreferenceContext));
                     break;
                 }
+                case SearchResult.NotApplicable:
+                    break;
+                default:
+                    throw new InvalidOperationException("Unsupported search outcome.");
             }
         }
         else
@@ -264,29 +258,22 @@ public sealed class AiAssistantService : IAiAssistantService
                         toolName, SearchFilterGrounding.SearchToolName,
                         StringComparison.OrdinalIgnoreCase))
                 {
-                    if (categoryDecision?.Status != CategoryDecisionStatus.Resolved)
+                    if (searchResult is not SearchResult.Results)
                     {
                         if (capturedCatalog is null || _searchOrchestrator is null)
                             return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
-                        var search = await _searchOrchestrator.RunAsync(
+                        searchResult = await _searchOrchestrator.RunAsync(
                             new SearchRequestContext(
                                 request, userHistory, capturedCatalog, client,
                                 () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
                                 budget, executionContext),
                             cancellationToken);
-                        categoryDecision = search.Decision;
-                        if (categoryDecision.Status != CategoryDecisionStatus.Resolved)
+                        if (searchResult is not SearchResult.Results search)
                         {
-                            telemetry.Succeeded(false);
-                            return SafeAnswer(model, "Which single marketplace service would you like to find?");
+                            if (searchResult is not SearchResult.Unavailable)
+                                telemetry.Succeeded(false);
+                            return SafeAnswer(model, SearchSafeAnswer(searchResult, lateSearch: true));
                         }
-                        if (search.Filters!.NeedsClarification)
-                        {
-                            telemetry.Succeeded(false);
-                            return SafeAnswer(model, "Could you clarify the required search filters before I search?");
-                        }
-                        if (search.Content is null)
-                            return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
                         var liveToolMessage = new ChatModelMessage(
                             ChatModelRoles.Tool, search.Content, toolCallId: toolCall.Id);
                         messages.Add(liveToolMessage);
@@ -390,6 +377,21 @@ public sealed class AiAssistantService : IAiAssistantService
 
     private static ChatResponse SafeAnswer(string model, string answer) =>
         new() { Answer = answer, Model = model };
+
+    private static string SearchSafeAnswer(SearchResult result, bool lateSearch = false) =>
+        result switch
+        {
+            SearchResult.NeedsClarification { Reason: SearchClarificationReason.Filters }
+                when lateSearch => "Could you clarify the required search filters before I search?",
+            SearchResult.NeedsClarification or SearchResult.NoMatch or SearchResult.NotApplicable
+                when lateSearch => "Which single marketplace service would you like to find?",
+            SearchResult.NeedsClarification clarification => clarification.Message,
+            SearchResult.NoMatch =>
+                "I couldn't match that request to an offered service. Could you describe the service you need?",
+            SearchResult.Unavailable =>
+                "Marketplace search is temporarily unavailable. Please try again shortly.",
+            _ => throw new InvalidOperationException("Search outcome does not have a safe response.")
+        };
 
     private ChatResponse FailureResponse(
         TaskModelProfile profile,
