@@ -116,6 +116,7 @@ builder.Services.AddSingleton<ToolRegistry>();
 builder.Services.AddSingleton<McpCategoryEnumRefresher>();
 builder.Services.AddScoped<CategoryDecisionService>();
 builder.Services.AddSingleton<SearchFilterExtractionService>();
+builder.Services.AddScoped<ISearchOrchestrator, SearchOrchestrator>();
 
 // MCP tool discovery — connects to remote MCP servers and registers their tools dynamically.
 builder.Services.AddHostedService<McpToolDiscoveryService>();

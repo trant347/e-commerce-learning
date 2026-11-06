@@ -19,8 +19,7 @@ public sealed class AiAssistantService : IAiAssistantService
     private readonly AssistantPrompt _prompt;
     private readonly CategoryResolutionOptions _categoryOptions;
     private readonly CategoryCatalogSnapshotStore? _snapshots;
-    private readonly CategoryDecisionService? _categoryDecisions;
-    private readonly SearchFilterExtractionService? _filterExtraction;
+    private readonly ISearchOrchestrator? _searchOrchestrator;
     private readonly int _historyMessageLimit;
 
     // Guard against infinite tool-call loops
@@ -40,8 +39,7 @@ public sealed class AiAssistantService : IAiAssistantService
         ILogger<AiAssistantService> logger,
         IOptions<CategoryResolutionOptions>? categoryOptions = null,
         CategoryCatalogSnapshotStore? snapshots = null,
-        CategoryDecisionService? categoryDecisions = null,
-        SearchFilterExtractionService? filterExtraction = null,
+        ISearchOrchestrator? searchOrchestrator = null,
         IOptions<AiChatOptions>? aiChatOptions = null)
     {
         _prompt = prompt;
@@ -50,8 +48,7 @@ public sealed class AiAssistantService : IAiAssistantService
         _logger = logger;
         _categoryOptions = categoryOptions?.Value ?? new CategoryResolutionOptions();
         _snapshots = snapshots;
-        _categoryDecisions = categoryDecisions;
-        _filterExtraction = filterExtraction;
+        _searchOrchestrator = searchOrchestrator;
         _historyMessageLimit = aiChatOptions?.Value.HistoryMessageLimit
             ?? AiChatOptions.DefaultHistoryMessageLimit;
     }
@@ -174,14 +171,16 @@ public sealed class AiAssistantService : IAiAssistantService
         CategoryDecision? categoryDecision = null;
         if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) == true)
         {
-            if (_categoryDecisions is null || _filterExtraction is null)
+            if (_searchOrchestrator is null)
                 throw new ChatModelException(ChatModelFailureCategory.InvalidConfiguration);
 
-            categoryDecision = await _categoryDecisions.ResolveAsync(
-                request, userHistory, capturedCatalog!, client,
-                () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
-                budget,
+            var search = await _searchOrchestrator.RunAsync(
+                new SearchRequestContext(
+                    request, userHistory, capturedCatalog!, client,
+                    () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                    budget, executionContext),
                 cancellationToken);
+            categoryDecision = search.Decision;
             switch (categoryDecision.Status)
             {
                 case CategoryDecisionStatus.NeedsClarification:
@@ -192,30 +191,19 @@ public sealed class AiAssistantService : IAiAssistantService
                     return SafeAnswer(model, "I couldn't match that request to an offered service. Could you describe the service you need?");
                 case CategoryDecisionStatus.Resolved:
                 {
-                    var filters = await _filterExtraction.ExtractAsync(
-                        request.Message ?? string.Empty, userHistory, client, budget, cancellationToken);
-                    if (filters.NeedsClarification)
+                    if (search.Filters!.NeedsClarification)
                     {
                         telemetry.Succeeded(false);
                         return SafeAnswer(model, "Could you clarify the required location, hourly USD rate, rating, or other requirement before I search?");
                     }
-                    if (_toolRegistry.Get(SearchFilterGrounding.SearchToolName) is null)
+                    if (search.Content is null)
                         return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
-
-                    var searchArgs = LockedSearchArguments(categoryDecision.CategoryId!, filters);
-                    var result = await ExecuteLockedSearchAsync(
-                        executionContext, searchArgs, cancellationToken);
-                    if (SearchFailed(result))
-                    {
-                        _logger.LogWarning("Locked category search returned an unusable result");
-                        return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
-                    }
 
                     var prefetchCall = new ChatModelToolCall(
                         $"catalog-search-{Guid.NewGuid():N}",
-                        SearchFilterGrounding.SearchToolName, searchArgs);
+                        SearchFilterGrounding.SearchToolName, search.Arguments!);
                     messages.Add(new ChatModelMessage(ChatModelRoles.Assistant, null, [prefetchCall]));
-                    var prefetchResult = new ChatModelMessage(ChatModelRoles.Tool, result, toolCallId: prefetchCall.Id);
+                    var prefetchResult = new ChatModelMessage(ChatModelRoles.Tool, search.Content, toolCallId: prefetchCall.Id);
                     messages.Add(prefetchResult);
                     executedToolMessages.Add(prefetchResult);
                     executedToolNames.Add(SearchFilterGrounding.SearchToolName);
@@ -225,16 +213,9 @@ public sealed class AiAssistantService : IAiAssistantService
                         "The preceding live search used the validated category and explicit hard filters. " +
                         "Use only these current results for provider claims. Do not present soft preferences as verified constraints " +
                         "or claim availability. Do not call search_task_masters again for this request."));
-                    if (filters.SoftPreferences.Count > 0)
+                    if (search.SoftPreferenceContext is not null)
                         messages.Add(new ChatModelMessage(ChatModelRoles.User,
-                            JsonSerializer.Serialize(new
-                            {
-                                contextFromEarlierUserMessages = "These are preferences, not verified provider constraints.",
-                                softPreferences = filters.SoftPreferences.Select(item => new
-                                {
-                                    item.Field, item.Value, item.Unit, item.Evidence
-                                })
-                            })));
+                            search.SoftPreferenceContext));
                     break;
                 }
             }
@@ -285,40 +266,36 @@ public sealed class AiAssistantService : IAiAssistantService
                 {
                     if (categoryDecision?.Status != CategoryDecisionStatus.Resolved)
                     {
-                        if (capturedCatalog is null
-                            || _categoryDecisions is null || _filterExtraction is null)
+                        if (capturedCatalog is null || _searchOrchestrator is null)
                             return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
-                        categoryDecision = await _categoryDecisions.ResolveAsync(
-                            request, userHistory, capturedCatalog, client,
-                            () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
-                            budget,
+                        var search = await _searchOrchestrator.RunAsync(
+                            new SearchRequestContext(
+                                request, userHistory, capturedCatalog, client,
+                                () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
+                                budget, executionContext),
                             cancellationToken);
+                        categoryDecision = search.Decision;
                         if (categoryDecision.Status != CategoryDecisionStatus.Resolved)
                         {
                             telemetry.Succeeded(false);
                             return SafeAnswer(model, "Which single marketplace service would you like to find?");
                         }
-                        var filters = await _filterExtraction.ExtractAsync(
-                            request.Message ?? string.Empty, userHistory, client, budget, cancellationToken);
-                        if (filters.NeedsClarification)
+                        if (search.Filters!.NeedsClarification)
                         {
                             telemetry.Succeeded(false);
                             return SafeAnswer(model, "Could you clarify the required search filters before I search?");
                         }
-                        var lockedArgs = LockedSearchArguments(categoryDecision.CategoryId!, filters);
-                        var lockedResult = await ExecuteLockedSearchAsync(
-                            executionContext, lockedArgs, cancellationToken);
-                        if (SearchFailed(lockedResult))
-                        {
-                            _logger.LogWarning("Locked category search returned an unusable result");
+                        if (search.Content is null)
                             return SafeAnswer(model, "Marketplace search is temporarily unavailable. Please try again shortly.");
-                        }
                         var liveToolMessage = new ChatModelMessage(
-                            ChatModelRoles.Tool, lockedResult, toolCallId: toolCall.Id);
+                            ChatModelRoles.Tool, search.Content, toolCallId: toolCall.Id);
                         messages.Add(liveToolMessage);
                         executedToolMessages.Add(liveToolMessage);
                         executedToolNames.Add(SearchFilterGrounding.SearchToolName);
                         telemetry.ToolCallCompleted(SearchFilterGrounding.SearchToolName, succeeded: true);
+                        if (search.SoftPreferenceContext is not null)
+                            messages.Add(new ChatModelMessage(ChatModelRoles.User,
+                                search.SoftPreferenceContext));
                         continue;
                     }
 
@@ -413,56 +390,6 @@ public sealed class AiAssistantService : IAiAssistantService
 
     private static ChatResponse SafeAnswer(string model, string answer) =>
         new() { Answer = answer, Model = model };
-
-    private static IReadOnlyDictionary<string, JsonElement> LockedSearchArguments(
-        string categoryId, SearchFilterEnvelope filters)
-    {
-        var arguments = new Dictionary<string, JsonElement>(filters.HardArguments, StringComparer.Ordinal)
-        {
-            ["category"] = JsonSerializer.SerializeToElement(categoryId)
-        };
-        return arguments;
-    }
-
-    private async Task<string> ExecuteLockedSearchAsync(
-        ToolExecutionContext executionContext,
-        IReadOnlyDictionary<string, JsonElement> arguments,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await _toolRegistry.ExecuteAsync(
-                executionContext, SearchFilterGrounding.SearchToolName, arguments, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _logger.LogError(
-                "Locked category search failed: exception type={ExceptionType}",
-                exception.GetType().Name);
-            return "{\"error\":\"tool_unavailable\"}";
-        }
-    }
-
-    private static bool SearchFailed(string result)
-    {
-        if (string.IsNullOrWhiteSpace(result)) return true;
-        try
-        {
-            using var doc = JsonDocument.Parse(result);
-            var root = doc.RootElement;
-            if (root.ValueKind == JsonValueKind.String)
-            {
-                using var inner = JsonDocument.Parse(root.GetString() ?? string.Empty);
-                root = inner.RootElement;
-                return root.ValueKind != JsonValueKind.Array;
-            }
-            return root.ValueKind != JsonValueKind.Array;
-        }
-        catch (JsonException)
-        {
-            return true;
-        }
-    }
 
     private ChatResponse FailureResponse(
         TaskModelProfile profile,

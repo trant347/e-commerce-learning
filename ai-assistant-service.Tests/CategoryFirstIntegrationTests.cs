@@ -65,6 +65,73 @@ public class CategoryFirstIntegrationTests
         Assert.Null(model.Requests[0].Tools);
         Assert.Contains(model.Requests[1].Messages, message =>
             message.Role == "tool" && message.Content!.Contains("Alice", StringComparison.Ordinal));
+        Assert.Contains(model.Requests[1].Messages, message =>
+            message.Role == "user"
+            && message.Content!.Contains("\"softPreferences\"", StringComparison.Ordinal)
+            && message.Content.Contains("preferably rated 4.5 stars", StringComparison.Ordinal));
+        Assert.Same(Context, tool.ExecutionContext);
+    }
+
+    [Fact]
+    public async Task SearchOrchestrator_UsesRequestContextAndSharedBudgetWithoutLeakingFilters()
+    {
+        var model = new RecordingChat(round => Answer(round == 1 ? Filters : NoFilters));
+        var jev = new RecordingJev(_ => Resolved("carpentry"));
+        var search = new RecordingTool("search_task_masters", "[]");
+        var orchestrator = new SearchOrchestrator(
+            new CategoryDecisionService(Options.Create(ResolutionOptions()), jev),
+            new SearchFilterExtractionService(), new ToolRegistry([search]),
+            NullLogger<SearchOrchestrator>.Instance);
+        var catalog = Snapshot(Version);
+        var budget = new RequestRoundBudget(2);
+        var remaining = TimeSpan.FromSeconds(7);
+        var first = await orchestrator.RunAsync(new SearchRequestContext(
+            new ChatRequest
+            {
+                Message = "Find a carpenter in Chicago, IL under $50/hour, preferably rated 4.5 stars"
+            },
+            ["Repair my table"], catalog, model, () => remaining, budget, Context));
+
+        Assert.Equal("[]", first.Content);
+        Assert.NotNull(first.SoftPreferenceContext);
+        Assert.Same(catalog, jev.LastRequest!.Catalog);
+        Assert.Equal(["Repair my table"], jev.LastRequest.ClarificationHistory);
+        Assert.Equal(remaining, jev.LastRequest.RemainingTime);
+        Assert.False(budget.TrySpend());
+        Assert.Equal("Chicago, IL", search.Arguments!["location"]);
+        Assert.False(search.Arguments.ContainsKey("minRating"));
+        Assert.Same(Context, search.ExecutionContext);
+
+        var nextContext = new ToolExecutionContext("bob", ["calendar.read"], "next-request");
+        var second = await orchestrator.RunAsync(new SearchRequestContext(
+            new ChatRequest { Message = "Find a carpenter" }, [], catalog, model,
+            () => remaining, new RequestRoundBudget(2), nextContext));
+
+        Assert.Equal("[]", second.Content);
+        Assert.Null(second.SoftPreferenceContext);
+        Assert.Equal(["category"], search.Arguments!.Keys);
+        Assert.Same(nextContext, search.ExecutionContext);
+    }
+
+    [Fact]
+    public async Task SearchOrchestrator_StopsBeforeRetrievalWhenSharedBudgetIsExhausted()
+    {
+        var model = new RecordingChat(_ => throw new InvalidOperationException("No budget for filters"));
+        var jev = new RecordingJev(_ => Resolved("carpentry"));
+        var search = new RecordingTool("search_task_masters", "[]");
+        var orchestrator = new SearchOrchestrator(
+            new CategoryDecisionService(Options.Create(ResolutionOptions()), jev),
+            new SearchFilterExtractionService(), new ToolRegistry([search]),
+            NullLogger<SearchOrchestrator>.Instance);
+        var context = new SearchRequestContext(
+            new ChatRequest { Message = "Find a carpenter" }, [], Snapshot(Version),
+            model, () => TimeSpan.FromSeconds(7), new RequestRoundBudget(1), Context);
+
+        await Assert.ThrowsAsync<RoundBudgetExceededException>(() => orchestrator.RunAsync(context));
+
+        Assert.Equal(1, jev.Calls);
+        Assert.Empty(model.Requests);
+        Assert.Equal(0, search.Calls);
     }
 
     [Theory]
@@ -330,11 +397,15 @@ public class CategoryFirstIntegrationTests
         Assert.Empty(response.Sources);
     }
 
-    [Fact]
-    public async Task ProductError_DoesNotBecomeProviderEvidence()
+    [Theory]
+    [InlineData("""{"error":"category_catalog_unavailable"}""")]
+    [InlineData("")]
+    [InlineData("not JSON")]
+    [InlineData("\"{\\\"error\\\":\\\"category_catalog_unavailable\\\"}\"")]
+    public async Task ProductError_DoesNotBecomeProviderEvidence(string result)
     {
         var model = new RecordingChat(_ => Answer(NoFilters));
-        var search = new RecordingTool("search_task_masters", """{"error":"category_catalog_unavailable"}""");
+        var search = new RecordingTool("search_task_masters", result);
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
             .ChatAsync(new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
         Assert.Equal(1, search.Calls);
@@ -424,13 +495,15 @@ public class CategoryFirstIntegrationTests
         Assert.True(result!.NeedsClarification);
     }
 
-    [Fact]
-    public async Task UnchangedEmptySearch_DoesNotBroadenOrRepeat()
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"[]\"")]
+    public async Task UnchangedEmptySearch_DoesNotBroadenOrRepeat(string result)
     {
         var model = new RecordingChat(round => round == 1
             ? Answer(NoFilters)
             : Answer("No providers found for that service."));
-        var search = new RecordingTool("search_task_masters", "[]");
+        var search = new RecordingTool("search_task_masters", result);
         var jev = new RecordingJev(_ => Resolved("carpentry"));
 
         var response = await Service(model, jev, search).ChatAsync(
@@ -1017,8 +1090,9 @@ public class CategoryFirstIntegrationTests
         configureRegistry?.Invoke(registry);
         return new AiAssistantService(
             prompt, resolver.Object, registry, logger ?? NullLogger<AiAssistantService>.Instance,
-            config, snapshots, new CategoryDecisionService(config, jev),
-            new SearchFilterExtractionService());
+            config, snapshots, new SearchOrchestrator(
+                new CategoryDecisionService(config, jev), new SearchFilterExtractionService(),
+                registry, NullLogger<SearchOrchestrator>.Instance));
     }
 
     private static ChatModelResponse Answer(string content) =>
@@ -1067,6 +1141,7 @@ public class CategoryFirstIntegrationTests
         public object ParametersSchema => new { type = "object" };
         public int Calls { get; private set; }
         public IReadOnlyDictionary<string, string>? Arguments { get; private set; }
+        public ToolExecutionContext? ExecutionContext { get; private set; }
         public List<IReadOnlyDictionary<string, string>> ArgumentHistory { get; } = [];
         public IReadOnlyList<string>? AppliedEnum { get; private set; }
         public int SetCount { get; private set; }
@@ -1083,6 +1158,7 @@ public class CategoryFirstIntegrationTests
             CancellationToken cancellationToken)
         {
             Calls++;
+            ExecutionContext = context;
             Arguments = new Dictionary<string, string>(arguments);
             ArgumentHistory.Add(Arguments);
             return Task.FromResult(result);
