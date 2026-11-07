@@ -19,7 +19,7 @@ public sealed class AiAssistantService : IAiAssistantService
     private readonly AssistantPrompt _prompt;
     private readonly CategoryResolutionOptions _categoryOptions;
     private readonly CategoryCatalogSnapshotStore? _snapshots;
-    private readonly ISearchOrchestrator? _searchOrchestrator;
+    private readonly ISearchOrchestrator _searchOrchestrator;
     private readonly int _historyMessageLimit;
 
     // Guard against infinite tool-call loops
@@ -37,9 +37,9 @@ public sealed class AiAssistantService : IAiAssistantService
         ITaskChatModelResolver modelResolver,
         ToolRegistry toolRegistry,
         ILogger<AiAssistantService> logger,
+        ISearchOrchestrator searchOrchestrator,
         IOptions<CategoryResolutionOptions>? categoryOptions = null,
         CategoryCatalogSnapshotStore? snapshots = null,
-        ISearchOrchestrator? searchOrchestrator = null,
         IOptions<AiChatOptions>? aiChatOptions = null)
     {
         _prompt = prompt;
@@ -168,56 +168,9 @@ public sealed class AiAssistantService : IAiAssistantService
         string? finalContent = null;
         var budget = new RequestRoundBudget(MaxToolRounds);
         CategoryCatalogSnapshot? capturedCatalog = null;
-        SearchResult? searchResult = null;
-        if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) == true)
-        {
-            if (_searchOrchestrator is null)
-                throw new ChatModelException(ChatModelFailureCategory.InvalidConfiguration);
-
-            searchResult = await _searchOrchestrator.RunAsync(
-                new SearchRequestContext(
-                    request, userHistory, capturedCatalog!, client,
-                    () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
-                    budget, executionContext),
-                cancellationToken);
-            switch (searchResult)
-            {
-                case SearchResult.NeedsClarification or SearchResult.NoMatch:
-                    telemetry.Succeeded(false);
-                    return SafeAnswer(model, SearchSafeAnswer(searchResult));
-                case SearchResult.Unavailable:
-                    return SafeAnswer(model, SearchSafeAnswer(searchResult));
-                case SearchResult.Results search:
-                {
-                    var prefetchCall = new ChatModelToolCall(
-                        $"catalog-search-{Guid.NewGuid():N}",
-                        SearchFilterGrounding.SearchToolName, search.Arguments);
-                    messages.Add(new ChatModelMessage(ChatModelRoles.Assistant, null, [prefetchCall]));
-                    var prefetchResult = new ChatModelMessage(ChatModelRoles.Tool, search.Content, toolCallId: prefetchCall.Id);
-                    messages.Add(prefetchResult);
-                    executedToolMessages.Add(prefetchResult);
-                    executedToolNames.Add(SearchFilterGrounding.SearchToolName);
-                    telemetry.ToolCallCompleted(SearchFilterGrounding.SearchToolName, succeeded: true);
-                    usedCallIds.Add(prefetchCall.Id);
-                    messages.Add(new ChatModelMessage(ChatModelRoles.System,
-                        "The preceding live search used the validated category and explicit hard filters. " +
-                        "Use only these current results for provider claims. Do not present soft preferences as verified constraints " +
-                        "or claim availability. Do not call search_task_masters again for this request."));
-                    if (search.SoftPreferenceContext is not null)
-                        messages.Add(new ChatModelMessage(ChatModelRoles.User,
-                            search.SoftPreferenceContext));
-                    break;
-                }
-                case SearchResult.NotApplicable:
-                    break;
-                default:
-                    throw new InvalidOperationException("Unsupported search outcome.");
-            }
-        }
-        else
-        {
+        if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) != true)
             capturedCatalog = null;
-        }
+        SearchResult? searchResult = null;
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)
@@ -258,10 +211,13 @@ public sealed class AiAssistantService : IAiAssistantService
                         toolName, SearchFilterGrounding.SearchToolName,
                         StringComparison.OrdinalIgnoreCase))
                 {
+                    if (capturedCatalog == null || _searchOrchestrator == null)
+                    {
+                        _logger.LogWarning("Search tool requested but category catalog is unavailable");
+                        return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
+                    }
                     if (searchResult is not SearchResult.Results)
                     {
-                        if (capturedCatalog is null || _searchOrchestrator is null)
-                            return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
                         searchResult = await _searchOrchestrator.RunAsync(
                             new SearchRequestContext(
                                 request, userHistory, capturedCatalog, client,
@@ -272,7 +228,7 @@ public sealed class AiAssistantService : IAiAssistantService
                         {
                             if (searchResult is not SearchResult.Unavailable)
                                 telemetry.Succeeded(false);
-                            return SafeAnswer(model, SearchSafeAnswer(searchResult, lateSearch: true));
+                            return SafeAnswer(model, SearchSafeAnswer(searchResult));
                         }
                         var liveToolMessage = new ChatModelMessage(
                             ChatModelRoles.Tool, search.Content, toolCallId: toolCall.Id);
@@ -350,8 +306,8 @@ public sealed class AiAssistantService : IAiAssistantService
 
         var roundLimitReached = finalContent is null;
         finalContent ??= defaultFallback;
-        if (richMode && capturedCatalog is null && executedToolNames.Count == 0)
-            return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
+        //if (richMode && capturedCatalog is null && executedToolNames.Count == 0)
+        //    return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
 
         if (hadToolExecutionFailure && string.Equals(finalContent, defaultFallback, StringComparison.Ordinal))
         {
@@ -378,13 +334,13 @@ public sealed class AiAssistantService : IAiAssistantService
     private static ChatResponse SafeAnswer(string model, string answer) =>
         new() { Answer = answer, Model = model };
 
-    private static string SearchSafeAnswer(SearchResult result, bool lateSearch = false) =>
+    private static string SearchSafeAnswer(SearchResult result) =>
         result switch
         {
             SearchResult.NeedsClarification { Reason: SearchClarificationReason.Filters }
-                when lateSearch => "Could you clarify the required search filters before I search?",
-            SearchResult.NeedsClarification or SearchResult.NoMatch or SearchResult.NotApplicable
-                when lateSearch => "Which single marketplace service would you like to find?",
+                => "Could you clarify the required search filters before I search?",
+            SearchResult.NotApplicable
+                => "Which single marketplace service would you like to find?",
             SearchResult.NeedsClarification clarification => clarification.Message,
             SearchResult.NoMatch =>
                 "I couldn't match that request to an offered service. Could you describe the service you need?",

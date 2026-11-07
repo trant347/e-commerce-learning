@@ -32,9 +32,9 @@ public class CategoryFirstIntegrationTests
     private static readonly ToolExecutionContext Context = new("alice", ["calendar.read"], "jev-test");
 
     [Fact]
-    public async Task ResolvedJev_PrefetchesLockedCategoryAndHardFilters_ButNotSoftPreferences()
+    public async Task OnDemandSearch_UsesLockedCategoryAndHardFilters_ButNotSoftPreferences()
     {
-        var model = new RecordingChat(round => round switch
+        var model = SearchChat(round => round switch
         {
             1 => Answer(Filters),
             2 => Answer("Found Alice."),
@@ -61,11 +61,13 @@ public class CategoryFirstIntegrationTests
         Assert.Equal("50", tool.Arguments["maxRate"]);
         Assert.Equal("Chicago, IL", tool.Arguments["location"]);
         Assert.False(tool.Arguments.ContainsKey("minRating"));
-        Assert.Equal(2, model.Requests.Count);
-        Assert.Null(model.Requests[0].Tools);
-        Assert.Contains(model.Requests[1].Messages, message =>
-            message.Role == "tool" && message.Content!.Contains("Alice", StringComparison.Ordinal));
-        Assert.Contains(model.Requests[1].Messages, message =>
+        Assert.Equal(3, model.Requests.Count);
+        Assert.NotNull(model.Requests[0].Tools);
+        Assert.Null(model.Requests[1].Tools);
+        Assert.Contains(model.Requests[2].Messages, message =>
+            message.Role == "tool" && message.ToolCallId == "search"
+            && message.Content!.Contains("Alice", StringComparison.Ordinal));
+        Assert.Contains(model.Requests[2].Messages, message =>
             message.Role == "user"
             && message.Content!.Contains("\"softPreferences\"", StringComparison.Ordinal)
             && message.Content.Contains("preferably rated 4.5 stars", StringComparison.Ordinal));
@@ -218,7 +220,7 @@ public class CategoryFirstIntegrationTests
     public async Task Abstention_NeverSearchesOrExtractsFilters(
         string selected, string expectedAnswer)
     {
-        var model = new RecordingChat(_ => throw new InvalidOperationException("Model must not run"));
+        var model = SearchChat(_ => throw new InvalidOperationException("Filters must not run"));
         var jev = new RecordingJev(_ => Resolved(selected));
         var search = new RecordingTool("search_task_masters", "[]");
 
@@ -227,7 +229,8 @@ public class CategoryFirstIntegrationTests
 
         Assert.Empty(response.Sources);
         Assert.Equal(0, search.Calls);
-        Assert.Empty(model.Requests);
+        Assert.Single(model.Requests);
+        Assert.Equal(1, jev.Calls);
         Assert.Equal(expectedAnswer, response.Answer);
     }
 
@@ -244,7 +247,7 @@ public class CategoryFirstIntegrationTests
                 })
         });
         var search = new RecordingTool("search_task_masters", "[]");
-        var model = new RecordingChat(_ => throw new InvalidOperationException());
+        var model = SearchChat(_ => throw new InvalidOperationException());
 
         await Service(model, jev, search).ChatAsync(
             new ChatRequest { Message = "help" }, Context, CancellationToken.None);
@@ -253,7 +256,7 @@ public class CategoryFirstIntegrationTests
     }
 
     [Fact]
-    public async Task NotApplicable_KeepsBookingToolFlowWithoutProviderSearch()
+    public async Task BookingRequest_DoesNotInvokeCategoryResolutionOrProviderSearch()
     {
         var model = new RecordingChat(round => round == 1
             ? Calls("book", "get_bookings")
@@ -277,10 +280,40 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(["get_bookings"], response.Sources);
         Assert.Equal(1, booking.Calls);
         Assert.Equal(0, search.Calls);
+        Assert.Equal(0, jev.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Greeting_DoesNotResolveCategoriesOrSearch(
+        bool catalogLoaded, bool expired)
+    {
+        var model = new RecordingChat(_ => Answer("Hello!"));
+        var jev = new RecordingJev(_ => throw new InvalidOperationException("Greeting must not resolve categories"));
+        var search = new RecordingTool("search_task_masters", "[]");
+        var store = new CategoryCatalogSnapshotStore(
+            Options.Create(ResolutionOptions()), TimeProvider.System);
+        if (catalogLoaded)
+            store.Publish(Snapshot(Version) with
+            {
+                LastSuccessfulRefreshAt = DateTimeOffset.UtcNow.AddMinutes(expired ? -6 : 0)
+            });
+
+        var response = await Service(model, jev, search, snapshots: store).ChatAsync(
+            new ChatRequest { Message = "Hello" }, Context, CancellationToken.None);
+
+        Assert.Equal("Hello!", response.Answer);
+        Assert.Single(model.Requests);
+        Assert.Equal(0, jev.Calls);
+        Assert.Equal(0, search.Calls);
+        Assert.Empty(response.Sources);
+        Assert.Empty(response.Mentions);
     }
 
     [Fact]
-    public async Task LateNativeSearch_IsReclassifiedAndUsesLockedCategory()
+    public async Task NativeSearch_IgnoresInventedModelCategoryAndFilters()
     {
         var model = new RecordingChat(round => round switch
         {
@@ -289,20 +322,13 @@ public class CategoryFirstIntegrationTests
             3 => Answer("No providers were returned."),
             _ => throw new InvalidOperationException()
         });
-        var jev = new RecordingJev(call => call == 1
-            ? Resolved("carpentry") with
-            {
-                Intent = new JevChoiceAnswer(
-                    "not_applicable", 0.9,
-                    new Dictionary<string, double> { ["service_search"] = 0.1, ["not_applicable"] = 0.9 })
-            }
-            : Resolved("carpentry"));
+        var jev = new RecordingJev(_ => Resolved("carpentry"));
         var search = new RecordingTool("search_task_masters", "[]");
 
         var answer = await Service(model, jev, search).ChatAsync(
             new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
 
-        Assert.Equal(2, jev.Calls);
+        Assert.Equal(1, jev.Calls);
         Assert.Equal(1, search.Calls);
         Assert.Equal("carpentry", search.Arguments!["category"]);
         Assert.False(search.Arguments.ContainsKey("maxRate"));
@@ -310,7 +336,7 @@ public class CategoryFirstIntegrationTests
     }
 
     [Fact]
-    public async Task LateSearch_WithNoValidDecision_IsBlocked()
+    public async Task Search_WithNotApplicableDecision_IsBlocked()
     {
         var model = new RecordingChat(_ =>
             Calls("inline", "search_task_masters", """{"category":"gardening"}"""));
@@ -327,32 +353,26 @@ public class CategoryFirstIntegrationTests
 
         Assert.Equal(0, search.Calls);
         Assert.Empty(response.Sources);
-        Assert.Equal(2, jev.Calls);
+        Assert.Equal(1, jev.Calls);
+        Assert.Equal("Which single marketplace service would you like to find?", response.Answer);
     }
 
     [Theory]
     [InlineData("decision:needs_clarification", "Find help", "[]",
         "Which single marketplace service would you like to find?")]
     [InlineData("decision:no_match", "Find help", "[]",
-        "Which single marketplace service would you like to find?")]
+        "I couldn't match that request to an offered service. Could you describe the service you need?")]
     [InlineData("carpentry", "I need someone available tomorrow", "[]",
         "Could you clarify the required search filters before I search?")]
     [InlineData("carpentry", "Find a carpenter", "{\"error\":\"unavailable\"}",
         "Marketplace search is temporarily unavailable. Please try again shortly.")]
-    public async Task LateSearch_TypedOutcomesPreserveSafeAnswers(
+    public async Task OnDemandSearch_TypedOutcomesPreserveSafeAnswers(
         string selected, string message, string payload, string expectedAnswer)
     {
         var model = new RecordingChat(round => round == 1
             ? Calls("late", "search_task_masters")
             : Answer(NoFilters));
-        var jev = new RecordingJev(call => call == 1
-            ? Resolved("carpentry") with
-            {
-                Intent = new JevChoiceAnswer(
-                    "not_applicable", 0.9,
-                    new Dictionary<string, double> { ["service_search"] = 0.1, ["not_applicable"] = 0.9 })
-            }
-            : Resolved(selected));
+        var jev = new RecordingJev(_ => Resolved(selected));
         var search = new RecordingTool("search_task_masters", payload);
 
         var response = await Service(model, jev, search).ChatAsync(
@@ -361,7 +381,7 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(expectedAnswer, response.Answer);
         Assert.Empty(response.Sources);
         Assert.Empty(response.Mentions);
-        Assert.Equal(2, jev.Calls);
+        Assert.Equal(1, jev.Calls);
         Assert.Equal(payload == "[]" ? 0 : 1, search.Calls);
     }
 
@@ -391,7 +411,7 @@ public class CategoryFirstIntegrationTests
 
         Assert.Empty(response.Sources);
         Assert.Equal(0, search.Calls);
-        Assert.Equal(2, jev.Calls);
+        Assert.Equal(1, jev.Calls);
     }
 
     [Fact]
@@ -399,26 +419,32 @@ public class CategoryFirstIntegrationTests
     {
         var model = new RecordingChat(round => round switch
         {
-            1 => Answer(NoFilters),
-            2 => Calls("override", "search_task_masters", """{"category":"gardening","minRate":10}"""),
-            3 => Answer("No providers."),
+            1 => Calls("search", "search_task_masters"),
+            2 => Answer(NoFilters),
+            3 => Calls("override", "search_task_masters", """{"category":"gardening","minRate":10}"""),
+            4 => Answer("No providers."),
             _ => throw new InvalidOperationException()
         });
         var search = new RecordingTool("search_task_masters", "[]");
+        var jev = new RecordingJev(_ => Resolved("carpentry"));
 
-        var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
+        var response = await Service(model, jev, search)
             .ChatAsync(new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
 
         Assert.Equal(1, search.Calls);
         Assert.Equal("carpentry", search.Arguments!["category"]);
         Assert.False(search.Arguments.ContainsKey("minRate"));
         Assert.Equal(["search_task_masters"], response.Sources);
+        Assert.Equal(1, jev.Calls);
+        Assert.Contains(model.Requests[3].Messages, message =>
+            message.ToolCallId == "override"
+            && message.Content!.Contains("category_search_already_executed", StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task ChatModelSemanticProvider_RejectsUnknownCategory()
     {
-        var model = new RecordingChat(_ =>
+        var model = SearchChat(_ =>
             Answer("""{"intent":"service_search","categoryId":"fabricated"}"""));
         var search = new RecordingTool("search_task_masters", "[]");
         var response = await Service(model, new RecordingJev(_ => throw new InvalidOperationException()),
@@ -431,7 +457,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task ChatModelSemanticProvider_UsesStructuredCategoryAndFilters()
     {
-        var model = new RecordingChat(round => round switch
+        var model = SearchChat(round => round switch
         {
             1 => Answer("""{"intent":"service_search","categoryId":"carpentry"}"""),
             2 => Answer(NoFilters),
@@ -448,8 +474,10 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(["search_task_masters"], response.Sources);
     }
 
-    [Fact]
-    public async Task MissingCatalog_BlocksSearchButAllowsIndependentTools()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnavailableCatalog_AllowsIndependentTools(bool expired)
     {
         var model = new RecordingChat(round => round == 1
             ? Calls("book", "get_bookings")
@@ -459,6 +487,11 @@ public class CategoryFirstIntegrationTests
         var booking = new RecordingTool("get_bookings", "{}");
         var store = new CategoryCatalogSnapshotStore(
             Microsoft.Extensions.Options.Options.Create(ResolutionOptions()), TimeProvider.System);
+        if (expired)
+            store.Publish(Snapshot(Version) with
+            {
+                LastSuccessfulRefreshAt = DateTimeOffset.UtcNow.AddMinutes(-6)
+            });
 
         var response = await Service(model, jev, search, booking, snapshots: store).ChatAsync(
             new ChatRequest { Message = "My bookings" }, Context, CancellationToken.None);
@@ -469,19 +502,24 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(1, booking.Calls);
     }
 
-    [Fact]
-    public async Task ExpiredCatalog_BlocksNewCategorySearch()
+    [Theory]
+    [InlineData(false, """{"category":"carpentry"}""")]
+    [InlineData(false, """{"location":"Chicago, IL"}""")]
+    [InlineData(true, """{"category":"carpentry"}""")]
+    [InlineData(true, """{"location":"Chicago, IL"}""")]
+    public async Task UnavailableCatalog_BlocksSearchWithOrWithoutCategory(
+        bool expired, string arguments)
     {
-        var model = new RecordingChat(_ => Calls("search", "search_task_masters"));
+        var model = new RecordingChat(_ => Calls("search", "search_task_masters", arguments));
         var search = new RecordingTool("search_task_masters", "[]");
         var jev = new RecordingJev(_ => throw new InvalidOperationException());
         var store = new CategoryCatalogSnapshotStore(
             Options.Create(ResolutionOptions()), TimeProvider.System);
-        store.Publish(new CategoryCatalogSnapshot(
-            1, Version,
-            [new CategoryCatalogItem("carpentry", "Carpentry", "Repair wood", [])],
-            "{}",
-            DateTimeOffset.UtcNow.AddMinutes(-6)));
+        if (expired)
+            store.Publish(Snapshot(Version) with
+            {
+                LastSuccessfulRefreshAt = DateTimeOffset.UtcNow.AddMinutes(-6)
+            });
 
         var response = await Service(model, jev, search, snapshots: store).ChatAsync(
             new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
@@ -489,7 +527,11 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(0, search.Calls);
         Assert.Equal(0, jev.Calls);
         Assert.Empty(response.Sources);
-        Assert.Contains("temporarily unavailable", response.Answer);
+        Assert.Empty(response.Mentions);
+        Assert.Single(model.Requests);
+        Assert.Equal(
+            "Category matching is temporarily unavailable. Please try again shortly.",
+            response.Answer);
     }
 
     [Theory]
@@ -499,7 +541,7 @@ public class CategoryFirstIntegrationTests
     [InlineData("""{"hard":{"maxRate":{"value":50,"unit":"usd_per_hour","evidence":"preferably under $50/hour"}},"soft":[],"unsupportedHard":[]}""")]
     public async Task InvalidFilters_ClarifyWithoutSearching(string extraction)
     {
-        var model = new RecordingChat(_ => Answer(extraction));
+        var model = SearchChat(_ => Answer(extraction));
         var search = new RecordingTool("search_task_masters", "[]");
 
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
@@ -510,7 +552,7 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(0, search.Calls);
         Assert.Empty(response.Sources);
         Assert.Equal(
-            "Could you clarify the required location, hourly USD rate, rating, or other requirement before I search?",
+            "Could you clarify the required search filters before I search?",
             response.Answer);
     }
 
@@ -521,7 +563,7 @@ public class CategoryFirstIntegrationTests
     [InlineData("\"{\\\"error\\\":\\\"category_catalog_unavailable\\\"}\"")]
     public async Task ProductError_DoesNotBecomeProviderEvidence(string result)
     {
-        var model = new RecordingChat(_ => Answer(NoFilters));
+        var model = SearchChat(_ => Answer(NoFilters));
         var search = new RecordingTool("search_task_masters", result);
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
             .ChatAsync(new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
@@ -538,7 +580,7 @@ public class CategoryFirstIntegrationTests
     [InlineData("Find a carpenter, I need someone available tomorrow")]
     public async Task OmittedUnsupportedHardRequirement_StillClarifies(string request)
     {
-        var model = new RecordingChat(_ => Answer(NoFilters));
+        var model = SearchChat(_ => Answer(NoFilters));
         var search = new RecordingTool("search_task_masters", "[]");
 
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
@@ -551,7 +593,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task OmittedExplicitHourlyHardLimit_ClarifiesInsteadOfWideningSearch()
     {
-        var model = new RecordingChat(_ => Answer(NoFilters));
+        var model = SearchChat(_ => Answer(NoFilters));
         var search = new RecordingTool("search_task_masters", "[]");
 
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
@@ -568,7 +610,7 @@ public class CategoryFirstIntegrationTests
     public async Task OmittedExplicitLocationOrRating_ClarifiesInsteadOfWideningSearch(
         string request)
     {
-        var model = new RecordingChat(_ => Answer(NoFilters));
+        var model = SearchChat(_ => Answer(NoFilters));
         var search = new RecordingTool("search_task_masters", "[]");
 
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")), search)
@@ -585,7 +627,7 @@ public class CategoryFirstIntegrationTests
             {"hard":{"location":{"value":"Chicago","unit":"place","evidence":"Chicago"}},
              "soft":[],"unsupportedHard":[]}
             """;
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer(filters)
             : Answer("Found Alice."));
         var search = new RecordingTool(
@@ -602,7 +644,7 @@ public class CategoryFirstIntegrationTests
         Assert.False(search.Arguments.ContainsKey("minRate"));
         Assert.False(search.Arguments.ContainsKey("maxRate"));
         Assert.Equal(["search_task_masters"], response.Sources);
-        var filterPrompt = model.Requests[0].Messages[0].Content!;
+        var filterPrompt = model.Requests[1].Messages[0].Content!;
         Assert.Contains("hard value must be a JSON object keyed by field", filterPrompt);
         Assert.Contains("Qualitative price preferences", filterPrompt);
     }
@@ -620,7 +662,7 @@ public class CategoryFirstIntegrationTests
     [InlineData("\"[]\"")]
     public async Task UnchangedEmptySearch_DoesNotBroadenOrRepeat(string result)
     {
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer(NoFilters)
             : Answer("No providers found for that service."));
         var search = new RecordingTool("search_task_masters", result);
@@ -637,7 +679,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task NoFilterRequest_PromptDefinesExactEmptyEnvelope()
     {
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer(NoFilters)
             : Answer("Found Alice."));
         var search = new RecordingTool(
@@ -649,13 +691,13 @@ public class CategoryFirstIntegrationTests
 
         Assert.Contains(
             """{"hard":{},"soft":[],"unsupportedHard":[]}""",
-            model.Requests[0].Messages[0].Content);
+            model.Requests[1].Messages[0].Content);
     }
 
     [Fact]
     public async Task ClarificationReply_PreservesEarlierExplicitHardFilters()
     {
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer("""
                 {"hard":{"maxRate":{"value":50,"unit":"usd_per_hour","evidence":"under $50/hour"},
                          "location":{"value":"Chicago, IL","unit":"place","evidence":"Chicago, IL"}},
@@ -702,9 +744,12 @@ public class CategoryFirstIntegrationTests
         var refresher = new McpCategoryEnumRefresher(
             registry, config, snapshots, TimeProvider.System,
             NullLogger<McpCategoryEnumRefresher>.Instance);
-        var model = new RecordingChat(round => round % 2 == 1
-            ? Answer(NoFilters)
-            : Answer("Found Pat."));
+        var model = new RecordingChat(round => (round % 3) switch
+        {
+            1 => Calls("search", "search_task_masters"),
+            2 => Answer(NoFilters),
+            _ => Answer("Found Pat.")
+        });
         var jev = new CatalogMetadataJev(alias);
         var assistant = Service(model, jev, search, catalog, snapshots: snapshots);
 
@@ -757,7 +802,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task JevFailure_ReturnsSafeAnswerWithoutSearching()
     {
-        var model = new RecordingChat(_ => throw new InvalidOperationException());
+        var model = SearchChat(_ => throw new InvalidOperationException());
         var search = new RecordingTool("search_task_masters", "[]");
         var jev = new RecordingJev(_ =>
             throw new JevDecisionException(JevFailureCategory.InsufficientCredits, 402));
@@ -773,7 +818,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task MalformedJevDecision_RepairsOnceWithinSharedRoundBudget()
     {
-        var model = new RecordingChat(round => round switch
+        var model = SearchChat(round => round switch
         {
             1 => Answer(NoFilters),
             2 => Answer("Found Alice."),
@@ -790,7 +835,7 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(2, jev.Calls);
         Assert.Equal(1, search.Calls);
         Assert.Equal("Found Alice.", response.Answer);
-        Assert.Equal(2, model.Requests.Count);
+        Assert.Equal(3, model.Requests.Count);
     }
 
     [Theory]
@@ -805,7 +850,7 @@ public class CategoryFirstIntegrationTests
     public async Task NonRepairableDecisionFailure_DoesNotCallJevAgain(
         JevFailureCategory failureCategory)
     {
-        var model = new RecordingChat(_ => throw new InvalidOperationException());
+        var model = SearchChat(_ => throw new InvalidOperationException());
         var jev = new RecordingJev(_ => throw new JevDecisionException(failureCategory));
         var search = new RecordingTool("search_task_masters", "[]");
 
@@ -814,14 +859,14 @@ public class CategoryFirstIntegrationTests
 
         Assert.Equal(1, jev.Calls);
         Assert.Equal(0, search.Calls);
-        Assert.Empty(model.Requests);
+        Assert.Single(model.Requests);
         Assert.Empty(response.Sources);
     }
 
     [Fact]
     public async Task SecondMalformedDecision_FailsSafelyWithoutThirdAttempt()
     {
-        var model = new RecordingChat(_ => throw new InvalidOperationException());
+        var model = SearchChat(_ => throw new InvalidOperationException());
         var jev = new RecordingJev(_ =>
             throw new JevDecisionException(JevFailureCategory.MalformedDecision, 200));
         var search = new RecordingTool("search_task_masters", "[]");
@@ -838,7 +883,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task ChatDecisionRepair_ConsumesOnlyRepairSoInvalidFiltersCannotRetry()
     {
-        var model = new RecordingChat(round => round switch
+        var model = SearchChat(round => round switch
         {
             1 => Answer("""{"intent":"service_search","categoryId":"invented"}"""),
             2 => Answer("""{"intent":"service_search","categoryId":"carpentry"}"""),
@@ -852,7 +897,7 @@ public class CategoryFirstIntegrationTests
             model, jev, search, semanticProvider: CategorySemanticProviders.ChatModel).ChatAsync(
             new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
 
-        Assert.Equal(3, model.Requests.Count);
+        Assert.Equal(4, model.Requests.Count);
         Assert.Equal(0, search.Calls);
         Assert.Empty(response.Sources);
     }
@@ -863,14 +908,14 @@ public class CategoryFirstIntegrationTests
         var jev = new RecordingJev(call => call == 1
             ? throw new JevDecisionException(JevFailureCategory.MalformedDecision)
             : Resolved("carpentry"));
-        var model = new RecordingChat(_ => Answer("not valid JSON"));
+        var model = SearchChat(_ => Answer("not valid JSON"));
         var search = new RecordingTool("search_task_masters", "[]");
 
         var response = await Service(model, jev, search).ChatAsync(
             new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
 
         Assert.Equal(2, jev.Calls);
-        Assert.Single(model.Requests);
+        Assert.Equal(2, model.Requests.Count);
         Assert.Equal(0, search.Calls);
         Assert.Empty(response.Sources);
     }
@@ -881,11 +926,10 @@ public class CategoryFirstIntegrationTests
         var jev = new RecordingJev(call => call == 1
             ? throw new JevDecisionException(JevFailureCategory.MalformedDecision)
             : Resolved("carpentry"));
-        var model = new RecordingChat(round => round switch
+        var model = SearchChat(round => round switch
         {
             1 => Answer(NoFilters),
             2 => Calls("booking-1", "get_bookings"),
-            3 => Calls("booking-2", "get_bookings"),
             _ => throw new InvalidOperationException("Round budget exceeded")
         });
         var booking = new RecordingTool("get_bookings", "{}");
@@ -897,7 +941,7 @@ public class CategoryFirstIntegrationTests
 
         Assert.Equal(2, jev.Calls);
         Assert.Equal(3, model.Requests.Count);
-        Assert.Equal(2, booking.Calls);
+        Assert.Equal(1, booking.Calls);
         Assert.Equal(1, search.Calls);
         Assert.Equal(["search_task_masters", "get_bookings"], response.Sources);
     }
@@ -905,7 +949,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task RequestDeadline_CancelsJevAndPreventsSearch()
     {
-        var model = new RecordingChat(_ => throw new InvalidOperationException(), requestTimeoutSeconds: 1);
+        var model = SearchChat(_ => throw new InvalidOperationException(), requestTimeoutSeconds: 1);
         var search = new RecordingTool("search_task_masters", "[]");
         var jev = new WaitingJev();
 
@@ -921,7 +965,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task CallerCancellation_DuringJevPropagatesWithoutSearch()
     {
-        var model = new RecordingChat(_ => throw new InvalidOperationException());
+        var model = SearchChat(_ => throw new InvalidOperationException());
         var search = new RecordingTool("search_task_masters", "[]");
         var jev = new WaitingJev();
         using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
@@ -934,17 +978,9 @@ public class CategoryFirstIntegrationTests
     }
 
     [Fact]
-    public async Task DecisionCall_LeavesOnlyFourConversationalRounds()
+    public async Task NonSearchRequest_KeepsAllFiveConversationalRounds()
     {
-        var model = new RecordingChat(round => round switch
-        {
-            1 => Answer("""{"intent":"not_applicable","categoryId":null}"""),
-            2 => Calls("book-1", "get_bookings"),
-            3 => Calls("book-2", "get_bookings"),
-            4 => Calls("book-3", "get_bookings"),
-            5 => Calls("book-4", "get_bookings"),
-            _ => throw new InvalidOperationException("Excess model round")
-        });
+        var model = new RecordingChat(round => Calls($"book-{round}", "get_bookings"));
         var booking = new RecordingTool("get_bookings", "{}");
         var search = new RecordingTool("search_task_masters", "[]");
 
@@ -954,9 +990,37 @@ public class CategoryFirstIntegrationTests
                 new ChatRequest { Message = "Show my bookings" }, Context, CancellationToken.None);
 
         Assert.Equal(5, model.Requests.Count);
-        Assert.Equal(4, booking.Calls);
+        Assert.Equal(5, booking.Calls);
         Assert.Equal(0, search.Calls);
         Assert.DoesNotContain("Seeded", response.Answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CatalogChangesDuringToolSelection_UsesPreLoopSnapshot()
+    {
+        var store = new CategoryCatalogSnapshotStore(
+            Options.Create(ResolutionOptions()), TimeProvider.System);
+        store.Publish(Snapshot(Version));
+        const string newer = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var model = new RecordingChat(round =>
+        {
+            if (round == 1)
+            {
+                store.Publish(Snapshot(newer));
+                return Calls("search", "search_task_masters");
+            }
+            return Answer(round == 2 ? NoFilters : "No providers found.");
+        });
+        var jev = new RecordingJev(_ => Resolved("carpentry"));
+        var search = new RecordingTool("search_task_masters", "[]");
+
+        var response = await Service(model, jev, search, snapshots: store).ChatAsync(
+            new ChatRequest { Message = "Find a carpenter" }, Context, CancellationToken.None);
+
+        Assert.Equal(Version, jev.LastRequest!.Catalog.CatalogVersion);
+        Assert.Equal("carpentry", search.Arguments!["category"]);
+        Assert.Equal(1, search.Calls);
+        Assert.Equal(["search_task_masters"], response.Sources);
     }
 
     [Fact]
@@ -971,7 +1035,7 @@ public class CategoryFirstIntegrationTests
             store.Publish(Snapshot(newer));
             return Resolved("carpentry");
         });
-        var model = new RecordingChat(_ => Answer(NoFilters));
+        var model = SearchChat(_ => Answer(NoFilters));
         var search = new RecordingTool("search_task_masters", """{"error":"invalid_category"}""");
 
         var response = await Service(model, jev, search, snapshots: store).ChatAsync(
@@ -995,7 +1059,7 @@ public class CategoryFirstIntegrationTests
             registry!.Register(replacement);
             return Resolved("carpentry");
         });
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer(NoFilters) : Answer("New is available."));
         var assistant = Service(
             model, jev, oldTool, configureRegistry: value => registry = value);
@@ -1016,7 +1080,7 @@ public class CategoryFirstIntegrationTests
         var store = new CategoryCatalogSnapshotStore(config, TimeProvider.System);
         store.Publish(Snapshot(Version));
         store.RecordFailure("catalog refresh unavailable");
-        var model = new RecordingChat(round =>
+        var model = SearchChat(round =>
             round == 1 ? Answer(NoFilters) : Answer("No providers found."));
         var jev = new RecordingJev(_ => Resolved("carpentry"));
         var search = new RecordingTool("search_task_masters", "[]");
@@ -1046,7 +1110,7 @@ public class CategoryFirstIntegrationTests
             })
         };
         store.Publish(catalog);
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer(NoFilters) : Answer("There are no providers in the results."));
         var search = new RecordingTool("search_task_masters", "[]");
         var response = await Service(model, new RecordingJev(_ => Resolved("carpentry")),
@@ -1063,7 +1127,7 @@ public class CategoryFirstIntegrationTests
     [Fact]
     public async Task SeededProviderResultsAndDecisionMetadata_NeverBecomeLiveSources()
     {
-        var model = new RecordingChat(round => round == 1
+        var model = SearchChat(round => round == 1
             ? Answer(NoFilters) : Answer("No providers found."));
         var search = new RecordingTool("search_task_masters", "[]");
         var response = await Service(
@@ -1074,7 +1138,7 @@ public class CategoryFirstIntegrationTests
 
         Assert.Equal(["search_task_masters"], response.Sources);
         Assert.Empty(response.Mentions);
-        Assert.DoesNotContain(model.Requests[1].Messages,
+        Assert.DoesNotContain(model.Requests[2].Messages,
             message => message.Content?.Contains("Seeded Provider", StringComparison.Ordinal) == true);
     }
 
@@ -1083,7 +1147,7 @@ public class CategoryFirstIntegrationTests
     {
         const string sentinel = "private prompt and provider body";
         var logger = new CaptureLogger();
-        var model = new RecordingChat(_ => throw new InvalidOperationException());
+        var model = SearchChat(_ => throw new InvalidOperationException());
         var search = new RecordingTool("search_task_masters", "[]");
         var jev = new RecordingJev(_ =>
             throw new JevDecisionException(JevFailureCategory.ProviderUnavailable, 529));
@@ -1210,13 +1274,19 @@ public class CategoryFirstIntegrationTests
         configureRegistry?.Invoke(registry);
         return new AiAssistantService(
             prompt, resolver.Object, registry, logger ?? NullLogger<AiAssistantService>.Instance,
-            config, snapshots, new SearchOrchestrator(
+            new SearchOrchestrator(
                 new CategoryDecisionService(config, jev), new SearchFilterExtractionService(),
-                registry, NullLogger<SearchOrchestrator>.Instance));
+                registry, NullLogger<SearchOrchestrator>.Instance), config, snapshots);
     }
 
     private static ChatModelResponse Answer(string content) =>
         new(new ChatModelMessage(ChatModelRoles.Assistant, content));
+
+    private static RecordingChat SearchChat(
+        Func<int, ChatModelResponse> afterSelection, int requestTimeoutSeconds = 60) =>
+        new(round => round == 1
+            ? Calls("search", "search_task_masters")
+            : afterSelection(round - 1), requestTimeoutSeconds);
 
     private static ChatModelResponse Calls(string id, string name, string arguments = "{}") =>
         new(new ChatModelMessage(ChatModelRoles.Assistant, null,

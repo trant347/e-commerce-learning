@@ -15,6 +15,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 using T = ai_assistant_service.Services.Telemetry.AiAssistantTelemetry;
 
@@ -273,6 +274,7 @@ public sealed class AiAssistantTelemetryTests
                     .ConfigurePrimaryHttpMessageHandler(() => handler);
                 services.AddSingleton(tool);
                 services.AddSingleton<ToolRegistry>();
+                services.AddSingleton(new Mock<ISearchOrchestrator>(MockBehavior.Strict).Object);
                 services.AddScoped<IAiAssistantService, AiAssistantService>();
             })
             .Build();

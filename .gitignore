@@ -17,4 +17,6 @@ code-reviews
 .agents
 prompts
 workflows
+__pycache__/
+*.py[cod]
 TODO.md

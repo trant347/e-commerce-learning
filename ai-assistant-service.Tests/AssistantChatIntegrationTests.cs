@@ -10,6 +10,7 @@ using ai_assistant_service.Services.Tools;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using Xunit;
 
 namespace ai_assistant_service.Tests;
@@ -38,6 +39,7 @@ public class AssistantChatIntegrationTests
                     .ConfigurePrimaryHttpMessageHandler(() => handler);
                 services.AddSingleton<IToolDefinition>(tool);
                 services.AddSingleton<ToolRegistry>();
+                services.AddSingleton(new Mock<ISearchOrchestrator>(MockBehavior.Strict).Object);
                 services.AddScoped<IAiAssistantService, AiAssistantService>();
             })
             .Build();
@@ -110,6 +112,7 @@ public class AssistantChatIntegrationTests
                     .ConfigurePrimaryHttpMessageHandler(() => handler);
                 services.AddSingleton<IToolDefinition>(tool);
                 services.AddSingleton<ToolRegistry>();
+                services.AddSingleton(new Mock<ISearchOrchestrator>(MockBehavior.Strict).Object);
                 services.AddScoped<IAiAssistantService, AiAssistantService>();
             })
             .Build();
@@ -163,6 +166,7 @@ public class AssistantChatIntegrationTests
                     .ConfigurePrimaryHttpMessageHandler(() => handler);
                 services.AddSingleton<IToolDefinition>(tool);
                 services.AddSingleton<ToolRegistry>();
+                services.AddSingleton(new Mock<ISearchOrchestrator>(MockBehavior.Strict).Object);
                 services.AddScoped<IAiAssistantService, AiAssistantService>();
             })
             .Build();

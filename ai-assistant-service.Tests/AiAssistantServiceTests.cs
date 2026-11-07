@@ -476,6 +476,7 @@ public class AiAssistantServiceTests
             resolver.Object,
             new ToolRegistry(tools),
             logger ?? NullLogger<AiAssistantService>.Instance,
+            new Mock<ISearchOrchestrator>(MockBehavior.Strict).Object,
             aiChatOptions: Options.Create(new AiChatOptions
             {
                 HistoryMessageLimit = historyMessageLimit
