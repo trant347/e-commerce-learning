@@ -24,13 +24,18 @@ public sealed class AiAssistantService : IAiAssistantService
 
     // Guard against infinite tool-call loops
     private const int MaxToolRounds = 5;
-    private const string CategoryFirstSystemPrompt =
+    private const string OnDemandSearchSystemPrompt =
         "You are a TaskMaster marketplace assistant. Use only live tool results from this request for provider or booking claims. " +
         "Never invent provider names, rates, ratings, locations, availability or booking details. " +
-        "The application decides and locks marketplace category searches; do not select, replace or broaden a category, " +
-        "and do not present preferences as verified constraints. Present providers in the returned order without reranking or omitting them. " +
+        "Call search_task_masters only when the current request needs a marketplace provider search. " +
+        "Do not search for greetings, ordinary conversation, or unrelated booking questions. " +
+        "You decide whether to search; the application resolves the category and validates explicit hard filters before retrieval. " +
+        "Do not select, replace or broaden a category, invent filters, or present preferences as verified constraints. " +
+        "Request at most one marketplace search per request. After search results arrive, use them without searching again, even if empty. " +
+        "Present providers in the returned order without reranking or omitting them. Search results do not verify availability. " +
         "If a tool returns no results, say so honestly. " +
-        "Use independent tools for booking questions; never claim a provider or booking was verified without its tool result.";
+        "Use the appropriate profile or booking tools independently when marketplace search is not needed; " +
+        "never claim a provider or booking was verified without its tool result.";
 
     public AiAssistantService(
         AssistantPrompt prompt,
@@ -133,7 +138,7 @@ public sealed class AiAssistantService : IAiAssistantService
 
         var richMode = CategoryResolutionModes.IsRichCatalogMode(_categoryOptions.Mode);
         var messages = richMode
-            ? new List<ChatModelMessage> { new(ChatModelRoles.System, CategoryFirstSystemPrompt) }
+            ? new List<ChatModelMessage> { new(ChatModelRoles.System, OnDemandSearchSystemPrompt) }
             : new List<ChatModelMessage>(_prompt.Messages);
         var usedCallIds = messages.SelectMany(message => message.ToolCalls ?? [])
             .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
@@ -170,7 +175,7 @@ public sealed class AiAssistantService : IAiAssistantService
         CategoryCatalogSnapshot? capturedCatalog = null;
         if (richMode && _snapshots?.TryCaptureUsable(out capturedCatalog, out _) != true)
             capturedCatalog = null;
-        SearchResult? searchResult = null;
+        var marketplaceSearchExecuted = false;
 
         // Tool-calling loop
         for (int round = 0; round < MaxToolRounds; round++)
@@ -216,9 +221,9 @@ public sealed class AiAssistantService : IAiAssistantService
                         _logger.LogWarning("Search tool requested but category catalog is unavailable");
                         return SafeAnswer(model, "Category matching is temporarily unavailable. Please try again shortly.");
                     }
-                    if (searchResult is not SearchResult.Results)
+                    if (!marketplaceSearchExecuted)
                     {
-                        searchResult = await _searchOrchestrator.RunAsync(
+                        var searchResult = await _searchOrchestrator.RunAsync(
                             new SearchRequestContext(
                                 request, userHistory, capturedCatalog, client,
                                 () => TimeSpan.FromSeconds(client.Profile.RequestTimeoutSeconds) - elapsed.Elapsed,
@@ -230,6 +235,7 @@ public sealed class AiAssistantService : IAiAssistantService
                                 telemetry.Succeeded(false);
                             return SafeAnswer(model, SearchSafeAnswer(searchResult));
                         }
+                        marketplaceSearchExecuted = true;
                         var liveToolMessage = new ChatModelMessage(
                             ChatModelRoles.Tool, search.Content, toolCallId: toolCall.Id);
                         messages.Add(liveToolMessage);
@@ -239,6 +245,10 @@ public sealed class AiAssistantService : IAiAssistantService
                         if (search.SoftPreferenceContext is not null)
                             messages.Add(new ChatModelMessage(ChatModelRoles.User,
                                 search.SoftPreferenceContext));
+                        messages.Add(new ChatModelMessage(ChatModelRoles.System,
+                            "The live search just completed using the validated category and explicit hard filters. " +
+                            "Use only these current results for provider claims. Do not present soft preferences as verified constraints " +
+                            "or claim availability. Do not call search_task_masters again for this request."));
                         continue;
                     }
 

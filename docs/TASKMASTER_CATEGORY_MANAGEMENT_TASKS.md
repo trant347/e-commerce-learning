@@ -4,6 +4,10 @@ Status: **Original catalog phase and JEV-01 through JEV-08 complete; release (JE
 
 Source: [TaskMaster Category Resolution Specification](TASKMASTER_CATEGORY_RESOLUTION_SPEC.md).
 Multi-category extension: [TaskMaster Multi-Category Search Specification](TASKMASTER_MULTI_CATEGORY_SEARCH_SPEC.md).
+On-demand search: [implementation and remaining work](AI_SEARCH_ON_DEMAND_DISCUSSION.md).
+Its Phase 1 tasks 1-5 and 7 are implemented; budget/deadline review, rollout/cost
+evaluation, and Phase 2 follow-up repair remain pending. These task numbers are
+separate from the JEV and MC checklists in this file.
 
 The specifications are authoritative; the active checklist below organizes
 the remaining work. The original phase numbers later in this file refer to
@@ -53,16 +57,20 @@ Removing referenced categories requires an explicit reassignment policy.
 
 ### Resume here
 
-As of October 10, 2026, **JEV-09 deterministic verification and the first live
-end-to-end comparison are complete, but release is blocked by the latency gate**.
+The October 10, 2026 **JEV-09 deterministic verification and first live
+end-to-end comparison are historical release evidence; release was blocked by
+the latency gate**. They do not verify the cost or latency of the subsequent
+on-demand flow.
 Jev category-first orchestration is wired behind the rich-catalog modes; legacy
 remains the default, and multi-category search is not enabled.
-The intended flow is user request -> category decision against product-owned
-metadata plus typed filter extraction by the configured chat model (intended:
-Ollama) -> validated MCP search -> grounded answer from the chat model.
-Classification/extraction may run concurrently, but search must wait for both
-validated outcomes. Product-service retrieval order is preserved; there is no
-post-retrieval Jev scoring stage.
+As of November 7, 2026, the rich-mode flow is user request -> conversational
+model tool selection -> optional search orchestrator -> category decision against
+product-owned metadata -> typed filter extraction by the configured chat model
+-> validated MCP search -> grounded answer. Non-search requests skip the
+category/filter path. Classification and extraction currently run sequentially;
+the proposed concurrency must still wait for both validated outcomes before
+retrieval. Product-service result order is preserved, with no post-retrieval
+Jev scoring. See the on-demand checklist for budget and rollout work.
 The first gated release retains one category; the MC tasks below add the
 planned maximum of one primary plus two alternatives.
 

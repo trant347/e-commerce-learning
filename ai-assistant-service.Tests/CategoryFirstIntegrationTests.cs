@@ -64,9 +64,16 @@ public class CategoryFirstIntegrationTests
         Assert.Equal(3, model.Requests.Count);
         Assert.NotNull(model.Requests[0].Tools);
         Assert.Null(model.Requests[1].Tools);
+        Assert.Contains("Call search_task_masters only when", model.Requests[0].Messages[0].Content);
+        Assert.DoesNotContain(model.Requests[0].Messages, message =>
+            message.Role == "tool"
+            || message.Content?.Contains("Do not call search_task_masters again", StringComparison.Ordinal) == true);
         Assert.Contains(model.Requests[2].Messages, message =>
             message.Role == "tool" && message.ToolCallId == "search"
             && message.Content!.Contains("Alice", StringComparison.Ordinal));
+        Assert.Contains(model.Requests[2].Messages, message =>
+            message.Role == "system"
+            && message.Content!.Contains("Do not call search_task_masters again", StringComparison.Ordinal));
         Assert.Contains(model.Requests[2].Messages, message =>
             message.Role == "user"
             && message.Content!.Contains("\"softPreferences\"", StringComparison.Ordinal)
@@ -439,6 +446,44 @@ public class CategoryFirstIntegrationTests
         Assert.Contains(model.Requests[3].Messages, message =>
             message.ToolCallId == "override"
             && message.Content!.Contains("category_search_already_executed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RepeatedSearchInSameBatch_UsesOneRetrievalAndStillExecutesBookingTool()
+    {
+        var model = new RecordingChat(round => round switch
+        {
+            1 => new ChatModelResponse(new ChatModelMessage(ChatModelRoles.Assistant, null,
+            [
+                new ChatModelToolCall("search", "search_task_masters", new Dictionary<string, JsonElement>()),
+                new ChatModelToolCall("repeat", "SEARCH_TASK_MASTERS", new Dictionary<string, JsonElement>()),
+                new ChatModelToolCall("booking", "get_bookings", new Dictionary<string, JsonElement>())
+            ])),
+            2 => Answer(NoFilters),
+            3 => Answer("No providers found. Your booking is confirmed."),
+            _ => throw new InvalidOperationException("Unexpected model round")
+        });
+        var jev = new RecordingJev(_ => Resolved("carpentry"));
+        var search = new RecordingTool("search_task_masters", "[]");
+        var booking = new RecordingTool("get_bookings", """{"id":"booking-1"}""");
+
+        var response = await Service(model, jev, search, booking).ChatAsync(
+            new ChatRequest { Message = "Find a carpenter and show my bookings" },
+            Context, CancellationToken.None);
+
+        Assert.Equal(1, jev.Calls);
+        Assert.Equal(1, search.Calls);
+        Assert.Equal(1, booking.Calls);
+        Assert.Equal(["search_task_masters", "get_bookings"], response.Sources);
+        Assert.Equal("No providers found. Your booking is confirmed.", response.Answer);
+        var results = model.Requests[2].Messages.Where(message => message.Role == "tool").ToList();
+        Assert.Equal(["search", "repeat", "booking"], results.Select(message => message.ToolCallId));
+        Assert.Equal("[]", results[0].Content);
+        Assert.Contains("category_search_already_executed", results[1].Content);
+        Assert.Contains("booking-1", results[2].Content);
+        Assert.Single(model.Requests[2].Messages, message =>
+            message.Role == "system"
+            && message.Content!.Contains("Do not call search_task_masters again", StringComparison.Ordinal));
     }
 
     [Fact]

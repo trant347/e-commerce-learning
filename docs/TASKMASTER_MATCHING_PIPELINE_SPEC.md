@@ -6,6 +6,12 @@
 > hard-versus-soft filter handling and grounded presentation. It extends
 > the category-resolution design without replacing its catalog, Choice API,
 > acceptance policy or search authorization contracts.
+>
+> On-demand amendment (November 7, 2026): in rich-catalog mode the conversational
+> model selects tools before matching starts. The implemented search placement
+> and remaining budget/rollout work are tracked in
+> [on-demand search](AI_SEARCH_ON_DEMAND_DISCUSSION.md). This does not change
+> the category, filter, ordering, or grounding contracts below.
 
 ## 1. Decision and boundaries
 
@@ -14,6 +20,13 @@ Ollama) for filter extraction and prose, and product-service for retrieval.
 There is no second Jev pass after retrieval.
 
 ```text
+User request and bounded chat history
+    v
+Conversational model: answer, use another tool, or request marketplace search
+    |-- No search requested: no category decision or filter extraction
+    v
+SearchOrchestrator: require the request-captured usable catalog
+    v
 User request and relevant user-authored clarification context
     |-- Jev: intent/category decisions against the captured catalog
     |-- Configured chat model (intended: Ollama): typed filter extraction
@@ -25,8 +38,9 @@ Product-owned MCP search with locked categories and supported hard filters
 Chat-model answer grounded in those results
 ```
 
-Category decisions and filter extraction may run concurrently when both use
-the same captured user context and extraction does not require the category
+The current orchestrator runs category resolution and filter extraction
+sequentially, only after a search tool call. Proposed concurrency may run both
+when they use the same captured user context and extraction does not require the category
 answer. Join and validate both before search; concurrency must not authorize
 early tool execution or create independent request deadlines. In hybrid mode,
 an accepted exact result skips the category Jev call, not filter validation.

@@ -69,15 +69,22 @@ searching.
   `McpRemoteTool.NormalizeSchema` preserves only `type`, `description`, and
   `enum` for each property.
 - `ToolRegistry.FlattenToString` flattens every argument to a string. A
-  multi-element array is joined with commas. If the model sends
+  multi-element array is joined with commas. In legacy mode or direct registry
+  calls, if the model sends
   `"category": ["a", "b"]`, product-service receives `"a,b"` and now rejects it
   with `invalid_category`; it no longer silently returns `[]`. The proposed
   assistant gate below still needs to reject this shape before MCP execution
   and explain the separate primary/alternative arguments.
 - `AiAssistantService.ExtractMentions` reads a top-level array, an object's
   `taskMasters` array, or a single object with `id`, but not grouped results.
-- The system prompt (`PromptOptions.SystemPrompt`) instructs the model to
-  "pick the single best match".
+- The legacy system prompt (`PromptOptions.SystemPrompt`) instructs the model
+  to "pick the single best match". In rich-catalog mode,
+  `AiAssistantService.OnDemandSearchSystemPrompt` lets the model request search
+  on demand; `SearchOrchestrator` discards its arguments and selects one
+  validated category before retrieval. The implemented one-search-per-request
+  limit is separate from this proposal's limit on categories within one search.
+  See [on-demand search](AI_SEARCH_ON_DEMAND_DISCUSSION.md) for current placement
+  and the remaining budget/rollout work.
 
 ## 3. Tool contract (product-service)
 
@@ -291,10 +298,14 @@ content must never become chat sources or mentions (existing rule).
 
 The user's reply to the narrowing question is an ordinary new request. The
 model may then issue a single-category search using relevant recent history,
-within the existing two-message history window. Explicit filters from the
+within the configured chat-history window, not a fixed two-message window.
+Explicit filters from the
 original request (for example "in San Francisco") may be reused only when
 they are still inside that window; otherwise the model asks again. There is
-no hidden state.
+no hidden state. This is proposed narrowing behavior: the current category/filter
+context is user-only and not bounded by the conversational model's window.
+Shared context and supersession remain Phase 2 work in the
+[on-demand document](AI_SEARCH_ON_DEMAND_DISCUSSION.md), not implemented guarantees.
 
 ## 5. Changes to the hybrid resolution design
 

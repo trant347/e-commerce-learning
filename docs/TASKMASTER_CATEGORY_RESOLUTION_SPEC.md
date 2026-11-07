@@ -10,13 +10,20 @@
 >
 > Jev amendment (September 30, 2026): category-first decisions may use
 > TypeSafe Jev through OpenRouter's Decisions API. The opt-in integration is
-> implemented but not approved for live evaluation or release; it remains
-> separate from the OpenRouter chat adapter.
+> implemented and remains separate from the OpenRouter chat adapter.
+> Historical evaluation results are tracked in the category/Jev checklist;
+> they do not approve release of the current on-demand flow.
 >
 > Matching-pipeline amendment (October 2, 2026): the separate
 > [matching pipeline spec](TASKMASTER_MATCHING_PIPELINE_SPEC.md) defines
 > Jev classification, Ollama filter extraction, validated retrieval and the
 > grounded final answer. It intentionally has no post-retrieval Jev scoring.
+>
+> On-demand amendment (November 7, 2026): rich-catalog matching now runs only
+> when the conversational model requests marketplace search. See
+> [on-demand search](AI_SEARCH_ON_DEMAND_DISCUSSION.md) for implemented placement,
+> request-local search tracking, and the remaining budget/rollout work.
+> The category-validation contracts here still apply before retrieval.
 >
 > Superseded proposals: interim multi-category search, object/action scoring,
 > related-category expansion, and replacing LLM interpretation with a general
@@ -126,9 +133,10 @@ payload on MCP; they are not successful empty catalogs or provider results.
 
 ### Current AI behavior and gaps
 
-- `McpCategoryEnumRefresher` calls `get_categories` and applies IDs to the
-  search tool schema, at startup and on the configured refresh interval
-  (currently 60 seconds), rather than necessarily on every chat request.
+- `McpCategoryEnumRefresher` uses `get_categories` in legacy mode and
+  `get_category_catalog` in rich-catalog modes, at startup and on the configured
+  refresh interval (currently 60 seconds). Rich modes publish validated
+  snapshots; chat requests capture a usable snapshot without a catalog tool call.
 - The refresher retains the previous list on failures or unusable results.
   Discovery reconnects after failed calls or unavailable tools; an empty
   response alone does not trigger reconnect.
@@ -139,18 +147,25 @@ payload on MCP; they are not successful empty catalogs or provider results.
   `CategoryService` before provider caches or repository searches. Explicitly
   empty/malformed values are errors even if a location is supplied; omission
   still permits the existing location-only search.
-- The assistant drops rate/rating filters whose value does not appear in the
-  user's recent messages (`SearchFilterGrounding`). Location is not checked,
+- The legacy assistant path drops rate/rating filters whose value does not appear
+  in the user's messages (`SearchFilterGrounding`). Location is not checked,
   because models legitimately rewrite it (for example `SF` to `San Francisco`).
-- The assistant's system prompt forces a best category/search, while the
-  product tool description permits clarification. These instructions conflict.
+- The legacy configured prompt forces a best category/search, while the product
+  tool description permits clarification. Rich-catalog mode instead uses
+  `OnDemandSearchSystemPrompt`: the model decides whether to search, not which
+  category or hard filters to retrieve.
 - Descriptions and admin-managed aliases are exposed through
   `get_category_catalog`; `get_categories` still supplies only IDs for legacy
-  clients. The assistant still refreshes the legacy ID list, not rich snapshots.
-  Semantic decision clients are not implemented.
-- Chat requests carry user/assistant history; the assistant currently uses
-  only the last two history messages. There is no durable category-resolution
-  conversation state.
+  clients. Rich-mode `SearchOrchestrator` uses `CategoryDecisionService` with
+  Jev or the configured chat model, followed by typed filter validation.
+  Native and inline-recovered search calls pass this same gate; their
+  model-supplied arguments are discarded.
+- Chat requests carry client-supplied user/assistant history. The conversational
+  model uses the configured `AI_CHAT_HISTORY_MESSAGE_LIMIT` window (default 5,
+  range 0-20); category/filter context currently uses all user-authored request
+  history. There is no durable category-resolution conversation state.
+  Shared bounded context and constraint supersession are proposed Phase 2
+  work in the on-demand document.
 
 Implementation anchors: `CategoryService.java`, `TaskMasterMcpTools.java`,
 `ProductCacheService.java`, `McpCategoryEnumRefresher.cs`,
@@ -333,7 +348,7 @@ separate from public provider results:
 | `resolved` | Exactly one catalog ID, no candidates or clarification; search may proceed |
 | `needs_clarification` | No selected ID; zero to three valid, distinct candidate IDs and one focused question; no provider search |
 | `no_match` | No selected ID or candidates; explain that no offered service fits and invite a more specific description; no provider search |
-| `not_applicable` | Not a category-search request; continue the existing non-search tool flow |
+| `not_applicable` | Not a category-search request; no provider retrieval (see on-demand handling below) |
 
 `method` is `llm`, `jev`, or `exact`. The application supplies method and snapshot
 version; never accept them as trusted model metadata. Do not expose chat-model
@@ -341,11 +356,11 @@ self-reported confidence or invent probability thresholds. Jev supplies actual
 decision distributions, but their meaning and activation gates are governed by
 the separate contract below, not by a chat model's confidence claims.
 
-For the chat-model engine, produce the structured decision in the initial model
-turn used for category routing, rather than requiring both a separate classifier
-call and another model call to select the same category. The current
-implementation uses a second chat turn for typed filter extraction, separate
-from category resolution; this must be measured against the latency gate.
+For the chat-model engine, the conversational model first requests search.
+`SearchOrchestrator` then obtains the structured category decision in a separate
+model call without tools, followed by another call for typed filter extraction.
+Do not add a second model category-selection call outside this gate.
+This changed round sequence must be measured against the latency gate.
 Filters may only reflect values explicitly supplied by the user. Then execute
 the product search and use the existing tool-result-grounded final answer
 generation.
@@ -354,11 +369,16 @@ This is an internal orchestration change, not a new model-executable domain
 tool or a change to the public `ChatResponse` shape. Use typed parsing and
 validation; extending the Ollama client for structured output, if needed,
 belongs in its existing contract/client layer. Native and inline-recovered
-tool calls must not bypass the same category-search gate. If a
-`not_applicable` flow later requests provider search, obtain a valid category
-decision before executing it.
+tool calls must not bypass the same category-search gate. Ordinary chat and
+unrelated tools do not require a category decision. If an invoked search yields
+`not_applicable`, the current loop ends with a focused service clarification;
+it does not execute an unrestricted fallback search.
 
 ### Jev category-first integration (proposed)
+
+**Implementation status:** the decision client and opt-in single-category path
+are implemented. The exact/hybrid extensions and release gates described below
+remain separate work. Search placement follows the on-demand amendment above.
 
 Use Jev for bounded category decisions before retrieval. Keep the existing
 configured `chat` model for conversation, explicit filter extraction and final
@@ -429,9 +449,10 @@ configuration-owned; a dated resolved model is diagnostic metadata only.
 
 #### Application-owned interpretation and search gate
 
-For a validated `not_applicable` intent, continue the existing independent
-tool flow. If a later chat tool call requests marketplace search, apply the
-same category gate before execution. An uncertain intent must not authorize
+Ordinary conversation and independent tools skip category classification.
+When the model requests search, a validated `not_applicable` intent produces a
+service clarification without retrieval. Every native or inline-recovered
+search call must pass the category gate. An uncertain intent must not authorize
 search.
 
 For service-search intent, accept a real category only when it is in the
@@ -661,9 +682,11 @@ alias map belongs in ai-assistant-service.
   History is untrusted context, not authorization or evidence of prior tool
   execution. Never take category choices or filters from seeded examples.
 - Preserve an explicit location/budget from the original request across the
-  immediate clarification exchange. The current two-message history window
-  can support that exchange; if necessary context has fallen outside it, ask
-  again rather than inventing or persisting hidden state.
+  immediate clarification exchange. The conversational history window is
+  configurable, not fixed at two messages. Category/filter context is currently
+  user-only and not bounded by that same window; aligning context and handling
+  superseded constraints remain Phase 2 work. If necessary context is missing,
+  ask again rather than inventing or persisting hidden state.
 - No new durable conversation storage or frontend response fields are needed.
 - A valid category returning zero providers is a successful empty search, not
   `no_match`, ambiguity, or permission to try another category.
